@@ -39,6 +39,8 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleName: Browser Setu
         LSApplicationCategoryType: public.app-category.productivity
+        # The app seals backups and sync snapshots with standard encryption of its own, beyond the system's: declared as such for export-compliance review.
+        ITSAppUsesNonExemptEncryption: true
         # Files this app downloads are marked as coming from the internet, so macOS checks them before anything in them is opened.
         LSFileQuarantineEnabled: true
         # Registers the app for web links, so it can be chosen as the default browser.
@@ -110,6 +112,8 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleName: Browser Setu
         LSApplicationCategoryType: public.app-category.productivity
+        # The app seals backups and sync snapshots with standard encryption of its own, beyond the system's: declared as such for export-compliance review.
+        ITSAppUsesNonExemptEncryption: true
         LSFileQuarantineEnabled: true
         CFBundleURLTypes:
           - CFBundleURLName: Web link
@@ -229,6 +233,7 @@ targets:
         NSCalendarsWriteOnlyAccessUsageDescription: Browser Setu adds an event to your calendar only when you open a calendar file you downloaded.
         NSFaceIDUsageDescription: Browser Setu asks for Face ID before sensitive changes, if you turn that on.
         NSLocalNetworkUsageDescription: Browser Setu finds your other devices on this network when you send them a link or file.
+        ITSAppUsesNonExemptEncryption: true
         NSBonjourServices: [_browsersetu._tcp]
         NSRemindersFullAccessUsageDescription: Browser Setu adds a reminder only when you choose Remind Me on selected text.
     settings:
