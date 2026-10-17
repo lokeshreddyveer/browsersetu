@@ -81,3 +81,37 @@ final class VimSearchAutomationTests: XCTestCase {
         g.revoke("s"); XCTAssertFalse(g.isAllowed("s", .readPage))
     }
 }
+
+final class MouseGestureTests: XCTestCase {
+    private func path(_ steps: [(CGFloat, CGFloat)]) -> [CGPoint] {
+        var p = CGPoint(x: 200, y: 200); var out = [p]
+        for (dx, dy) in steps { p = CGPoint(x: p.x + dx, y: p.y + dy); out.append(p) }
+        return out
+    }
+
+    func testPathsBecomeLettersAndWobbleIsIgnored() {
+        XCTAssertEqual(MouseGesture.strokes(of: path([(-80, 5)])), "L")
+        XCTAssertEqual(MouseGesture.strokes(of: path([(0, 80), (80, 4)])), "DR")
+        XCTAssertEqual(MouseGesture.strokes(of: path([(0, -80), (0, 80)])), "UD")
+        XCTAssertEqual(MouseGesture.strokes(of: path([(10, 10), (-8, 12)])), "", "a small wobble is not a gesture")
+        XCTAssertEqual(MouseGesture.strokes(of: path([(50, 0), (50, 0), (50, 0)])), "R", "the same direction again is still one stroke")
+        XCTAssertEqual(MouseGesture.strokes(of: path([(60, 0), (0, 60), (-60, 0), (0, -60), (60, 0)])), "RDLU", "at most four strokes")
+        XCTAssertEqual(MouseGesture.strokes(of: []), "")
+    }
+
+    func testTheDefaultMapDoesWhatItSays() {
+        let map = MouseGesture.defaults
+        XCTAssertEqual(MouseGesture.action(for: path([(-80, 0)]), in: map)?.action, .back)
+        XCTAssertEqual(MouseGesture.action(for: path([(0, 80), (80, 0)]), in: map)?.action, .closeTab)
+        XCTAssertNil(MouseGesture.action(for: path([(0, 80), (80, 0), (0, 80)]), in: map), "a longer path is not the shorter one")
+        XCTAssertEqual(Set(map.keys.map(\.count)).isSubset(of: [1, 2]), true)
+    }
+
+    func testTheMapIsSavedAsTextAndBadLinesAreDropped() {
+        XCTAssertEqual(MouseGesture.decode(MouseGesture.encode(MouseGesture.defaults)), MouseGesture.defaults)
+        let odd = MouseGesture.decode("LL back\nXX reload\nL nonsense\nUUUUU reload\nR  forward\nU scrollTop")
+        XCTAssertEqual(odd, ["LL": .back, "R": .forward, "U": .scrollTop], "unknown letters, actions and over-long paths are dropped; extra spaces are fine")
+        XCTAssertEqual(MouseGesture.decode(nil), MouseGesture.defaults); XCTAssertEqual(MouseGesture.decode("garbage"), MouseGesture.defaults)
+        XCTAssertEqual(MouseGesture.arrows("DR"), "↓→")
+    }
+}

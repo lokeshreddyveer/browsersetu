@@ -32,6 +32,7 @@ final class Workbench: ObservableObject {
     @Published var snapshot: DevSnapshot?
     @Published var scratchOutput = ""
     @Published var inspectable = false
+    @Published var openDocumentRequested = false
     @Published var picked: PickedElement?
     @Published var picking = false
     @Published var showSizeHUD = false

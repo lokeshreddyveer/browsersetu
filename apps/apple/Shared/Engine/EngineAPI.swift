@@ -41,6 +41,9 @@ protocol TabEngineEvents: AnyObject {
     func engineDidFinishLoading()
     func engineLoadFailed(url: URL?, description: String)
     func engineProcessCrashed()
+    func engineMouseGesturesEnabled() -> Bool
+    /// The strokes drawn so far while the middle button is held (`finished` false), and the whole gesture when it is let go (`finished` true; empty means it was only a click).
+    func engineMouseGesture(_ sequence: String, finished: Bool)
     /// Whether the page has its own bar fixed to the top or bottom edge of the screen (a site header, a row of tabs). Only these pages are kept clear of the status bar and the dock.
     func engineFixedBars(top: Bool, bottom: Bool)
     /// Whether the browser wants to look at a login form just before it is submitted (never in a private tab, or when the setting is off).
@@ -108,6 +111,8 @@ extension TabEngine {
 }
 
 extension TabEngineEvents {
+    func engineMouseGesturesEnabled() -> Bool { false }
+    func engineMouseGesture(_ sequence: String, finished: Bool) {}
     func engineFixedBars(top: Bool, bottom: Bool) {}
     func engineWantsLoginCapture() -> Bool { false }
     func engineLoginSubmitted(origin: String, user: String, password: String) {}

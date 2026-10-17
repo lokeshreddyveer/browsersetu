@@ -45,10 +45,12 @@ extension BrowserModel {
 struct DownloadFileActions: View {
     let url: URL
     @State private var preview: URL?
+    @EnvironmentObject private var model: BrowserModel
 
     var body: some View {
         HStack(spacing: 6) {
             Button { preview = url } label: { Image(systemName: "eye") }.help("Preview")
+            if url.pathExtension.lowercased() == "pdf" { Button { model.editPDF(at: url) } label: { Image(systemName: "pencil.and.signature") }.help("Edit or sign this PDF") }
             ShareLink(item: url) { Image(systemName: "square.and.arrow.up") }.help("Share")
             #if os(macOS)
             Button { revealInSystem(url) } label: { Image(systemName: "magnifyingglass") }.help("Show in Finder")
@@ -56,5 +58,34 @@ struct DownloadFileActions: View {
         }
         .buttonStyle(.borderless)
         .quickLookPreview($preview)
+    }
+}
+
+
+extension BrowserModel {
+    /// Opens a PDF in the editor. The original is never changed: edits are saved as a copy beside it.
+    func editPDF(at url: URL) {
+        pdfEditorURL = url
+        sheet = .pdfEditor
+    }
+
+    /// Edits the PDF the tab in front is showing: it is fetched as a download (with the page's own sign-in, through WebKit), then opened in the editor when it arrives.
+    func editCurrentPDF() {
+        guard let tab = active, !tab.isPrivate, let url = tab.url, ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { notice = "Open a PDF in a normal tab first."; return }
+        guard url.pathExtension.lowercased() == "pdf" || tab.title.lowercased().hasSuffix(".pdf") else { notice = "This page is not a PDF."; return }
+        pendingPDFEdits.insert(url.absoluteString)
+        downloads.starter?(url)
+        notice = "Fetching the PDF to edit…"
+    }
+
+    /// A download finished: if it was fetched for editing, the editor opens on it.
+    func openFinishedPDFIfWanted(source: URL?, filename: String) {
+        guard let source, pendingPDFEdits.remove(source.absoluteString) != nil, let file = DownloadCoordinator.locate(filename: filename) else { return }
+        editPDF(at: file)
+    }
+
+    /// Any file you choose: a PDF opens in the editor, anything else in Apple's own previewer (Word, Excel, Pages, Numbers, Keynote, PowerPoint, text, pictures and more).
+    func openDocument(_ url: URL) {
+        if url.pathExtension.lowercased() == "pdf" { editPDF(at: url) } else { previewURL = url }
     }
 }

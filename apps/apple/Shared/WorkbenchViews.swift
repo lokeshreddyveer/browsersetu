@@ -29,6 +29,7 @@ struct WorkbenchView: View {
             .transition(.opacity)
         }
         .animation(.easeOut(duration: 0.18), value: part)
+        .quickLookPreview($model.previewURL)
         .accessibilityIdentifier("workbench")
     }
 }
@@ -269,11 +270,22 @@ private struct WorkbenchFiles: View {
     @State private var kind = DownloadRule.Kind.any
     @State private var folder = ""
     @State private var annotating: URL?
+    @State private var choosingDocument = false
 
     init(bench: Workbench) { _bench = ObservedObject(wrappedValue: bench) }
 
     var body: some View {
-        filesList.sheet(item: $annotating) { url in PDFAnnotatorView(source: url).environmentObject(model) }
+        filesList
+            .fileImporter(isPresented: $choosingDocument, allowedContentTypes: [.item]) { result in
+                guard case .success(let url) = result else { return }
+                let scoped = url.startAccessingSecurityScopedResource()
+                // The file is copied into the downloads folder first: edits are saved beside it, and a file chosen from elsewhere may not be writable.
+                let copy = DownloadCoordinator.uniqueURL(in: DownloadCoordinator.directory, name: url.lastPathComponent)
+                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                if (try? FileManager.default.copyItem(at: url, to: copy)) != nil { model.openDocument(copy) } else { model.notice = "That file could not be opened." }
+            }
+            .onChange(of: bench.openDocumentRequested) { _, wanted in if wanted { bench.openDocumentRequested = false; choosingDocument = true } }
+            .sheet(item: $annotating) { url in PDFEditorView(source: url).environmentObject(model) }
     }
 
     private var filesList: some View {
@@ -294,6 +306,11 @@ private struct WorkbenchFiles: View {
                         .disabled(folder.isEmpty)
                 }
                 Text("A rule with a site beats one without. Files go in a folder inside Downloads.").font(.caption).foregroundStyle(.secondary)
+            }
+            Section("Documents") {
+                Button("Open a Document…") { choosingDocument = true }
+                Text("A PDF opens in the editor: mark up, fill in forms, type, draw, sign, black out, rotate, delete, reorder and merge pages, extract pages and save a protected copy. Word, Excel, Pages, Numbers, Keynote, PowerPoint, text and pictures open in Apple's previewer. Edits are always saved as a new copy.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("PDFs in Downloads") {
                 let pdfs = model.downloads.completed.filter { $0.pathExtension.lowercased() == "pdf" }.prefix(12)

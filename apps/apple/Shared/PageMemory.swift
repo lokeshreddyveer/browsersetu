@@ -116,6 +116,8 @@ struct GesturesSection: View {
             Toggle("Swipe the address bar to switch tabs", isOn: $model.swipeAddressPill)
             #else
             Toggle("Swipe with two fingers to go back and forward", isOn: $model.gestureBackForward)
+            Toggle("Mouse gestures: hold the middle button and drag", isOn: $model.mouseGestures)
+            if model.mouseGestures { MouseGestureEditor() }
             #endif
             Toggle("Pinch to zoom", isOn: $model.gesturePinchZoom)
         } header: { Text("Gestures") } footer: {
@@ -124,6 +126,38 @@ struct GesturesSection: View {
             #else
             Text("Double-tap with two fingers to zoom in on part of a page.")
             #endif
+        }
+    }
+}
+
+/// The list of gestures and what each does, with a way to add one and to go back to the standard set.
+struct MouseGestureEditor: View {
+    @EnvironmentObject var model: BrowserModel
+    @State private var newPath = ""
+    @State private var newAction = VimAction.back
+
+    var body: some View {
+        DisclosureGroup("Gestures") {
+            ForEach(model.mouseGestureMap.keys.sorted { ($0.count, $0) < ($1.count, $1) }, id: \.self) { path in
+                HStack {
+                    Text(MouseGesture.arrows(path)).font(.system(.body, design: .monospaced)).frame(width: 70, alignment: .leading)
+                    Picker("", selection: Binding(get: { model.mouseGestureMap[path] ?? .back }, set: { var map = model.mouseGestureMap; map[path] = $0; model.setMouseGestureMap(map) })) {
+                        ForEach(VimAction.allCases) { Text($0.title).tag($0) }
+                    }.labelsHidden()
+                    Button(role: .destructive) { var map = model.mouseGestureMap; map[path] = nil; model.setMouseGestureMap(map) } label: { Image(systemName: "trash") }.buttonStyle(.borderless)
+                }
+            }
+            HStack {
+                TextField("L R U D, such as DR", text: $newPath).frame(width: 150)
+                Picker("", selection: $newAction) { ForEach(VimAction.allCases) { Text($0.title).tag($0) } }.labelsHidden()
+                Button("Add") {
+                    let clean = newPath.uppercased().filter { "LRUD".contains($0) }
+                    guard (1...MouseGesture.maxStrokes).contains(clean.count) else { model.notice = "Use one to four of L, R, U and D."; return }
+                    var map = model.mouseGestureMap; map[clean] = newAction; model.setMouseGestureMap(map); newPath = ""
+                }.disabled(newPath.isEmpty)
+            }
+            Button("Use the Standard Set") { model.setMouseGestureMap(MouseGesture.defaults) }
+            Text("L, R, U and D are left, right, up and down. A middle click that does not move still works as a middle click. Gestures need a mouse with a middle button.").font(.caption).foregroundStyle(.secondary)
         }
     }
 }

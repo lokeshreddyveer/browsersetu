@@ -8,7 +8,7 @@ import SetuPrivacyCore
 import SwiftUI
 
 enum Sheet: String, Identifiable {
-    case bookmarks, history, downloads, settings, layout, research, sitePrivacy, workbench, findAll, sessions, timeline, dashboard, readingList, note, qr, style, pageTools, selection, shareTabs, shopping, repair, devices, pageSearch, resources
+    case bookmarks, history, downloads, pdfEditor, settings, layout, research, sitePrivacy, workbench, findAll, sessions, timeline, dashboard, readingList, note, qr, style, pageTools, selection, shareTabs, shopping, repair, devices, pageSearch, resources
     var id: String { rawValue }
 }
 
@@ -79,7 +79,15 @@ final class BrowserModel: ObservableObject {
     var neverSaveOrigins: Set<String> = []
     var askingAboutLogin = false
     var declinedFill: Set<String> = []
+    /// Hold the middle button and drag (Mac): back, forward, close tab and more.
+    @Published var mouseGestures = false { didSet { saveSetting("mouse_gestures", mouseGestures ? "1" : "0") } }
+    @Published var mouseGestureMap: [String: VimAction] = MouseGesture.defaults
+    @Published var gestureHint: String?
+    var hintTask: Task<Void, Never>?
     var workbenchBacking: Workbench?
+    @Published var pdfEditorURL: URL?
+    @Published var previewURL: URL?
+    var pendingPDFEdits = Set<String>()
     var spotlightTask: Task<Void, Never>?
     @Published var pageSnapshots: [String: [PageSnapshot]] = [:] { didSet { saveSetting("page_snapshots", encodedMap(pageSnapshots)) } }
     @Published var comparedProducts: [ComparedProduct] = [] { didSet { saveSetting("compared_products", encodedList(comparedProducts)) } }
@@ -243,6 +251,7 @@ final class BrowserModel: ObservableObject {
         loadUISettings()
         engine.downloads.onFinished = { [weak self] source, filename in
             try? self?.core.recordDownload(url: source?.absoluteString ?? "", filename: filename)
+            self?.openFinishedPDFIfWanted(source: source, filename: filename)
             if let warning = DownloadSafety.warning(forFilename: filename, from: source) { self?.notice = warning }
             #if os(iOS)
             // Wallet passes, contact cards and calendar events open in the system sheet that adds them.
@@ -1715,6 +1724,8 @@ final class BrowserModel: ObservableObject {
         tabTree = get("tab_tree") == "1"
         loadLoginSettings(get)
         spotlightBookmarks = get("spotlight_bookmarks") == "1"
+        mouseGestures = get("mouse_gestures") == "1"
+        mouseGestureMap = MouseGesture.decode(get("mouse_gesture_map"))
         syncPasswords = get("sync_passwords") == "1"
         syncLedger = Self.decodeMap(get("sync_ledger"), as: SyncState.self)["state"] ?? SyncState()
         syncClock = Self.decodeMap(get("sync_clock"), as: SyncClock.self)["clock"] ?? SyncClock()
@@ -1949,7 +1960,7 @@ final class BrowserModel: ObservableObject {
         "sidebar_width", "single_toolbar", "split_orientation", "start_background", "startup", "startup_workspace",
         "strip_tracking", "tab_groups", "tab_layout", "tab_previews", "tint_toolbar", "toolbar_autohide", "toolbar_items",
         "workspaces", "double_click", "collapse_on_scroll", "search_template", "search_suggestions", "speed_pill", "pill_collapsed", "site_icons", "shortcuts", "homepage", "saved_sessions", "organize_downloads", "site_notes", "search_shortcuts", "bookmark_tags", "site_styles", "phone_toolbar", "address_display", "address_icon", "search_panel_bottom", "search_panel_bottom2", "swipe_address", "app_links", "app_link_sites", "blur_private_switcher", "permission_expiry", "favorites_order", "overview_style", "overview_grouped", "overview_sort", "dark_pages", "dark_sites", "website_appearance", "site_appearance", "theme", "theme_custom", "low_power_memory", "clear_on_quit", "remember_reading", "keep_form_drafts", "site_zoom", "group_colors",
-        "save_logins", "site_open_rules", "download_concurrent", "spotlight_bookmarks", "vim_on", "vim_keymap", "workflows", "download_rules", "extension_profiles", "site_delete_rules", "site_user_agents", "containers", "split_templates", "tab_tree", "block_webrtc", "webrtc_exceptions",
+        "save_logins", "mouse_gestures", "mouse_gesture_map", "site_open_rules", "download_concurrent", "spotlight_bookmarks", "vim_on", "vim_keymap", "workflows", "download_rules", "extension_profiles", "site_delete_rules", "site_user_agents", "containers", "split_templates", "tab_tree", "block_webrtc", "webrtc_exceptions",
     ]
 
     /// The same, with the slow key derivation and encryption on a background thread so the window never stalls.
@@ -2106,6 +2117,8 @@ extension BrowserModel {
             .init(id: "search-selection-default", title: "Search the Selected Words", subtitle: "With your search engine, in a new tab", symbol: "magnifyingglass", shortcut: "") { [self] in
                 searchSelection(with: SelectionSearch.Engine(name: "default", template: searchTemplate))
             },
+            .init(id: "edit-pdf", title: "Edit or Sign This PDF", subtitle: "Mark up, fill in, sign, redact, reorder pages; saved as a copy", symbol: "pencil.and.signature", shortcut: "") { [self] in editCurrentPDF() },
+            .init(id: "open-document", title: "Open a Document…", subtitle: "A PDF to edit, or Word, Excel, Pages and more to preview", symbol: "doc.badge.plus", shortcut: "") { [self] in sheet = .workbench; workbench.openDocumentRequested = true },
             .init(id: "pick-element", title: "Pick an Element on This Page", subtitle: "Its selector, size, styles and HTML", symbol: "scope", shortcut: "") { [self] in Task { await workbench.pickElement() } },
             .init(id: "size-hud", title: workbench.showSizeHUD ? "Hide the Page Size" : "Show the Page Size", subtitle: "Live width and height in the corner", symbol: "ruler", shortcut: "") { [self] in workbench.showSizeHUD.toggle() },
             .init(id: "vim-mode", title: workbench.vimEnabled ? "Turn Off Vim Keys" : "Turn On Vim Keys", subtitle: "j k gg G H L and more, when no text field has the keyboard", symbol: "keyboard", shortcut: "") { [self] in workbench.vimEnabled.toggle() },

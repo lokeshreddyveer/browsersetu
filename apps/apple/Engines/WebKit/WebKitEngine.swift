@@ -226,6 +226,8 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
         super.init()
         #if os(macOS)
         reporting.onScroll = { [weak self] delta in self?.events?.engineScrolled(deltaY: Double(delta)) }
+        reporting.gesturesEnabled = { [weak self] in self?.events?.engineMouseGesturesEnabled() ?? false }
+        reporting.onGesture = { [weak self] sequence, finished in self?.events?.engineMouseGesture(sequence, finished: finished) }
         reporting.onKey = { [weak self] event in
             guard let self, !self.editableFocused, event.modifierFlags.intersection([.command, .control, .option]).isEmpty,
                   let key = event.characters, key.count == 1 else { return false }
@@ -1284,6 +1286,38 @@ final class ScrollReportingWebView: WKWebView {
     var onKey: ((NSEvent) -> Bool)?
     /// A click or a key the page got: focus may have moved.
     var onInteraction: (() -> Void)?
+
+    // Mouse gestures: the middle button, held and dragged. A press that does not move is given to the page unchanged, so a middle click on a link still opens it in a new tab.
+    var gesturesEnabled: () -> Bool = { false }
+    var onGesture: ((String, Bool) -> Void)?
+    private var heldPress: NSEvent?
+    private var trail: [CGPoint] = []
+
+    private func gesturePoint(_ event: NSEvent) -> CGPoint {
+        let p = convert(event.locationInWindow, from: nil)
+        return CGPoint(x: p.x, y: isFlipped ? p.y : bounds.height - p.y)
+    }
+
+    override func otherMouseDown(with event: NSEvent) {
+        guard event.buttonNumber == 2, gesturesEnabled() else { super.otherMouseDown(with: event); return }
+        heldPress = event; trail = [gesturePoint(event)]
+    }
+
+    override func otherMouseDragged(with event: NSEvent) {
+        guard heldPress != nil else { super.otherMouseDragged(with: event); return }
+        trail.append(gesturePoint(event))
+        onGesture?(MouseGesture.strokes(of: trail), false)
+    }
+
+    override func otherMouseUp(with event: NSEvent) {
+        guard let down = heldPress else { super.otherMouseUp(with: event); return }
+        heldPress = nil
+        let sequence = MouseGesture.strokes(of: trail); trail = []
+        if sequence.isEmpty {
+            super.otherMouseDown(with: down); super.otherMouseUp(with: event)
+            onGesture?("", true)
+        } else { onGesture?(sequence, true) }
+    }
 
     override func keyDown(with event: NSEvent) {
         if onKey?(event) == true { return }
