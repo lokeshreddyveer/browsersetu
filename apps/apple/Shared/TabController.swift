@@ -273,6 +273,15 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
     func engineSecurityChanged(_ secure: Bool) { isSecure = secure }
     func engineThemeColorChanged(_ tint: PageTint?) { self.tint = tint }
 
+    /// Set by the engine once the page is read; the phone layout keeps only such pages clear of the status bar and the dock.
+    private(set) var fixedTop = false
+    private(set) var fixedBottom = false
+    func engineFixedBars(top: Bool, bottom: Bool) {
+        guard top != fixedTop || bottom != fixedBottom else { return }
+        fixedTop = top; fixedBottom = bottom
+        if owner?.activeID == id { owner?.pageFixedBarsChanged(self) }
+    }
+
     func engineDidFinishLoading() {
         if !showingError { owner?.didFinishLoading(self) }
         engine.setGestures(owner?.gestureOptions ?? GestureOptions())

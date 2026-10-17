@@ -953,9 +953,13 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
         readIconLinks(in: webView)
         #if os(iOS)
         paintBehindPage(webView)
+        fixedBarsSeen = (false, false)
+        probeFixedBars(webView)
         Task { @MainActor [weak self, weak webView] in
             try? await Task.sleep(for: .milliseconds(700))      // a page that sets its dark background late is read again
-            if let webView { self?.paintBehindPage(webView) }
+            if let webView { self?.paintBehindPage(webView); self?.probeFixedBars(webView) }
+            try? await Task.sleep(for: .milliseconds(2000))     // single-page sites build their bars after the page has loaded
+            if let webView { self?.probeFixedBars(webView) }
         }
         #endif
     }
@@ -963,6 +967,38 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
     #if os(iOS)
     /// The strip under the status bar (and above the page on a phone) is not part of the page, so it showed white on a dark page and the clock
     /// vanished. It is painted with the page's own background colour, read from the page (read-only), as the page's theme colour if it gave none.
+    private var fixedBarsSeen = (top: false, bottom: false)
+
+    /// Looks, read-only, for a bar fixed to the top or bottom edge. Within one page load a bar that was seen stays seen, so the layout does not flip back and forth.
+    private func probeFixedBars(_ webView: WKWebView) {
+        let script = """
+        const W = innerWidth, H = innerHeight, out = { top: false, bottom: false };
+        const near = (el, edge) => {
+          for (let e = el; e && e !== document.documentElement; e = e.parentElement) {
+            const p = getComputedStyle(e).position;
+            if (p === 'fixed' || p === 'sticky') {
+              const r = e.getBoundingClientRect();
+              if (r.width >= W * 0.6 && r.height >= 30 && r.height <= 200 && r.height < H * 0.3) {
+                if (edge === 'top' && r.top <= 3) return true;
+                if (edge === 'bottom' && r.bottom >= H - 3) return true;
+              }
+            }
+          }
+          return false;
+        };
+        for (const x of [W * 0.25, W * 0.5, W * 0.75]) {
+          for (const el of document.elementsFromPoint(x, 4)) if (near(el, 'top')) out.top = true;
+          for (const el of document.elementsFromPoint(x, H - 4)) if (near(el, 'bottom')) out.bottom = true;
+        }
+        return out;
+        """
+        Task { @MainActor [weak self, weak webView] in
+            guard let self, let webView, let r = (try? await webView.callAsyncJavaScript(script, contentWorld: .defaultClient)) as? [String: Any] else { return }
+            fixedBarsSeen = (fixedBarsSeen.top || (r["top"] as? Bool ?? false), fixedBarsSeen.bottom || (r["bottom"] as? Bool ?? false))
+            events?.engineFixedBars(top: fixedBarsSeen.top, bottom: fixedBarsSeen.bottom)
+        }
+    }
+
     private func paintBehindPage(_ webView: WKWebView) {
         let script = """
         const solid = (e) => {

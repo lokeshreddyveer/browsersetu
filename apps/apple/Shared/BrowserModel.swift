@@ -521,6 +521,13 @@ final class BrowserModel: ObservableObject {
     /// iPhone: how much of the page's foot the floating toolbar covers; set by the screen, applied to every tab's scroll view.
     var phoneBottomInset: CGFloat = 0 { didSet { if oldValue != phoneBottomInset { for tab in tabs { tab.applyBottomInset() } } } }
     /// The status-bar strip the page must stay clear of when it runs to the top edge of the screen.
+    /// Whether the page in front has its own bar fixed to the top or bottom edge (iPhone layout only).
+    @Published private(set) var activeFixedTop = false
+    @Published private(set) var activeFixedBottom = false
+    func pageFixedBarsChanged(_ tab: TabController) {
+        guard tab.id == activeID else { return }
+        activeFixedTop = tab.fixedTop; activeFixedBottom = tab.fixedBottom
+    }
     var phoneTopInset: CGFloat = 0 { didSet { if oldValue != phoneTopInset { for tab in tabs { tab.applyBottomInset() } } } }
     /// iPhone: the island opens by itself when the network speed changes a lot. Off until switched on.
     @Published var speedPopups = false { didSet { saveSetting("speed_popups", speedPopups ? "1" : "0") } }
@@ -851,6 +858,7 @@ final class BrowserModel: ObservableObject {
         let previousTab = active
         expandChrome()
         activeID = id
+        if let tab = active { activeFixedTop = tab.fixedTop; activeFixedBottom = tab.fixedBottom }
         active?.ensureLoaded()
         if let current = active, !current.isPrivate { extensionCenter.tabActivated(current, previous: previousTab.flatMap { $0.isPrivate ? nil : $0 }) }
         if let tab = active, tab.workspace != activeWorkspace { activeWorkspace = tab.workspace }
