@@ -46,3 +46,56 @@ final class WebLoginTests: XCTestCase {
         XCTAssertEqual(WebLoginVault.list(profile: profile).map(\.origin), ["https://b.test"])
     }
 }
+
+final class PasswordKeepingTests: XCTestCase {
+    func testASecretIsFoundWhicheverWayItWasKept() {
+        let service = "com.browsersetu.test.keep." + UUID().uuidString
+        defer { SecretStore.deleteAll(service: service) }
+        let data = Data("secret".utf8)
+        // Asking for iCloud Keychain on a copy that cannot use it must keep the secret on this device, not lose it.
+        let outcome = SecretStore.put(data, service: service, account: "a", synchronizable: true)
+        XCTAssertNotEqual(outcome, .failed)
+        XCTAssertEqual(SecretStore.get(service: service, account: "a"), data)
+        XCTAssertEqual(SecretStore.accounts(service: service), ["a"])
+        // Writing it the other way replaces it; it never shows twice.
+        XCTAssertNotEqual(SecretStore.put(Data("again".utf8), service: service, account: "a"), .failed)
+        XCTAssertEqual(SecretStore.get(service: service, account: "a"), Data("again".utf8))
+        XCTAssertEqual(SecretStore.accounts(service: service), ["a"])
+        SecretStore.delete(service: service, account: "a")
+        XCTAssertNil(SecretStore.get(service: service, account: "a"))
+    }
+
+    func testMovingPasswordsLeavesThemAllThere() {
+        let profile = "move-" + UUID().uuidString
+        defer { WebLoginVault.removeAll(profile: profile) }
+        guard WebLoginVault.save(WebLogin(origin: "https://a.test", user: "me", password: "pw"), profile: profile) else { return XCTFail("the Keychain is not available to this test run") }
+        WebLoginVault.save(WebLogin(origin: "https://b.test", user: "you", password: "pw2"), profile: profile)
+        let result = WebLoginVault.migrate(profile: profile, toCloud: true)
+        XCTAssertEqual(result.total, 2)
+        XCTAssertEqual(WebLoginVault.list(profile: profile).count, 2, "none are lost, whether or not iCloud Keychain was available")
+        _ = WebLoginVault.migrate(profile: profile, toCloud: false)
+        XCTAssertEqual(WebLoginVault.list(profile: profile).map(\.password).sorted(), ["pw", "pw2"])
+    }
+
+    func testABackupCarriesPasswordsOnlyWhenAsked() throws {
+        let payloadWith = BackupPayload(created: Date(), bookmarks: [], settings: [:], passwords: [WebLogin(origin: "https://a.test", user: "me", password: "pw")])
+        let sealed = try BackupFile.seal(payloadWith, passphrase: "correct horse", iterations: 1_000)
+        XCTAssertEqual(try BackupFile.open(sealed, passphrase: "correct horse").passwords?.first?.password, "pw")
+        let without = try BackupFile.seal(BackupPayload(created: Date(), bookmarks: [], settings: [:]), passphrase: "x", iterations: 1_000)
+        XCTAssertNil(try BackupFile.open(without, passphrase: "x").passwords)
+    }
+
+    @MainActor
+    func testRestoringPasswordsRefusesOddOnes() async {
+        let model = BrowserModel(engine: WebKitEngine(), root: NSTemporaryDirectory() + "bs-restore-\(UUID().uuidString)", profile: "restore-" + UUID().uuidString)
+        defer { WebLoginVault.removeAll(profile: model.profileName) }
+        let added = model.restorePasswords([
+            WebLogin(origin: "https://good.test", user: "me", password: "pw"),
+            WebLogin(origin: "http://plain.test", user: "me", password: "pw"),                 // plain http is never kept
+            WebLogin(origin: "https://empty.test", user: "", password: "pw"),
+            WebLogin(origin: "https://long.test", user: "me", password: String(repeating: "x", count: 600)),
+        ])
+        XCTAssertEqual(added, 1)
+        XCTAssertEqual(model.restorePasswords([WebLogin(origin: "https://good.test", user: "me", password: "pw")]), 0, "the same one again is not added twice")
+    }
+}

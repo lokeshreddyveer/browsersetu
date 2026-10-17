@@ -137,7 +137,8 @@ final class SyncModelTests: XCTestCase {
     }
 
     func testSavedPasswordsTravelOnlyWhenTurnedOnAndOnlyInsideTheSnapshot() async throws {
-        let a = model(), b = model()
+        // Throwaway profile names: this test saves and then deletes passwords, and it must never be able to touch the real "default" profile's Keychain items.
+        let a = BrowserModel(engine: WebKitEngine(), root: NSTemporaryDirectory() + "bs-sync-\(UUID().uuidString)", profile: "sync-test-" + UUID().uuidString), b = model()
         await a.start(); await b.start()
         guard WebLoginVault.save(WebLogin(origin: "https://bank.test", user: "me", password: "s3cret"), profile: a.profileName) else { return XCTFail("the Keychain is not available to this test run") }
         defer { WebLoginVault.removeAll(profile: a.profileName) }
@@ -147,7 +148,7 @@ final class SyncModelTests: XCTestCase {
         let on = try XCTUnwrap(a.makeSyncSnapshot())
         XCTAssertEqual(on.state?.logins.count, 1)
         // The receiving device is another profile, so the Keychain separates them.
-        let receiver = BrowserModel(engine: WebKitEngine(), root: NSTemporaryDirectory() + "bs-sync-\(UUID().uuidString)", profile: "default")
+        let receiver = BrowserModel(engine: WebKitEngine(), root: NSTemporaryDirectory() + "bs-sync-\(UUID().uuidString)", profile: "sync-test-" + UUID().uuidString)
         await receiver.start()
         receiver.syncPasswords = false
         _ = receiver.applySyncSnapshot(on)
