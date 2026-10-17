@@ -30,6 +30,8 @@ struct BackupPayload: Codable, Equatable {
     var deviceID: String? = nil
     /// Research collections, in a backup file only (sync does not carry them).
     var research: [ResearchCollection]? = nil
+    /// Saved passwords, only when the person chose to include them. A backup file is sealed with their passphrase.
+    var passwords: [WebLogin]? = nil
     /// Sync only: every synced item with its stamp, so devices merge deterministically and deletions are remembered. When present it replaces `bookmarks`.
     var state: SyncState? = nil
     /// Sync only: counts up with every snapshot this device writes, so an out-of-date copy delivered late can be recognised and ignored.

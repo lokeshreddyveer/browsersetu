@@ -2,49 +2,92 @@ import Foundation
 import LocalAuthentication
 import Security
 
-/// Secrets kept in the system Keychain, on this device only, available while the device is unlocked. Nothing here is written to the
-/// profile's own files or settings.
+/// Secrets kept in the system Keychain, available while the device is unlocked. Nothing here is written to the profile's own files or settings.
+/// By default an item stays on this device. An item can instead be written as one iCloud Keychain carries to the person's other devices,
+/// sealed end to end by Apple; reading and removing look in both places, so a secret is found whichever way it was kept.
 enum SecretStore {
-    private static func query(service: String, account: String?) -> [String: Any] {
+    enum Outcome { case synced, local, failed }
+
+    private static func query(service: String, account: String?, cloud: Bool) -> [String: Any] {
         var q: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service]
         if let account { q[kSecAttrAccount as String] = account }
+        if cloud {
+            q[kSecAttrSynchronizable as String] = kSecAttrSynchronizableAny
+            #if os(macOS)
+            q[kSecUseDataProtectionKeychain as String] = true       // iCloud Keychain items live in the data protection keychain
+            #endif
+        }
         return q
     }
 
+    /// Writes the secret, replacing any earlier copy in either place. With `synchronizable`, iCloud Keychain is tried first; when this copy of the app cannot use it,
+    /// the secret is kept on this device instead and the result says so.
     @discardableResult
-    static func set(_ data: Data, service: String, account: String) -> Bool {
-        SecItemDelete(query(service: service, account: account) as CFDictionary)
-        var item = query(service: service, account: account)
+    static func put(_ data: Data, service: String, account: String, synchronizable: Bool = false) -> Outcome {
+        remove(service: service, account: account)
+        if synchronizable {
+            var item = query(service: service, account: account, cloud: true)
+            item[kSecAttrSynchronizable as String] = true
+            item[kSecValueData as String] = data
+            item[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlocked
+            if SecItemAdd(item as CFDictionary, nil) == errSecSuccess { return .synced }
+        }
+        var item = query(service: service, account: account, cloud: false)
         item[kSecValueData as String] = data
         item[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-        return SecItemAdd(item as CFDictionary, nil) == errSecSuccess
+        return SecItemAdd(item as CFDictionary, nil) == errSecSuccess ? .local : .failed
+    }
+
+    @discardableResult
+    static func set(_ data: Data, service: String, account: String, synchronizable: Bool = false) -> Bool {
+        put(data, service: service, account: account, synchronizable: synchronizable) != .failed
     }
 
     static func get(service: String, account: String) -> Data? {
-        var q = query(service: service, account: account)
-        q[kSecReturnData as String] = true
-        q[kSecMatchLimit as String] = kSecMatchLimitOne
-        var result: CFTypeRef?
-        return SecItemCopyMatching(q as CFDictionary, &result) == errSecSuccess ? result as? Data : nil
-    }
-
-    /// The account names stored under a service.
-    static func accounts(service: String) -> [String] {
-        var q = query(service: service, account: nil)
-        q[kSecReturnAttributes as String] = true
-        q[kSecMatchLimit as String] = kSecMatchLimitAll
-        var result: CFTypeRef?
-        guard SecItemCopyMatching(q as CFDictionary, &result) == errSecSuccess, let rows = result as? [[String: Any]] else { return [] }
-        return rows.compactMap { $0[kSecAttrAccount as String] as? String }.sorted()
+        for cloud in [false, true] {
+            var q = query(service: service, account: account, cloud: cloud)
+            q[kSecReturnData as String] = true
+            q[kSecMatchLimit as String] = kSecMatchLimitOne
+            var result: CFTypeRef?
+            if SecItemCopyMatching(q as CFDictionary, &result) == errSecSuccess, let data = result as? Data { return data }
+        }
+        return nil
     }
 
     @discardableResult
-    static func delete(service: String, account: String) -> Bool {
-        let status = SecItemDelete(query(service: service, account: account) as CFDictionary)
-        return status == errSecSuccess || status == errSecItemNotFound
+    private static func remove(service: String, account: String) -> Bool {
+        let local = SecItemDelete(query(service: service, account: account, cloud: false) as CFDictionary)
+        let cloud = SecItemDelete(query(service: service, account: account, cloud: true) as CFDictionary)
+        return [local, cloud].allSatisfy { $0 == errSecSuccess || $0 == errSecItemNotFound }
     }
 
-    static func deleteAll(service: String) { SecItemDelete(query(service: service, account: nil) as CFDictionary) }
+    /// The account names stored under a service, from both places.
+    static func accounts(service: String) -> [String] {
+        var names = Set<String>()
+        for cloud in [false, true] {
+            var q = query(service: service, account: nil, cloud: cloud)
+            q[kSecReturnAttributes as String] = true
+            q[kSecMatchLimit as String] = kSecMatchLimitAll
+            var result: CFTypeRef?
+            guard SecItemCopyMatching(q as CFDictionary, &result) == errSecSuccess, let rows = result as? [[String: Any]] else { continue }
+            rows.compactMap { $0[kSecAttrAccount as String] as? String }.forEach { names.insert($0) }
+        }
+        return names.sorted()
+    }
+
+    @discardableResult
+    static func delete(service: String, account: String) -> Bool { remove(service: service, account: account) }
+
+    static func deleteAll(service: String) {
+        // On a Mac the system removes only the first match unless it is told to remove them all, which left every other saved item behind.
+        for cloud in [false, true] {
+            var q = query(service: service, account: nil, cloud: cloud)
+            #if os(macOS)
+            q[kSecMatchLimit as String] = kSecMatchLimitAll
+            #endif
+            SecItemDelete(q as CFDictionary)
+        }
+    }
 }
 
 /// The whole of what a website's sign-in box belongs to: how it was reached, which machine and port, which realm, how it asked, and whether it is a
