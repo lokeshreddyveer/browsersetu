@@ -3,6 +3,15 @@
   <channel>
     <title>Browser Setu</title>
     <item>
+      <title>Browser Setu 0.3.3</title>
+      <pubDate>Sat, 17 Oct 2026 18:20:09 -0000</pubDate>
+      <sparkle:version>8</sparkle:version>
+      <sparkle:shortVersionString>0.3.3</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <description><![CDATA[Downloads now show progress while they run and a Downloaded card when they finish, instead of saving silently.]]></description>
+      <enclosure url="https://github.com/lokeshreddyveer/browsersetu/releases/download/v0.3.3/BrowserSetu-0.3.3.dmg" type="application/octet-stream" sparkle:edSignature="3lrKytJmx0yZ6svQIgffHSO3HGpootllWe11avYPS22JH7tL6tEGfkEka1hxMWyEtKPaaKyto5F5sIVKzdG/BQ==" length="15728979"/>
+    </item>
+    <item>
       <title>Browser Setu 0.3.2</title>
       <pubDate>Sat, 17 Oct 2026 18:04:09 -0000</pubDate>
       <sparkle:version>7</sparkle:version>
@@ -38,5 +47,5 @@
       <description><![CDATA[First public release. A native WebKit browser for macOS with a Rust core: tabs, sidebar layouts, workspaces, content blocking, per-site privacy, saved passwords in your Keychain, web extensions, research collections, developer tools, and automatic updates. Early release: see docs/capabilities.md for what has been checked and what has not.]]></description>
       <enclosure url="https://github.com/lokeshreddyveer/browsersetu/releases/download/v0.2.0/BrowserSetu-0.2.0.dmg" type="application/octet-stream" sparkle:edSignature="grmp8aD3U/KjtKeEkUcI3ESkfohsFjkds81VYV6rBzRGW6/JUxDLtcQ1hg178QCZEWXFRCB4AwrzLHSqGC2VCw==" length="14528271"/>
     </item>
-        </channel>
+          </channel>
 </rss>
