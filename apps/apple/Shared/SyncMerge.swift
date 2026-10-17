@@ -39,6 +39,22 @@ struct SyncState: Codable, Equatable {
     var settings: [String: SyncCell<String>] = [:]              // by setting name
     var workspaces: [String: SyncCell<SyncWorkspace>] = [:]     // by name
     var logins: [String: SyncCell<SyncLogin>] = [:]             // by origin and user; only when the person turned password sync on
+    var sessions: [String: SyncCell<SavedSession>] = [:]        // by session id
+
+    init(bookmarks: [String: SyncCell<SyncBookmark>] = [:], settings: [String: SyncCell<String>] = [:], workspaces: [String: SyncCell<SyncWorkspace>] = [:],
+         logins: [String: SyncCell<SyncLogin>] = [:], sessions: [String: SyncCell<SavedSession>] = [:]) {
+        self.bookmarks = bookmarks; self.settings = settings; self.workspaces = workspaces; self.logins = logins; self.sessions = sessions
+    }
+
+    /// Older snapshots have no sessions; they still open.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        bookmarks = try c.decodeIfPresent([String: SyncCell<SyncBookmark>].self, forKey: .bookmarks) ?? [:]
+        settings = try c.decodeIfPresent([String: SyncCell<String>].self, forKey: .settings) ?? [:]
+        workspaces = try c.decodeIfPresent([String: SyncCell<SyncWorkspace>].self, forKey: .workspaces) ?? [:]
+        logins = try c.decodeIfPresent([String: SyncCell<SyncLogin>].self, forKey: .logins) ?? [:]
+        sessions = try c.decodeIfPresent([String: SyncCell<SavedSession>].self, forKey: .sessions) ?? [:]
+    }
 
     static let tombstoneLifetime: Double = 90 * 24 * 3600
     static let maxCells = 12_000
@@ -54,7 +70,7 @@ enum SyncMerge {
     }
 
     static func merge(_ a: SyncState, _ b: SyncState) -> SyncState {
-        SyncState(bookmarks: merge(a.bookmarks, b.bookmarks), settings: merge(a.settings, b.settings), workspaces: merge(a.workspaces, b.workspaces), logins: merge(a.logins, b.logins))
+        SyncState(bookmarks: merge(a.bookmarks, b.bookmarks), settings: merge(a.settings, b.settings), workspaces: merge(a.workspaces, b.workspaces), logins: merge(a.logins, b.logins), sessions: merge(a.sessions, b.sessions))
     }
 
     /// Notes what changed on this device since the last time: a new or different value gets a fresh stamp, and a value that has disappeared becomes a tombstone.
@@ -83,7 +99,7 @@ enum SyncMerge {
     /// Old tombstones are dropped, and when there are too many cells the oldest tombstones go first. A device that was off for longer than the lifetime could bring a deleted item back.
     static func pruned(_ state: SyncState, now: Date) -> SyncState {
         func prune<V>(_ cells: [String: SyncCell<V>]) -> [String: SyncCell<V>] { cells.filter { $0.value.value != nil || now.timeIntervalSince1970 - $0.value.stamp.time < SyncState.tombstoneLifetime } }
-        return SyncState(bookmarks: prune(state.bookmarks), settings: prune(state.settings), workspaces: prune(state.workspaces), logins: prune(state.logins))
+        return SyncState(bookmarks: prune(state.bookmarks), settings: prune(state.settings), workspaces: prune(state.workspaces), logins: prune(state.logins), sessions: prune(state.sessions))
     }
 
     static func highestStamp(in state: SyncState) -> Double {
@@ -92,6 +108,7 @@ enum SyncMerge {
         for c in state.settings.values { top = max(top, c.stamp.time) }
         for c in state.workspaces.values { top = max(top, c.stamp.time) }
         for c in state.logins.values { top = max(top, c.stamp.time) }
+        for c in state.sessions.values { top = max(top, c.stamp.time) }
         return top
     }
 }

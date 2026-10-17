@@ -100,3 +100,22 @@ final class SlashModelTests: XCTestCase {
         XCTAssertTrue(short.isEmpty, "one letter is not a search")
     }
 }
+
+final class SelectionSearchTests: XCTestCase {
+    func testEnginesCoverPresetsKeywordsAndYourOwnWithoutRepeats() {
+        let list = SelectionSearch.engines(custom: ["wiki2": "https://wiki.example.test/?q={}", "bad": "http://insecure.test/{}", "twice": "https://www.google.com/search?q={}"])
+        XCTAssertTrue(list.contains { $0.name == "Google" })
+        XCTAssertTrue(list.contains { $0.name == "GitHub" })
+        XCTAssertTrue(list.contains { $0.name == "wiki2" })
+        XCTAssertFalse(list.contains { $0.name == "bad" }, "an engine that is not https is left out")
+        XCTAssertEqual(list.filter { $0.template == "https://www.google.com/search?q={}" }.count, 1)
+    }
+
+    func testSelectedWordsBecomeOneSafeQueryValue() {
+        let url = SelectionSearch.url(for: "  rust &  swift=fast#x?\nnew line ", template: "https://s.test/?q={}")
+        XCTAssertEqual(url?.absoluteString, "https://s.test/?q=rust%20%26%20swift%3Dfast%23x%3F%20new%20line")
+        XCTAssertNil(SelectionSearch.url(for: "   ", template: "https://s.test/?q={}"))
+        XCTAssertNil(SelectionSearch.url(for: "x", template: "https://s.test/"), "a template with no place for the words is refused")
+        XCTAssertEqual(SelectionSearch.url(for: String(repeating: "a", count: 1000), template: "https://s.test/?q={}")?.absoluteString.count, "https://s.test/?q=".count + 300)
+    }
+}

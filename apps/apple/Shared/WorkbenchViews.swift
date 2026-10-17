@@ -231,6 +231,24 @@ private struct WorkbenchDeveloper: View {
                     if snap.errors.isEmpty { Text("None since the page loaded.").foregroundStyle(.secondary) }
                 }
             }
+            Section("Pick an element") {
+                Button(bench.picking ? "Click an element on the page…" : "Pick an Element on the Page") { Task { await bench.pickElement() } }.disabled(bench.picking)
+                if let e = bench.picked {
+                    LabeledContent("Selector", value: e.selector).textSelection(.enabled)
+                    LabeledContent("Size", value: "\(Int(e.size.width)) × \(Int(e.size.height))")
+                    HStack { Button("Copy Selector") { copyToPasteboard(e.selector) }; Button("Copy CSS") { copyToPasteboard(e.css) }; Button("Copy HTML") { copyToPasteboard(e.html) } }
+                    DisclosureGroup("Styles (\(e.styles.count))") {
+                        ForEach(Array(e.styles.enumerated()), id: \.offset) { _, pair in LabeledContent(pair.name, value: pair.value).font(.caption.monospaced()) }
+                    }
+                }
+                Text("Click once on the page; Escape cancels. The page is only read: nothing on it is changed, and the picker never runs in private tabs.").font(.caption).foregroundStyle(.secondary)
+            }
+            #if os(macOS)
+            Section("Window size") {
+                ForEach(ViewportPreset.all) { preset in Button("\(preset.title) · \(preset.summary)") { model.resizeWindow(to: preset) } }
+                Toggle("Show the page size in the corner", isOn: $bench.showSizeHUD)
+            }
+            #endif
             Section("Scratchpad") {
                 TextEditor(text: $code).font(.system(.callout, design: .monospaced)).frame(minHeight: 70)
                 Button("Run on This Page") { Task { await bench.runScratch(code) } }

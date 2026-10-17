@@ -154,3 +154,44 @@ final class SyncModelTests: XCTestCase {
         XCTAssertEqual(receiver.syncLedger.logins.count, 0, "a device with password sync off takes none in")
     }
 }
+
+@MainActor
+final class SessionSyncTests: XCTestCase {
+    private func model() -> BrowserModel { BrowserModel(engine: WebKitEngine(), root: NSTemporaryDirectory() + "bs-ss-\(UUID().uuidString)", profile: "default") }
+
+    func testASessionSavedOnOneDeviceAppearsOnTheOtherAndDeletionTravels() async throws {
+        let a = model(), b = model()
+        await a.start(); await b.start()
+        a.setSavedSessions([SavedSession(name: "Reading", tabs: [SavedSession.Tab(url: "https://a.test/x", title: "A", pinned: false, scroll: 0.4)], workspace: "")])
+        _ = b.receiveWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
+        XCTAssertEqual(b.savedSessions.first?.name, "Reading")
+        XCTAssertEqual(b.savedSessions.first?.tabs.first?.scroll, 0.4, "the place on the page travels with it")
+        let session = try XCTUnwrap(a.savedSessions.first)
+        a.deleteSession(session)
+        _ = b.receiveWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
+        XCTAssertTrue(b.savedSessions.isEmpty)
+    }
+
+    func testASessionWithUnsafeAddressesLosesThemOnTheWayIn() async throws {
+        let a = model(), b = model()
+        await a.start(); await b.start()
+        a.setSavedSessions([SavedSession(name: "Mixed", tabs: [SavedSession.Tab(url: "javascript:alert(1)", title: "x", pinned: false), SavedSession.Tab(url: "https://ok.test/", title: "ok", pinned: false)])])
+        _ = b.receiveWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
+        XCTAssertEqual(b.savedSessions.first?.tabs.map(\.url), ["https://ok.test/"])
+    }
+
+    func testOpeningASessionReturnsEachPageToWhereItWasSaved() async throws {
+        let m = model()
+        await m.start()
+        let session = SavedSession(name: "Place", tabs: [SavedSession.Tab(url: "http://127.0.0.1:18765/", title: "T", pinned: false, scroll: 0.5)])
+        m.openSession(session)
+        let tab = try XCTUnwrap(m.tabs.last)
+        XCTAssertEqual(m.sessionScroll[tab.id], 0.5, "the place is remembered for the page until it has loaded")
+    }
+
+    func testSnapshotsWithoutSessionsStillOpen() throws {
+        let json = #"{"bookmarks":{},"settings":{},"workspaces":{},"logins":{}}"#
+        let state = try JSONDecoder().decode(SyncState.self, from: Data(json.utf8))
+        XCTAssertTrue(state.sessions.isEmpty)
+    }
+}

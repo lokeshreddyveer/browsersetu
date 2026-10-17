@@ -70,6 +70,10 @@ final class BrowserModel: ObservableObject {
     var indexGeneration = 0
     var pageIndexStore: PageIndex?
     @Published var spotlightBookmarks = false { didSet { saveSetting("spotlight_bookmarks", spotlightBookmarks ? "1" : "0"); syncSpotlight() } }
+    /// Pages opened from a saved session, and how far down each one was.
+    var sessionScroll: [UInt64: Double] = [:]
+    /// A passage to find on a page as soon as it has loaded (from "Go to passage").
+    var pendingPassage: [UInt64: String] = [:]
     var researchBacking: ResearchStore?
     var saveLoginsEnabled = true
     var neverSaveOrigins: Set<String> = []
@@ -2099,12 +2103,21 @@ extension BrowserModel {
             .init(id: "capture-full", title: "Save a Picture of the Whole Page", subtitle: "Top to bottom, to Downloads", symbol: "camera", shortcut: "") { [self] in Task { await workbench.capturePage(fullPage: true) } },
             .init(id: "save-archive", title: "Save This Page as a Web Archive", subtitle: "One file with the page and its pictures, to Downloads", symbol: "archivebox", shortcut: "") { [self] in Task { await workbench.exportWebArchive() } },
             .init(id: "fill-login", title: "Fill Saved Sign-in", subtitle: "Asks for Touch ID first", symbol: "key.viewfinder", shortcut: "") { [self] in if let tab = active { offerToFillLogin(in: tab, force: true) } },
+            .init(id: "search-selection-default", title: "Search the Selected Words", subtitle: "With your search engine, in a new tab", symbol: "magnifyingglass", shortcut: "") { [self] in
+                searchSelection(with: SelectionSearch.Engine(name: "default", template: searchTemplate))
+            },
+            .init(id: "pick-element", title: "Pick an Element on This Page", subtitle: "Its selector, size, styles and HTML", symbol: "scope", shortcut: "") { [self] in Task { await workbench.pickElement() } },
+            .init(id: "size-hud", title: workbench.showSizeHUD ? "Hide the Page Size" : "Show the Page Size", subtitle: "Live width and height in the corner", symbol: "ruler", shortcut: "") { [self] in workbench.showSizeHUD.toggle() },
             .init(id: "vim-mode", title: workbench.vimEnabled ? "Turn Off Vim Keys" : "Turn On Vim Keys", subtitle: "j k gg G H L and more, when no text field has the keyboard", symbol: "keyboard", shortcut: "") { [self] in workbench.vimEnabled.toggle() },
             .init(id: "site-privacy", title: "Site Privacy: What This Site Stores, Safety Check, Forget", subtitle: "", symbol: "lock.shield", shortcut: "") { [self] in sheet = .sitePrivacy },
             .init(id: "forget-site", title: "Forget This Site Completely", subtitle: "Data, history, permissions, sign-ins", symbol: "trash.slash", shortcut: "") { [self] in Task { await forgetActiveSiteCompletely() } },
             .init(id: "webrtc", title: blockWebRTC ? "Allow WebRTC" : "Switch WebRTC Off", subtitle: "Pages cannot learn this device's network address", symbol: "network.slash", shortcut: "") { [self] in blockWebRTC.toggle() },
             .init(id: "research", title: "Research Collections", subtitle: "Pages, highlights, notes and citations", symbol: "books.vertical.fill", shortcut: "") { [self] in sheet = .research },
             .init(id: "research-add-page", title: "Add This Page to Research", subtitle: "", symbol: "plus.rectangle.on.folder", shortcut: "") { [self] in Task { await addPageToResearch() } },
+            .init(id: "research-offline", title: "Save an Offline Copy to Research", subtitle: "The page as a PDF that opens without a connection", symbol: "arrow.down.doc", shortcut: "") { [self] in Task { await saveOfflineCopyToResearch() } },
+            .init(id: "research-note", title: "Add a Note on the Selected Words", subtitle: "Saved with the passage; takes you back to it", symbol: "text.bubble", shortcut: "") { [self] in
+                Task { @MainActor in if let text = await Dialogs.promptText(title: "Note on the Selection", message: "Select the words on the page first, then write your note.", placeholder: "") { await addAnchoredNote(text) } }
+            },
             .init(id: "research-add-selection", title: "Add Selection to Research", subtitle: "A highlight with its citation", symbol: "highlighter", shortcut: "") { [self] in Task { await addSelectionToResearch() } },
             .init(id: "copy-citation", title: "Copy Citation for This Page", subtitle: "", symbol: "quote.opening", shortcut: "") { [self] in Task { await copyCitationForActivePage() } },
             .init(id: "restore-layout", title: "Restore Standard Layout", subtitle: "The way back from any layout", symbol: "arrow.counterclockwise", shortcut: "⌥⇧⌘0") { [self] in restoreStandardLayout() },
@@ -2191,6 +2204,14 @@ extension BrowserModel {
         }
         for article in readingList.filter({ $0.title.localizedCaseInsensitiveContains(query) }).prefix(3) {
             all.append(.init(id: "read-\(article.id)", title: article.title, subtitle: "Reading list · " + article.site, symbol: "books.vertical", shortcut: "") { [self] in openReadingItem(article) })
+        }
+        #if os(macOS)
+        for preset in ViewportPreset.all {
+            all.append(.init(id: "window-size-\(preset.id)", title: "Window Size: \(preset.title) (\(preset.summary))", subtitle: "Resize this window to look at the page at that size", symbol: "macwindow", shortcut: "") { [self] in resizeWindow(to: preset) })
+        }
+        #endif
+        for engine in SelectionSearch.engines(custom: customSearchShortcuts) {
+            all.append(.init(id: "search-selection-\(engine.id)", title: "Search Selected Words with \(engine.name)", subtitle: "In a new tab", symbol: "text.magnifyingglass", shortcut: "") { [self] in searchSelection(with: engine) })
         }
         #if os(macOS)
         for panel in SettingsPanel.allCases {
