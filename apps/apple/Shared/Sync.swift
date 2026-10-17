@@ -18,7 +18,7 @@ enum SyncRules {
 
     /// Combines another device's snapshot into this one. Bookmarks are added, never removed (so nothing is lost by syncing); settings follow
     /// the newer snapshot, and only if the person asked for settings to sync. Returns what changed.
-    struct Outcome: Equatable { var bookmarksAdded = 0; var settingsApplied = 0; var tabs = 0 }
+    struct Outcome: Equatable { var bookmarksAdded = 0; var bookmarksRemoved = 0; var bookmarksChanged = 0; var settingsApplied = 0; var workspacesChanged = 0; var loginsChanged = 0; var tabs = 0 }
 
     static func bookmarksToAdd(remote: [BackupPayload.Bookmark], existing: Set<String>) -> [BackupPayload.Bookmark] {
         var seen = existing
@@ -36,16 +36,36 @@ enum SyncRules {
         Array(tabs.filter { ["http", "https"].contains(URL(string: $0.url)?.scheme?.lowercased() ?? "") }.prefix(maxTabs))
     }
 
-    /// Makes a snapshot fit: first the tabs go, then the oldest bookmarks, until the sealed size is under the limit.
+    /// Makes a snapshot fit: first the tabs and the extension list go, then the oldest tombstones (a deletion may then be forgotten and an item could come back),
+    /// then the oldest bookmarks of a snapshot without merge state; nothing else is cut.
     static func sealedFitting(_ snapshot: BackupPayload, passphrase: String, iterations: UInt32 = BackupFile.defaultIterations) throws -> Data {
         var working = snapshot
         var sealed = try BackupFile.seal(working, passphrase: passphrase, iterations: iterations)
-        while sealed.count > maxSealedBytes, !(working.tabs ?? []).isEmpty || working.bookmarks.count > 50 {
+        while sealed.count > maxSealedBytes {
             if let t = working.tabs, !t.isEmpty { working.tabs = Array(t.prefix(t.count / 2)) }
-            else { working.bookmarks = Array(working.bookmarks.prefix(working.bookmarks.count * 3 / 4)) }
+            else if working.extensions != nil { working.extensions = nil }
+            else if var state = working.state, SyncRules.dropOldestTombstones(&state) { working.state = state }
+            else if working.state == nil, working.bookmarks.count > 50 { working.bookmarks = Array(working.bookmarks.prefix(working.bookmarks.count * 3 / 4)) }
+            else { break }
             sealed = try BackupFile.seal(working, passphrase: passphrase, iterations: iterations)
         }
         return sealed
+    }
+
+    /// Drops the older half of the tombstones; false when there are none left to drop.
+    static func dropOldestTombstones(_ state: inout SyncState) -> Bool {
+        var stamps: [Double] = []
+        for c in state.bookmarks.values where c.value == nil { stamps.append(c.stamp.time) }
+        for c in state.settings.values where c.value == nil { stamps.append(c.stamp.time) }
+        for c in state.workspaces.values where c.value == nil { stamps.append(c.stamp.time) }
+        for c in state.logins.values where c.value == nil { stamps.append(c.stamp.time) }
+        guard !stamps.isEmpty else { return false }
+        let cut = stamps.sorted()[stamps.count / 2]
+        state.bookmarks = state.bookmarks.filter { $0.value.value != nil || $0.value.stamp.time > cut }
+        state.settings = state.settings.filter { $0.value.value != nil || $0.value.stamp.time > cut }
+        state.workspaces = state.workspaces.filter { $0.value.value != nil || $0.value.stamp.time > cut }
+        state.logins = state.logins.filter { $0.value.value != nil || $0.value.stamp.time > cut }
+        return true
     }
 }
 
@@ -156,5 +176,7 @@ struct SyncConflict: Equatable, Identifiable {
     var mine: String
     var theirs: String
     var device: String
+    /// Where the other value came from, kept so choosing it makes it win everywhere.
+    var theirsStamp: SyncStamp? = nil
     var id: String { key }
 }

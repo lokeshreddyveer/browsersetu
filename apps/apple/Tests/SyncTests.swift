@@ -95,4 +95,62 @@ final class SyncModelTests: XCTestCase {
         XCTAssertFalse(listed.contains("https://secret.test/"), "private tabs are never shared")
         XCTAssertFalse(b.tabs.contains { $0.url?.host == "reading.test" }, "they are only offered, never opened by themselves")
     }
+
+    // MARK: Deterministic merging between real models
+
+    func testADeletedBookmarkStaysDeletedOnTheOtherDevice() async throws {
+        let a = model(), b = model()
+        await a.start(); await b.start()
+        try a.core.addBookmark(url: "https://shared.test", title: "Shared", folder: "")
+        _ = b.receiveWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
+        XCTAssertTrue(try b.core.isBookmarked(url: "https://shared.test"))
+        try a.core.removeBookmark(url: "https://shared.test")                    // removed on the first device
+        _ = b.receiveWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
+        XCTAssertFalse(try b.core.isBookmarked(url: "https://shared.test"), "the deletion travels instead of the bookmark coming back")
+        _ = a.receiveWiFiSnapshot(try XCTUnwrap(b.wifiSnapshot()))
+        XCTAssertFalse(try a.core.isBookmarked(url: "https://shared.test"), "and it does not return when the other device syncs back")
+    }
+
+    func testAnEditOnOneDeviceReachesTheOtherAndAnOutOfDateCopyIsIgnored() async throws {
+        let a = model(), b = model()
+        await a.start(); await b.start()
+        try a.core.addBookmark(url: "https://page.test", title: "Old", folder: "")
+        let first = try XCTUnwrap(a.wifiSnapshot())
+        _ = b.receiveWiFiSnapshot(first)
+        try a.core.removeBookmark(url: "https://page.test")
+        try a.core.addBookmark(url: "https://page.test", title: "New", folder: "")
+        _ = b.receiveWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
+        XCTAssertEqual(try b.core.listBookmarks(query: "").first { $0.url == "https://page.test" }?.title, "New")
+        _ = b.receiveWiFiSnapshot(first)                                         // the old copy is delivered late
+        XCTAssertEqual(try b.core.listBookmarks(query: "").first { $0.url == "https://page.test" }?.title, "New", "a late, older copy cannot undo the edit")
+    }
+
+    func testWorkspacesSyncByNameButEachDeviceKeepsItsOwnLayout() async throws {
+        let a = model(), b = model()
+        await a.start(); await b.start()
+        a.createWorkspace("Research", icon: "book")
+        _ = b.receiveWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
+        XCTAssertEqual(b.workspaces.first { $0.name == "Research" }?.icon, "book")
+        a.deleteWorkspace("Research")
+        _ = b.receiveWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
+        XCTAssertNil(b.workspaces.first { $0.name == "Research" }, "deleting a workspace travels too")
+    }
+
+    func testSavedPasswordsTravelOnlyWhenTurnedOnAndOnlyInsideTheSnapshot() async throws {
+        let a = model(), b = model()
+        await a.start(); await b.start()
+        guard WebLoginVault.save(WebLogin(origin: "https://bank.test", user: "me", password: "s3cret"), profile: a.profileName) else { return XCTFail("the Keychain is not available to this test run") }
+        defer { WebLoginVault.removeAll(profile: a.profileName) }
+        let snapshotOff = try JSONDecoder().decode(BackupPayload.self, from: try XCTUnwrap(a.wifiSnapshot()))
+        XCTAssertTrue(snapshotOff.state?.logins.isEmpty ?? true, "off means no password is put into a snapshot")
+        a.syncPasswords = true
+        let on = try XCTUnwrap(a.makeSyncSnapshot())
+        XCTAssertEqual(on.state?.logins.count, 1)
+        // The receiving device is another profile, so the Keychain separates them.
+        let receiver = BrowserModel(engine: WebKitEngine(), root: NSTemporaryDirectory() + "bs-sync-\(UUID().uuidString)", profile: "default")
+        await receiver.start()
+        receiver.syncPasswords = false
+        _ = receiver.applySyncSnapshot(on)
+        XCTAssertEqual(receiver.syncLedger.logins.count, 0, "a device with password sync off takes none in")
+    }
 }

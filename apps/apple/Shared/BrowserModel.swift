@@ -516,6 +516,14 @@ final class BrowserModel: ObservableObject {
     /// When a setting differs between devices: take the newer one (off), or ask which to keep (on).
     @Published var syncAskOnConflict = false { didSet { saveSetting("sync_ask", syncAskOnConflict ? "1" : "0") } }
     @Published var syncConflicts: [SyncConflict] = []
+    /// Saved passwords go with sync only when this is on; they travel inside the passphrase-sealed snapshot, never as plain data.
+    @Published var syncPasswords = false { didSet { saveSetting("sync_passwords", syncPasswords ? "1" : "0") } }
+    /// What every synced item looked like, with its stamp, the last time this device synced; and the clock that stamps this device's changes.
+    var syncLedger = SyncState()
+    var syncClock = SyncClock()
+    var syncSeq = 0
+    var syncSeen: [String: Int] = [:]
+    @Published var remoteExtensions: [String: [SyncExtension]] = [:]
     @Published var syncSettingsToo = false { didSet { saveSetting("sync_settings", syncSettingsToo ? "1" : "0") } }
     @Published var remoteTabs: [RemoteTabs] = []
     @Published var lastSync: Date?
@@ -1003,6 +1011,12 @@ final class BrowserModel: ObservableObject {
         saveWorkspaces()
     }
 
+    /// A workspace changed on another device: its name, icon, colour and preset are taken, and this device's own layout for it is kept.
+    func upsertWorkspaceFromSync(_ name: String, _ value: SyncWorkspace) {
+        if let i = workspaces.firstIndex(where: { $0.name == name }) { workspaces[i].icon = value.icon; workspaces[i].preset = value.preset; workspaces[i].accent = value.accent }
+        else if workspaces.count < 30, !name.isEmpty, name.count <= 30 { workspaces.append(Workspace(name: name, icon: value.icon, preset: value.preset, accent: value.accent)) }
+    }
+
     func renameWorkspace(_ old: String, to new: String) {
         let clean = new.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty, clean.count <= 30, !workspaces.contains(where: { $0.name == clean }),
@@ -1154,7 +1168,7 @@ final class BrowserModel: ObservableObject {
         saveWorkspaces()
     }
 
-    private func saveWorkspaces() {
+    func saveWorkspaces() {
         if let data = try? JSONEncoder().encode(workspaces), let json = String(data: data, encoding: .utf8) {
             saveSetting("workspaces", json)
         }
@@ -1647,6 +1661,11 @@ final class BrowserModel: ObservableObject {
         tabTree = get("tab_tree") == "1"
         loadLoginSettings(get)
         spotlightBookmarks = get("spotlight_bookmarks") == "1"
+        syncPasswords = get("sync_passwords") == "1"
+        syncLedger = Self.decodeMap(get("sync_ledger"), as: SyncState.self)["state"] ?? SyncState()
+        syncClock = Self.decodeMap(get("sync_clock"), as: SyncClock.self)["clock"] ?? SyncClock()
+        syncSeq = Int(get("sync_seq") ?? "") ?? 0
+        syncSeen = Self.decodeMap(get("sync_seen"), as: Int.self)
         siteUserAgents = Self.decodeMap(get("site_user_agents"), as: String.self)
         siteDeleteRules = Self.decodeMap(get("site_delete_rules"), as: [SiteDeleteRule].self)["list"] ?? []
         tempPermissions = Self.decodeMap(get("temp_permissions"), as: Double.self)
