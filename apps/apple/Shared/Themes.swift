@@ -123,7 +123,12 @@ struct ThemeBackdrop: View {
                 case .fog:
                     for i in 0..<6 {
                         let t = Double(i)
-                        let rect = CGRect(x: size.width * (0.05 + 0.18 * t) - 140, y: size.height * (0.55 + 0.07 * sin(t * 1.7)) - 90, width: 360, height: 180)
+                        // Written in small steps: the compiler on older Xcode versions gives up on this as one expression.
+                        let across: Double = 0.05 + 0.18 * t
+                        let wave: Double = 0.55 + 0.07 * sin(t * 1.7)
+                        let x: Double = size.width * across - 140
+                        let y: Double = size.height * wave - 90
+                        let rect = CGRect(x: x, y: y, width: 360, height: 180)
                         context.fill(Path(ellipseIn: rect), with: .color(tint.opacity(0.07)))
                     }
                 case .stars:
