@@ -48,15 +48,27 @@ extension View {
     func glassCapsule() -> some View { modifier(GlassCapsule()) }
 }
 
-/// A soft wash of the page's own colour behind the toolbar and tab row.
+/// The page's own colour behind the toolbar and tab row, as Safari does it. How much of it shows depends on what is already there: a chosen theme keeps most of its own
+/// colour (so the theme is still the theme), and a colour that would fight the window's light or dark look (a white page in a dark window) is only a faint wash, so the
+/// buttons and text on the bar stay easy to read.
+enum ToolbarTint {
+    static func strength(for tint: PageTint, dark: Bool, themed: Bool) -> Double {
+        let luminance = 0.2126 * tint.red + 0.7152 * tint.green + 0.0722 * tint.blue
+        let base = themed ? 0.30 : 0.50
+        let clashes = dark ? luminance > 0.62 : luminance < 0.38
+        return clashes ? min(base, 0.14) : base
+    }
+}
+
 struct ToolbarTintLayer: View {
     @EnvironmentObject var model: BrowserModel
     @ObservedObject var tab: TabController
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         Group {
             if model.tintToolbar, !tab.isBlank, let tint = tab.tint {
-                Color(tint: tint).opacity(0.22)
+                Color(tint: tint).opacity(ToolbarTint.strength(for: tint, dark: scheme == .dark, themed: model.themeIsActive))
             } else {
                 Color.clear
             }
@@ -437,7 +449,7 @@ struct TopBar: View {
 
     private var standard: some View {
         GeometryReader { geo in
-            let priority = ToolbarPriority(fitting: geo.size.width, leadingInset: leadingInset)
+            let priority = ToolbarPriority(fitting: geo.size.width, leadingInset: leadingInset, extras: model.toolbarExtrasCount)
             // Controls hug both edges and the address field sits in the middle of the window, not between the
             // two clusters, so it stays put as buttons come and go.
             ZStack {
@@ -470,6 +482,7 @@ struct TopBar: View {
     @ViewBuilder private func trailing(_ priority: ToolbarPriority) -> some View {
         ExtensionActionButtons(center: model.extensionCenter)
         if priority.showOptional {
+            ToolbarExtras()
             if model.shows(.share), let url = model.active?.url, model.active?.isBlank == false {
                 ShareLink(item: url) { Image(systemName: "square.and.arrow.up") }
                     .buttonStyle(ChromeButtonStyle()).help("Share").accessibilityLabel("Share")
@@ -648,6 +661,12 @@ struct MoreMenu: View {
                 if let url = model.active?.url, model.active?.isBlank == false {
                     ShareLink(item: url) { Label("Share…", systemImage: "square.and.arrow.up") }
                 }
+            }
+            Section("Workspace and Split View") {
+                Menu { Button("Personal") { model.switchWorkspace("") }; ForEach(model.workspaces) { w in Button(w.name) { model.switchWorkspace(w.name) } }; Divider(); Button("New Workspace…") { promptNewWorkspace(model: model) } } label: {
+                    Label("Workspace: " + (model.activeWorkspace.isEmpty ? "Personal" : model.activeWorkspace), systemImage: "square.grid.2x2")
+                }
+                Menu { SplitViewMenuItems() } label: { Label("Split View", systemImage: "rectangle.split.2x1") }
             }
             Section("Browser") {
                 Button { model.sheet = .bookmarks } label: { Label("Bookmarks", systemImage: "book") }

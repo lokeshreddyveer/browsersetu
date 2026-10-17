@@ -115,6 +115,8 @@ struct SidebarLayoutPanel: View {
                 ForEach(open) { SidebarTabRow(tab: $0, selected: $0.id == model.activeID) }
             }
         }
+        // A tab dragged here from another window comes into this one.
+        .acceptsDroppedTabs(model)
     }
 
     // Groups

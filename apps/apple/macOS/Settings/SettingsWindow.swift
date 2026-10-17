@@ -47,7 +47,7 @@ enum SettingsPanel: String, CaseIterable, Identifiable {
         switch self {
         case .general: 590
         case .appearance: 620
-        case .tabs: 610
+        case .tabs: 720
         case .search: 260
         case .privacy: 640
         case .websites: 360
@@ -166,6 +166,7 @@ struct SettingsPanelView: View {
         case .tabs:
             TabPositionSection()
             TabsSettingsSection()
+            SplitAndWindowSettingsSection()
             WorkspacesSettingsSection()
         case .search:
             SearchSettingsSection()

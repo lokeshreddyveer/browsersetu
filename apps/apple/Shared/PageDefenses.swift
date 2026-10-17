@@ -279,7 +279,7 @@ struct NeverSleepSection: View {
     var body: some View {
         Section {
             if model.neverSleepSites.isEmpty {
-                Text("No site is kept awake. Turn it on for a site in Site Privacy, or with “Never Put This Site to Sleep” in the command palette.").font(.caption).foregroundStyle(.secondary)
+                Label("No site is kept awake", systemImage: "moon.zzz").foregroundStyle(.secondary)
             }
             ForEach(model.neverSleepSites.sorted(), id: \.self) { site in
                 HStack {
@@ -291,7 +291,7 @@ struct NeverSleepSection: View {
         } header: {
             Text("Never Put to Sleep")
         } footer: {
-            Text("Tabs on these sites stay loaded when memory is short, and when you put all other tabs to sleep.")
+            Text("Tabs on these sites stay loaded when memory is short, and when you put all other tabs to sleep. Add a site from Site Privacy, or with “Never Put This Site to Sleep” in the command palette.")
         }
     }
 }

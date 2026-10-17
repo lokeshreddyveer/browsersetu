@@ -26,14 +26,23 @@ struct InlineBar: View {
             InlineTabs(address: model.addressBar)
             HStack(spacing: 0) {
                 ExtensionActionButtons(center: model.extensionCenter)
+                ToolbarExtras()
                 if let url = model.active?.url, model.active?.isBlank == false {
                     ShareLink(item: url) { Image(systemName: "square.and.arrow.up") }
                         .buttonStyle(ChromeButtonStyle()).help("Share").accessibilityLabel("Share")
                 }
+                if model.shows(.bookmark) {
+                    ChromeButton(symbol: model.activeBookmarked ? "star.fill" : "star", help: "Bookmark This Page", identifier: "bookmark-button",
+                                 tint: model.activeBookmarked ? .yellow : nil) { model.toggleBookmark() }
+                        .disabled(model.active?.isBlank ?? true)
+                }
+                if model.shows(.downloads) { ChromeButton(symbol: "arrow.down.circle", help: "Downloads", identifier: "downloads-button") { model.sheet = .downloads } }
+                // One Row always keeps these three, as it always has.
                 ChromeButton(symbol: "plus", help: "New Tab", identifier: "new-tab-button") { model.newTab() }
                 ChromeButton(symbol: "square.on.square", help: "Show Tab Overview", identifier: "overview-button") {
                     model.overviewVisible ? model.hideOverview() : model.showOverview()
                 }
+                MoreMenu(priority: ToolbarPriority(width: 1000))
             }
         }
         .padding(.trailing, 8)
@@ -113,6 +122,7 @@ struct InlineTabs: View {
             .onAppear { publish(span) }
             .onChange(of: span) { _, new in publish(new) }
         }
+        .acceptsDroppedTabs(model)
         .accessibilityIdentifier("tab-bar")
     }
 

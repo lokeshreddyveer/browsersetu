@@ -1039,7 +1039,43 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
             if let webView { self?.probeFixedBars(webView) }
         }
         #endif
+        #if os(macOS)
+        sampleTint(webView)
+        Task { @MainActor [weak self, weak webView] in
+            try? await Task.sleep(for: .milliseconds(800))      // a page that sets its colour late is read again
+            if let webView { self?.sampleTint(webView) }
+        }
+        #endif
     }
+
+    #if os(macOS)
+    /// A page that names no theme colour still has a background, and that is what the toolbar can take on. Read once the page has loaded, from the page and read-only.
+    private func sampleTint(_ webView: WKWebView) {
+        guard webView.themeColor == nil else { return }
+        Task { @MainActor [weak self, weak webView] in
+            guard let webView else { return }
+            let rgb = (try? await webView.callAsyncJavaScript(Self.backgroundProbe, contentWorld: .defaultClient)) as? [Int]
+            if let rgb, rgb.count == 3, webView.themeColor == nil {
+                self?.events?.engineThemeColorChanged(PageTint(red: Double(rgb[0]) / 255, green: Double(rgb[1]) / 255, blue: Double(rgb[2]) / 255))
+            }
+        }
+    }
+    #endif
+
+    /// The solid colour at the top of the page, found the way the eye would: the element at the top edge and the ones around it, outward, then the middle of the page.
+    static let backgroundProbe = """
+    const solid = (e) => {
+      const m = getComputedStyle(e).backgroundColor.match(/[\\d.]+/g) || [];
+      const a = m.length >= 4 ? parseFloat(m[3]) : (m.length >= 3 ? 1 : 0);
+      return a > 0.5 ? [+m[0], +m[1], +m[2]] : null;
+    };
+    for (const [x, y] of [[innerWidth / 2, 2], [4, 2], [innerWidth / 2, innerHeight / 2]]) {
+      let el = document.elementFromPoint(x, y), color = null;
+      while (el && !color) { color = solid(el); el = el.parentElement; }
+      if (color) return color;
+    }
+    return solid(document.documentElement) || [255, 255, 255];
+    """
 
     #if os(iOS)
     /// The strip under the status bar (and above the page on a phone) is not part of the page, so it showed white on a dark page and the clock

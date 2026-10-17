@@ -39,6 +39,8 @@ enum AddressBarPosition: String, CaseIterable, Identifiable {
 /// Buttons the user can show or hide in the toolbar.
 enum ToolbarItemID: String, CaseIterable, Identifiable {
     case sidebar, backForward, reload, share, bookmark, newTab, tabOverview, downloads
+    /// Added later, for the Mac's top bar and One Row layouts (the iPhone has its own dock).
+    case workspaces, profile, splitView, history, library, find, palette
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -50,6 +52,13 @@ enum ToolbarItemID: String, CaseIterable, Identifiable {
         case .newTab: "New tab"
         case .tabOverview: "Tab overview"
         case .downloads: "Downloads"
+        case .workspaces: "Workspaces"
+        case .profile: "Profile"
+        case .splitView: "Split view"
+        case .history: "History"
+        case .library: "Bookmarks"
+        case .find: "Find in page"
+        case .palette: "Command palette"
         }
     }
     var symbol: String {
@@ -62,7 +71,22 @@ enum ToolbarItemID: String, CaseIterable, Identifiable {
         case .newTab: "plus"
         case .tabOverview: "square.on.square"
         case .downloads: "arrow.down.circle"
+        case .workspaces: "square.grid.2x2"
+        case .profile: "person.crop.circle"
+        case .splitView: "rectangle.split.2x1"
+        case .history: "clock"
+        case .library: "book"
+        case .find: "magnifyingglass"
+        case .palette: "command"
         }
+    }
+    /// What can be switched on here. The new items belong to the Mac.
+    static var available: [ToolbarItemID] {
+        #if os(macOS)
+        allCases
+        #else
+        allCases.filter { ![.workspaces, .profile, .splitView, .history, .library, .find, .palette].contains($0) }
+        #endif
     }
     /// Back/forward/reload, bookmark and downloads sit in the bar; everything else is in the More menu and the keyboard.
     static let defaults: [ToolbarItemID] = {
@@ -70,7 +94,7 @@ enum ToolbarItemID: String, CaseIterable, Identifiable {
         // A phone has no menu bar or keyboard to fall back on, so the tab overview and new tab stay on the toolbar.
         [.sidebar, .backForward, .reload, .share, .bookmark, .newTab, .tabOverview]
         #else
-        [.sidebar, .backForward, .reload, .bookmark, .downloads]
+        [.sidebar, .backForward, .reload, .bookmark, .downloads, .workspaces, .splitView]
         #endif
     }()
 }

@@ -56,6 +56,10 @@ class H(http.server.BaseHTTPRequestHandler):
             return self.send(200, f"<title>Tall</title><body style='margin:0'>{rows}</body>")
         if path == "/amp-page":
             return self.send(200, f'<html amp><head><title>AMP copy</title><link rel="canonical" href="http://127.0.0.1:{PORT}/full-page"></head><body>amp</body></html>')
+        if path == "/tinted":
+            return self.send(200, "<title>Tinted</title><body style=\"margin:0;background:#1d4ed8;color:white;font:20px sans-serif\">a page with a blue background and no theme colour</body>")
+        if path == "/tinted-light":
+            return self.send(200, "<title>Light</title><body style=\"margin:0;background:#fde68a;color:#222;font:20px sans-serif\">a warm light page</body>")
         if path == "/full-page":
             return self.send(200, "<title>Full page</title>the real one")
         if path == "/script-page":

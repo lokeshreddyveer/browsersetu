@@ -188,7 +188,9 @@ struct WindowBackdrop: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
-        if reduceTransparency {
+        if reduceTransparency || model.themeIsActive {
+            // A chosen theme paints the whole window in its own colour. The system's blur lets the desktop show through and washes the colour out, most of all above
+            // the page, so a theme is drawn solid everywhere.
             Color.chrome
         } else if model.singleToolbar || model.topBarHidden {
             ZStack {
@@ -508,6 +510,7 @@ struct VerticalTabsList: View {
             .animation(.easeOut(duration: 0.12), value: model.visibleTabs.map(\.id))
             .animation(.easeOut(duration: 0.18), value: model.density)
         }
+        .acceptsDroppedTabs(model)
     }
 
     private var groups: some View {

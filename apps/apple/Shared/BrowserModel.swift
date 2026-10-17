@@ -797,6 +797,9 @@ final class BrowserModel: ObservableObject {
             active?.load(URL(string: base + "/p/Documentation")!)
             for name in ["Inbox", "Calendar", "News", "Maps"] { openTab(url: URL(string: base + "/p/" + name), isPrivate: false, select: false) }
         case "sidebar": layoutPreset = .sidebar
+        case "workspaces":
+            createWorkspace("Dev", icon: "hammer"); createWorkspace("Research", icon: "book"); setWorkspaceAccent("Research", accent: .purple)
+            layoutPreset = .sidebar
         case "sidebar-right-rail": layoutPreset = .sidebar; sidebarPosition = .right; sidebarRail = true
         case "classic-page":
             active?.load(URL(string: base + "/page")!)
@@ -1864,7 +1867,15 @@ final class BrowserModel: ObservableObject {
         showContinue = get("show_continue") != "0"
         showFrequent = get("show_frequent") != "0"
         if let raw = get("toolbar_items") {
-            toolbarItems = raw.split(separator: ",").compactMap { ToolbarItemID(rawValue: String($0)) }
+            var chosen = raw.split(separator: ",").compactMap { ToolbarItemID(rawValue: String($0)) }
+            // The workspace and split-view buttons came later; a toolbar chosen before them gets them once, and can switch them off.
+            #if os(macOS)
+            if get("toolbar_items_version") == nil {
+                for item in [ToolbarItemID.workspaces, .splitView] where !chosen.contains(item) { chosen.append(item) }
+                try? core.setSetting(key: "toolbar_items_version", value: "2")
+            }
+            #endif
+            toolbarItems = ToolbarItemID.allCases.filter { chosen.contains($0) }
         } else {
             toolbarItems = ToolbarItemID.defaults
         }
@@ -1920,6 +1931,8 @@ final class BrowserModel: ObservableObject {
     var sidebarIsPinned: Bool { sidebarVisible && !sidebarRail }
 
     func shows(_ item: ToolbarItemID) -> Bool { toolbarItems.contains(item) }
+    /// How many of the added toolbar buttons are switched on, so the bar can leave room for them.
+    var toolbarExtrasCount: Int { [ToolbarItemID.workspaces, .profile, .splitView, .history, .library, .find, .palette].filter(shows).count }
 
     /// Saves a search address if it is valid (https, with `{}` exactly once). Returns whether it was saved.
     @discardableResult

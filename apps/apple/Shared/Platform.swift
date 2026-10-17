@@ -18,7 +18,9 @@ extension EngineViewHost: NSViewRepresentable {
         return container
     }
     func updateNSView(_ container: NSView, context: Context) {
-        if view.superview !== container { attach(view, to: container) }
+        // Only a page with no home is taken in here. A page that has been given to another window (a tab moved or dropped there) must be left alone: the window it
+        // left is still updating for a moment, and taking the page back made it vanish from the window it was moved to.
+        if view.superview == nil { attach(view, to: container) }
     }
     private func attach(_ child: NSView, to container: NSView) {
         child.removeFromSuperview()

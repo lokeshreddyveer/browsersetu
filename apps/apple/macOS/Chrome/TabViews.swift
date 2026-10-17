@@ -91,8 +91,7 @@ private struct TabInteractions: ViewModifier {
             .draggable(String(tab.id))
             .dropDestination(for: String.self) { items, _ in
                 guard let raw = items.first, let dragged = UInt64(raw), dragged != tab.id else { return false }
-                model.reorder(dragged, before: tab.id)
-                return true
+                return model.acceptDroppedTab(dragged, before: tab.id)
             }
             .accessibilityElement(children: .combine)
             .accessibilityLabel(tab.displayTitle)
@@ -218,6 +217,7 @@ struct HorizontalTabStrip: View {
         }
         .frame(height: model.density.stripHeight)
         .background(WindowDragRegion())
+        .acceptsDroppedTabs(model)
         .accessibilityIdentifier("tab-bar")
     }
 
@@ -257,6 +257,7 @@ struct CompactTabStrip: View {
         }
         .frame(height: model.density.stripHeight)
         .background(WindowDragRegion())
+        .acceptsDroppedTabs(model)
         .accessibilityIdentifier("tab-bar")
     }
 }
