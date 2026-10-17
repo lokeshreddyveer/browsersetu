@@ -91,5 +91,6 @@ xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
 xcrun stapler staple "$DMG"
 xcrun stapler validate "$DMG"
 spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG" 2>&1 | tail -2
+python3 scripts/generate-sbom.py "$DIST" >/dev/null && echo "▸ SBOM and build metadata written to $DIST"
 echo "✔ $DMG is signed, notarized and stapled"
 shasum -a 256 "$DMG"
