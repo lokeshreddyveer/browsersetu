@@ -77,3 +77,21 @@ extension BrowserModel {
         return ok
     }
 }
+
+extension BrowserModel {
+    /// Adds the passwords from another browser's file. Nothing is overwritten: a name already saved for a site keeps its password.
+    func importPasswords(csv: String) -> (added: Int, skippedInsecure: Int, skippedDuplicate: Int) {
+        let kept = WebLoginVault.list(profile: profileName)
+        let result = PasswordImport.parse(csv: csv, existing: kept)
+        var added = 0
+        for login in result.logins.prefix(5_000) where WebLoginVault.save(login, profile: profileName) { added += 1 }
+        return (added, result.skippedInsecure, result.skippedDuplicate)
+    }
+
+    /// History from another browser, written by the core in one transaction away from the main thread.
+    func importHistory(_ visits: [HistoryImport.Visit]) async -> Int {
+        let core = self.core
+        let batch = visits.map { ImportedVisit(url: $0.url, title: $0.title, lastVisit: $0.seconds, visitCount: $0.count) }
+        return await Task.detached(priority: .userInitiated) { Int((try? core.importHistory(visits: batch)) ?? 0) }.value
+    }
+}

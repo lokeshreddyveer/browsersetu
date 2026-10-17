@@ -58,6 +58,15 @@ pub struct HistoryItem {
     pub visit_count: i64,
 }
 
+/// One page from another browser's history.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct ImportedVisit {
+    pub url: String,
+    pub title: String,
+    pub last_visit: i64,
+    pub visit_count: i64,
+}
+
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct BookmarkItem {
     pub url: String,
@@ -346,6 +355,32 @@ impl BrowserCore {
     }
 
     // --- history ---
+
+    /// Imports history from another browser. Only web pages are kept, titles and addresses are cut to a sane length, dates in the future or before 1990 are
+    /// replaced, and no more than 200,000 pages are taken at once. Returns how many were written.
+    pub fn import_history(&self, visits: Vec<ImportedVisit>) -> Result<u32, CoreError> {
+        let latest = now();
+        let clean: Vec<(String, String, i64, i64)> = visits
+            .into_iter()
+            .take(200_000)
+            .filter(|v| {
+                v.url.len() <= 2048
+                    && v.url != "about:blank"
+                    && policy::evaluate_navigation(&v.url, true) == NavigationDecision::Allow
+                    && (v.url.starts_with("http://") || v.url.starts_with("https://"))
+            })
+            .map(|v| {
+                let when = if v.last_visit < 631_152_000 || v.last_visit > latest {
+                    latest
+                } else {
+                    v.last_visit
+                };
+                let title: String = v.title.chars().take(300).collect();
+                (v.url, title, when, v.visit_count.clamp(1, 10_000))
+            })
+            .collect();
+        Ok(self.store.lock().unwrap().import_visits(&clean)?)
+    }
 
     pub fn search_history(&self, query: String, limit: u32) -> Result<Vec<HistoryItem>, CoreError> {
         let rows = self.store.lock().unwrap().search_history(&query, limit)?;

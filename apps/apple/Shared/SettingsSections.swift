@@ -322,6 +322,8 @@ struct SavedSignInsSection: View {
     @State private var entries: [SignInVault.Entry] = []
     @State private var logins: [WebLogin] = []
     @State private var saving = true
+    @State private var editing: WebLogin?
+    @State private var adding = false
 
     var body: some View {
         Section {
@@ -333,11 +335,14 @@ struct SavedSignInsSection: View {
                         Text(login.user).font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
+                    Button("Copy") { Task { if await model.requireAuthentication("Copy a saved password") { copyToPasteboard(login.password); model.notice = "Password copied." } } }.buttonStyle(.borderless)
+                    Button("Edit") { editing = login }.buttonStyle(.borderless)
                     Button(role: .destructive) {
                         Task { if await model.requireAuthentication("Remove a saved password") { WebLoginVault.forget(login, profile: model.profileName); load() } }
                     } label: { Image(systemName: "trash") }.buttonStyle(.borderless)
                 }
             }
+            Button("Add a Password…") { adding = true }
             if !model.neverSaveOrigins.isEmpty {
                 ForEach(model.neverSaveOrigins.sorted(), id: \.self) { origin in
                     HStack { Text("Never offered for \(URL(string: origin)?.host ?? origin)").font(.caption); Spacer(); Button("Allow Again") { model.allowSavingLogins(for: origin); load() } }
@@ -362,6 +367,8 @@ struct SavedSignInsSection: View {
             Text("For the plain name-and-password boxes some websites show. Kept in your Keychain, on this device, for this profile only, and never in private tabs. Passwords for web pages are offered for saving after you sign in, kept in the same Keychain, and filled only after Touch ID or your password. Nothing is saved in private tabs, and nothing is sent to any server.")
         }
         .onAppear(perform: load)
+        .sheet(item: $editing, onDismiss: load) { LoginEditor(original: $0) }
+        .sheet(isPresented: $adding, onDismiss: load) { LoginEditor(original: nil) }
     }
 
     private func load() { entries = SignInVault.list(profile: model.profileName); logins = WebLoginVault.list(profile: model.profileName); saving = model.saveLoginsEnabled }
@@ -673,6 +680,84 @@ struct BookmarkTransferSection: View {
     }
 }
 
+/// Moving passwords and history to and from other browsers. Both files are plain text, so each step says so and asks first.
+struct ImportExportSection: View {
+    @EnvironmentObject var model: BrowserModel
+    @State private var importingPasswords = false
+    @State private var exportingPasswords = false
+    @State private var importingHistory = false
+    @State private var csvDocument = PasswordCSVDocument(text: "")
+    @State private var confirmExport = false
+    @State private var lastImportedFile: URL?
+    @State private var askToDelete = false
+
+    var body: some View {
+        Section {
+            Button("Import Passwords…") { importingPasswords = true }
+            Button("Export Passwords…") { confirmExport = true }
+            Button("Import History…") { importingHistory = true }
+            Button("Copy a New Strong Password") { copyToPasteboard(PasswordGenerator.make()); model.notice = "A new password was copied. It stays on the clipboard until something else replaces it." }
+        } header: { Text("Import and Export") } footer: {
+            Text("Passwords: the CSV file from Chrome, Edge, Brave, Firefox or Apple's Passwords app. Sites that start with http (not https) are never imported. History: the JSON file from a Google Takeout \"Browser History\" export or Safari's Export Browsing History. A password file holds every password as plain text: delete it as soon as you have used it.")
+        }
+        .fileImporter(isPresented: $importingPasswords, allowedContentTypes: [.commaSeparatedText, .plainText]) { result in
+            guard case .success(let url) = result else { return }
+            lastImportedFile = url
+            Task {
+                let text: String? = await Task.detached(priority: .userInitiated) {
+                    let scoped = url.startAccessingSecurityScopedResource()
+                    defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                    guard let data = try? Data(contentsOf: url), data.count < 20_000_000 else { return nil }
+                    return String(decoding: data, as: UTF8.self)
+                }.value
+                guard let text else { model.notice = "That file could not be read."; return }
+                let r = model.importPasswords(csv: text)
+                model.notice = "Imported \(r.added) password\(r.added == 1 ? "" : "s")." + (r.skippedInsecure > 0 ? " \(r.skippedInsecure) for http sites were left out." : "") + (r.skippedDuplicate > 0 ? " \(r.skippedDuplicate) were already saved." : "")
+                if r.added > 0 { askToDelete = true }
+            }
+        }
+        .fileImporter(isPresented: $importingHistory, allowedContentTypes: [.json]) { result in
+            guard case .success(let url) = result else { return }
+            Task {
+                let visits: [HistoryImport.Visit]? = await Task.detached(priority: .userInitiated) {
+                    let scoped = url.startAccessingSecurityScopedResource()
+                    defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                    guard let data = try? Data(contentsOf: url), data.count < 400_000_000 else { return nil }
+                    return HistoryImport.parse(json: data)
+                }.value
+                guard let visits else { model.notice = "That file could not be read."; return }
+                let count = await model.importHistory(visits)
+                model.notice = count == 0 ? "No web pages were found in that file." : "Imported \(count) page\(count == 1 ? "" : "s") of history."
+            }
+        }
+        .fileExporter(isPresented: $exportingPasswords, document: csvDocument, contentType: .commaSeparatedText, defaultFilename: "Browser Setu Passwords") { result in
+            csvDocument = PasswordCSVDocument(text: "")
+            if case .success = result { model.notice = "Passwords exported. The file is plain text: delete it when you are done." }
+        }
+        .confirmationDialog("Export every saved password?", isPresented: $confirmExport, titleVisibility: .visible) {
+            Button("Export as Plain Text", role: .destructive) {
+                Task {
+                    guard await model.requireAuthentication("Export your saved passwords") else { return }
+                    csvDocument = PasswordCSVDocument(text: PasswordImport.csv(for: WebLoginVault.list(profile: model.profileName)))
+                    exportingPasswords = true
+                }
+            }
+        } message: { Text("The file will hold every password as readable text. Anyone who can open the file can read them. Keep it somewhere private and delete it when you are done.") }
+        .confirmationDialog("Delete the file you imported from?", isPresented: $askToDelete, titleVisibility: .visible) {
+            Button("Delete the File", role: .destructive) { if let url = lastImportedFile { _ = url.startAccessingSecurityScopedResource(); try? FileManager.default.removeItem(at: url); url.stopAccessingSecurityScopedResource() } }
+            Button("Keep It", role: .cancel) {}
+        } message: { Text("It holds your old passwords as readable text. If Browser Setu cannot delete it, move it to the Trash yourself.") }
+    }
+}
+
+struct PasswordCSVDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.commaSeparatedText] }
+    var text: String
+    init(text: String) { self.text = text }
+    init(configuration: ReadConfiguration) throws { text = String(decoding: configuration.file.regularFileContents ?? Data(), as: UTF8.self) }
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper { FileWrapper(regularFileWithContents: Data(text.utf8)) }
+}
+
 struct BackupSection: View {
     @EnvironmentObject var model: BrowserModel
     @State private var exportSheet = false
@@ -839,5 +924,49 @@ struct AcknowledgementsSheet: View {
             }
         }
         .frame(minWidth: 520, minHeight: 420)
+    }
+}
+
+
+/// Add or change one saved password. Showing it needs Touch ID, like copying it.
+struct LoginEditor: View {
+    let original: WebLogin?
+    @EnvironmentObject var model: BrowserModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var site = ""
+    @State private var user = ""
+    @State private var password = ""
+    @State private var revealed = false
+    @State private var problem: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(original == nil ? "Add a Password" : "Edit Password").font(.title3.bold())
+            TextField("Website, such as https://example.com", text: $site).textFieldStyle(.roundedBorder).disabled(original != nil)
+            TextField("Username or email", text: $user).textFieldStyle(.roundedBorder)
+            HStack {
+                Group { if revealed { TextField("Password", text: $password) } else { SecureField("Password", text: $password) } }.textFieldStyle(.roundedBorder)
+                Button(revealed ? "Hide" : "Show") {
+                    Task {
+                        if revealed || original == nil { revealed.toggle(); return }
+                        if await model.requireAuthentication("Show a saved password") { revealed = true }
+                    }
+                }
+                Button("Generate") { password = PasswordGenerator.make(); revealed = true }
+            }
+            if let problem { Text(problem).font(.caption).foregroundStyle(.red) }
+            HStack { Spacer(); Button("Cancel") { dismiss() }; Button("Save") { save() }.keyboardShortcut(.defaultAction).disabled(site.isEmpty || user.isEmpty || password.isEmpty) }
+        }
+        .padding(20).frame(minWidth: 420)
+        .onAppear { if let original { site = original.origin; user = original.user; password = original.password } }
+    }
+
+    private func save() {
+        let address = site.contains("://") ? site : "https://" + site
+        guard let origin = WebLoginOrigin.normalized(address) else { problem = "Use a website that starts with https."; return }
+        guard LoginRules.capture(["origin": origin, "user": user, "password": password]) != nil else { problem = "The name or password is too long."; return }
+        if let original, original.user != user.trimmingCharacters(in: .whitespaces) { WebLoginVault.forget(original, profile: model.profileName) }
+        guard WebLoginVault.save(WebLogin(origin: origin, user: user.trimmingCharacters(in: .whitespaces), password: password), profile: model.profileName) else { problem = "It could not be saved to the Keychain."; return }
+        dismiss()
     }
 }

@@ -208,6 +208,7 @@ struct SettingsPanelView: View {
             LinkCleaningSection()
             SiteIconsSection()
             BookmarkTransferSection()
+            ImportExportSection()
             BackupSection()
             RecoverySection()
             AboutSection()

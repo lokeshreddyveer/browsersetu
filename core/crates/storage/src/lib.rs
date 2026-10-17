@@ -150,6 +150,28 @@ impl Store {
         Ok(())
     }
 
+    /// Adds pages from another browser's history in one transaction. A page already here keeps the later of the two dates, gains the imported visits, and keeps its
+    /// own title when the imported one is empty. Returns how many rows were written.
+    pub fn import_visits(&mut self, visits: &[(String, String, i64, i64)]) -> Result<u32> {
+        let tx = self.conn.transaction()?;
+        let mut written = 0;
+        {
+            let mut stmt = tx.prepare(
+                "INSERT INTO history (url, title, last_visit, visit_count) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(url) DO UPDATE SET
+                   title = CASE WHEN excluded.title <> '' AND title = '' THEN excluded.title ELSE title END,
+                   last_visit = MAX(last_visit, excluded.last_visit),
+                   visit_count = visit_count + excluded.visit_count",
+            )?;
+            for (url, title, when, count) in visits {
+                stmt.execute(params![url, title, when, count])?;
+                written += 1;
+            }
+        }
+        tx.commit()?;
+        Ok(written)
+    }
+
     pub fn search_history(&self, query: &str, limit: u32) -> Result<Vec<HistoryEntry>> {
         let pattern = like_pattern(query);
         let mut stmt = self.conn.prepare(
@@ -382,6 +404,28 @@ fn like_pattern(q: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn imported_history_merges_without_losing_what_is_here() {
+        let mut s = Store::open_in_memory().unwrap();
+        s.record_visit("https://a.com", "Alpha", 100).unwrap();
+        let n = s
+            .import_visits(&[
+                ("https://a.com".into(), "Other title".into(), 50, 3),
+                ("https://b.com".into(), "Beta".into(), 70, 2),
+                ("https://c.com".into(), "".into(), 10, 1),
+            ])
+            .unwrap();
+        assert_eq!(n, 3);
+        let a = s.search_history("alpha", 10).unwrap();
+        assert_eq!(
+            (a[0].last_visit, a[0].visit_count, a[0].title.as_str()),
+            (100, 4, "Alpha")
+        );
+        let b = s.search_history("beta", 10).unwrap();
+        assert_eq!((b[0].last_visit, b[0].visit_count), (70, 2));
+        assert_eq!(s.recent_history(10).unwrap().len(), 3);
+    }
 
     #[test]
     fn history_counts_and_search() {
