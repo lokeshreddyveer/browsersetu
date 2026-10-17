@@ -31,8 +31,8 @@ struct PhoneRootView: View {
     /// Room kept clear of the page for the whole dock, measured from the home-indicator edge (the page already stops there): the dock's height and a small gap.
     /// It must not read the window's own safe area while laying out: that made the whole screen come up blank.
     private var pageReservedBottom: CGFloat {
-        // Kept the same when the dock folds into its pill: the page changing size while you scroll made its content jump.
-        guard showsDock, !landscape, !dockOnItsOwnStrip, !model.floatingAddressVisible else { return 0 }
+        // Only for a page with its own bar along the bottom, and kept the same when the dock folds into its pill: the page changing size while you scroll made its content jump.
+        guard showsDock, model.activeFixedBottom, !landscape, !dockOnItsOwnStrip, !model.floatingAddressVisible else { return 0 }
         return PhoneChrome.height + PhoneChrome.dockLift + 8
     }
 
@@ -125,10 +125,10 @@ struct PhoneRootView: View {
             // With the bars away the page still starts below the status bar (a site's own top bar would otherwise sit under the clock) and ends above the dock
             // (a site's own bottom tabs would otherwise be hidden by it). It runs under the home-indicator strip, which the dock's own room includes. When the dock
             // folds into its small pill, the page takes that room back.
-            .ignoresSafeArea(.container, edges: showsDock && !dockOnItsOwnStrip ? .bottom : [])
+            .ignoresSafeArea(.container, edges: showsDock && !dockOnItsOwnStrip ? (model.activeFixedTop ? .bottom : .vertical) : [])
             // The strip behind the clock takes the page's own colour, so a dark site does not get a white band above it. It belongs to the page's area only.
             .background(alignment: .top) {
-                if showsDock, model.tintToolbar, let tab = model.active { PageTopStrip(tab: tab) }
+                if showsDock, model.activeFixedTop, model.tintToolbar, let tab = model.active { PageTopStrip(tab: tab) }
             }
             .padding(.bottom, pageReservedBottom)
             .motion(.spring(response: 0.4, dampingFraction: 0.88), value: pageReservedBottom)

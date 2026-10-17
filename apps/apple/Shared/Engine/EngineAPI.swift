@@ -41,6 +41,8 @@ protocol TabEngineEvents: AnyObject {
     func engineDidFinishLoading()
     func engineLoadFailed(url: URL?, description: String)
     func engineProcessCrashed()
+    /// Whether the page has its own bar fixed to the top or bottom edge of the screen (a site header, a row of tabs). Only these pages are kept clear of the status bar and the dock.
+    func engineFixedBars(top: Bool, bottom: Bool)
     /// Whether the browser wants to look at a login form just before it is submitted (never in a private tab, or when the setting is off).
     func engineWantsLoginCapture() -> Bool
     func engineLoginSubmitted(origin: String, user: String, password: String)
@@ -104,6 +106,7 @@ extension TabEngine {
 }
 
 extension TabEngineEvents {
+    func engineFixedBars(top: Bool, bottom: Bool) {}
     func engineWantsLoginCapture() -> Bool { false }
     func engineLoginSubmitted(origin: String, user: String, password: String) {}
     func engineVimKey(_ key: String) -> Bool { false }
