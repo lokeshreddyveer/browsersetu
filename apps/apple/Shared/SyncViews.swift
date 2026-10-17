@@ -35,6 +35,7 @@ struct SyncSection: View {
                         Task { await model.syncNowCloud() }
                     }
                 }
+                Toggle("Also sync saved passwords", isOn: $model.syncPasswords)
                 Toggle("Also sync settings", isOn: $model.syncSettingsToo)
                 if model.syncSettingsToo { Toggle("Ask me when a setting differs", isOn: $model.syncAskOnConflict) }
                 Button("Sync Now") { Task { await model.syncNowCloud() } }.disabled(!hasPhrase).accessibilityIdentifier("sync-now")

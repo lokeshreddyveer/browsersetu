@@ -194,6 +194,7 @@ struct SettingsPanelView: View {
             ResourceMonitorSection()
         case .extensions:
             ExtensionsSettingsSection()
+            RemoteExtensionsSection()
             UserScriptsSection()
         case .shortcuts:
             ShortcutsSettingsSection()

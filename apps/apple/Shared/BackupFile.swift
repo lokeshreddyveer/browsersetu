@@ -30,6 +30,19 @@ struct BackupPayload: Codable, Equatable {
     var deviceID: String? = nil
     /// Research collections, in a backup file only (sync does not carry them).
     var research: [ResearchCollection]? = nil
+    /// Sync only: every synced item with its stamp, so devices merge deterministically and deletions are remembered. When present it replaces `bookmarks`.
+    var state: SyncState? = nil
+    /// Sync only: counts up with every snapshot this device writes, so an out-of-date copy delivered late can be recognised and ignored.
+    var seq: Int? = nil
+    /// Sync only: the extensions installed on that device, for information (they are never installed by sync).
+    var extensions: [SyncExtension]? = nil
+}
+
+struct SyncExtension: Codable, Equatable, Identifiable {
+    var name: String
+    var chromeID: String?
+    var version: String
+    var id: String { chromeID ?? name }
 }
 
 extension BackupPayload: Sendable {}

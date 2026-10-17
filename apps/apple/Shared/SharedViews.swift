@@ -993,6 +993,7 @@ struct SettingsView: View {
             HealthCheckSection()
         case "extensions":
             ExtensionsSettingsSection()
+            RemoteExtensionsSection()
             UserScriptsSection()
         case "advanced":
             AdvancedSettingsSection()
@@ -1049,6 +1050,7 @@ struct SettingsView: View {
             PerformanceSettingsSection()
             #if os(iOS)
             ExtensionsSettingsSection()
+            RemoteExtensionsSection()
             UserScriptsSection()
             #endif
             AdvancedSettingsSection()
@@ -1312,5 +1314,24 @@ struct SiteDataSheet: View {
     private func reload() async {
         sites = await model.siteData()
         loading = false
+    }
+}
+
+
+/// Extensions installed on the person's other devices, as a reminder: sync never installs an extension, because each one must be reviewed on the device that runs it.
+struct RemoteExtensionsSection: View {
+    @EnvironmentObject var model: BrowserModel
+    var body: some View {
+        let mine = Set(model.extensionCenter.extensions.map(\.name))
+        let others = model.remoteExtensions.sorted { $0.key < $1.key }.map { device, list in (device, list.filter { !mine.contains($0.name) }) }.filter { !$0.1.isEmpty }
+        if !others.isEmpty {
+            Section {
+                ForEach(others, id: \.0) { device, list in
+                    LabeledContent(device, value: list.map(\.name).joined(separator: ", "))
+                }
+            } header: { Text("On Your Other Devices") } footer: {
+                Text("These extensions are installed on your other devices but not here. Sync never installs one for you: add it from its own page, so you review what it asks for on this device.")
+            }
+        }
     }
 }
