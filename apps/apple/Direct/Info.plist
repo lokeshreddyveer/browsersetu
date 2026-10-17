@@ -76,6 +76,10 @@
 	<string>Websites you allow can use your microphone.</string>
 	<key>NSRemindersFullAccessUsageDescription</key>
 	<string>Browser Setu adds a reminder only when you choose Remind Me on selected text.</string>
+	<key>NSUserActivityTypes</key>
+	<array>
+		<string>com.browsersetu.page</string>
+	</array>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 	<key>SUEnableInstallerLauncherService</key>
