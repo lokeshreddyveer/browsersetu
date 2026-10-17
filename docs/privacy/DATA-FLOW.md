@@ -1,6 +1,6 @@
 # Data flow, for the App Store privacy questionnaire
 
-Written 17 October 2026 from the source of version 0.2.0. It records what the app sends and where, so the App Store Connect answers can be checked against evidence.
+Written 17 October 2026 and brought up to date for version 0.3.3 (the YouTube ad rules update was added then). It records what the app sends and where, so the App Store Connect answers can be checked against evidence.
 **The empty collected-data list in the privacy manifest is provisional**: it must be reviewed against Apple's current definitions in App Store Connect before it is treated as final.
 
 BrowserSetu has no analytics, no telemetry, no accounts and no server of its own. Tests in `apps/apple/Tests/PrivacyIntegrationTests.swift` fail if networking code appears outside the files listed below, or if a page gains a channel back to the app.
@@ -15,6 +15,7 @@ BrowserSetu has no analytics, no telemetry, no accounts and no server of its own
 | Chrome Web Store extension | the person adds one by address | one package request | Google's store | HTTPS only, restricted to Google's download host. |
 | Update check (downloadable Mac build only) | daily, can be turned off | the app's version | github.com | Sparkle; not in the App Store or iPhone builds. |
 | iCloud sync | opt-in | bookmarks, and settings and open tabs if chosen | the person's own iCloud | Sealed with the person's own passphrase before upload; BrowserSetu cannot read it. Verify the current questionnaire wording for data transmitted through iCloud. |
+| YouTube ad rules | **on its own, at most once a day, only while "Block ads on YouTube" and "Keep the YouTube ad rules up to date" are both on**; the "Check Now" button asks at any time | nothing but the request for one small file: no cookies, no identifiers, no referrer | raw.githubusercontent.com (`lokeshreddyveer/browsersetu`, `rules/youtube-ads.json`) | The file is data only (names of fields to remove, page elements to hide); every name is checked against a strict pattern and the whole file is refused if any is not acceptable. It cannot add code. |
 | Leaked-password check | **only when the person presses Check Passwords for Leaks** (after Touch ID) | the first five characters of each saved password's SHA-1 hash, nothing else | haveibeenpwned.com (`api.pwnedpasswords.com`) | k-anonymity range lookup: no password, whole hash, site, user name, cookie or account is sent; padded responses; the match is made on the device and the result is not stored. |
 | Wi-Fi sync / sharing | the person pairs two of their devices | the shared items | their own other device, on the same network | One-time 100-bit code; not through any server. |
 

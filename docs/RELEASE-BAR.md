@@ -14,7 +14,7 @@ Updated 17 October 2026.
 ## 2. Security and reliability
 - [ ] Real-device proxy test passes.
 - [ ] Real-device profile-sync test passes (two devices).
-- [ ] Fuzz tests for ZIPs, extension manifests, backups and sync inputs.
+- [x] Fuzz tests for ZIPs, extension manifests, backups, sync inputs and device messages (`FuzzTests`, 6 tests, passing on 17 Oct 2026).
 - [x] Interrupted downloads resume after a restart (`DownloadPersistenceTests`).
 - [ ] Crash recovery, extension rollback and profile migration verified end to end, not only in logic tests.
 
@@ -27,7 +27,7 @@ Updated 17 October 2026.
 
 ## 4. Release engineering
 - [ ] CI runs all required unit, integration, security and UI tests, and is green.
-- [ ] SBOM and reproducible-build metadata generated for each release.
+- [x] SBOM and reproducible-build metadata generated for each release (`scripts/generate-sbom.py`, run by `scripts/release.sh`): the application version comes from `MARKETING_VERSION`, and the run fails if the Rust, Cargo, Xcode or Swift version cannot be read.
 - [ ] Written rollback, hotfix, incident-response and data-recovery procedures.
-- [x] Mac release signed, notarized, stapled and Gatekeeper-checked (0.2.0).
+- [x] Mac release signed, notarized, stapled and Gatekeeper-checked (0.2.0 and 0.3.0 through 0.3.3; see `docs/releases/`).
 - [ ] All evidence for the build kept together (`docs/releases/`).

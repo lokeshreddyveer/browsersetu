@@ -27,6 +27,7 @@ the evidence for each item, is [`docs/capabilities.md`](docs/capabilities.md). M
 
 ### First minutes
 
+0. **First launch asks a few questions** (a one-minute setup): the look and theme, the layout, your search engine, which protections you want, and whether to offer to save passwords. Every answer applies at once and can be changed later; "Run Setup Again" is in the command palette.
 1. **Open it.** A blank tab shows the start page: a search field, your favorites, a card to carry on where you were, and places you go often. Type to search or enter an address.
 2. **Press ⌘K** for the command palette. Almost everything in this list is a command there, so you never have to remember where a thing lives.
 3. **Choose a look** in Settings › Appearance: a layout (Classic, Sidebar, Minimal, Floating, One Row), a theme, and the buttons you want in the toolbar. **⌥⇧⌘0** always restores the standard layout.
@@ -52,6 +53,16 @@ the evidence for each item, is [`docs/capabilities.md`](docs/capabilities.md). M
   Start it from the Split View button in the toolbar, the Split View menu, the More menu, or right-click a tab › Open in Split View (then Add to Split View as a Panel). Drag the divider between two panels
   to resize them (double-click it to make them equal again), click a panel to make it the active one, swap panels or close the split from the same places. Every page in a panel stays loaded and is
   never put to sleep. Save the pair as a template to reopen it later.
+- **Right-click everywhere (Mac).** The sidebar (also when it hides at the edge), the toolbar, the tab strip, a new tab page and a link on a page each have a menu of their own: new tab, private tab, search tabs, new group or workspace,
+  which sidebar section to show, its side, collapse to icons, auto-hide, layout, density, Break, Page Actions, and for a link **Open in New Tab, Background Tab, Split View or Private Tab**. Settings › Tabs › Right-Click Menus switches any item off.
+- **Customize the buttons by dragging (Mac).** Right-click the row of buttons at the foot of the sidebar › Customize Buttons: the row becomes editable in place, with a tray of the others above it. Drag one in, along the row to reorder it,
+  or out to remove it. 18 are available (History, Downloads, Bookmarks, Reading List, New Tab, Find, Command Palette, Break, Split View, Timeline, Saved Sessions, Privacy Dashboard, Settings, Profile…); seven fit in the row, the rest sit under "…".
+  The buttons inside the address bar are arranged the same way (right-click the bar › Arrange Buttons).
+- **Tab tree, stacks and previews.** Turn on the tab tree and a tab opened from a link sits under its parent, with an arrow that folds the branch; closing a parent moves its tabs up a level. Stacks put one website's tabs together in the
+  sidebar, with a count that folds them. Rest the pointer on a tab for a preview card.
+- **Web panels.** Add a small https site (chat, notes, music) in Settings › Tabs; its icon sits in the sidebar footer and opens it as a card over the page's edge, with the browser's own protections (it is a hidden tab). One button turns it into a tab.
+- **Settings as a panel or a tab.** A switch in the Settings header chooses: its own window, or a tab with a gear in the tab list. It remembers your choice, including for ⌘, and the menu bar.
+- **Drag and drop.** A tab you drag shows a small glass card with its site, and the tab it will land before lights up. Drop a link on a tab to open it. Drag a tab to another window and it moves with its page.
 - **Focus mode** drops the toolbar and card for an edge-to-edge page.
 - **Memory.** Tabs you are not using give their memory back in Balanced, Saver or Performance mode, and the app tells you which tabs are asleep and why. A **never-sleep list** keeps chosen sites awake;
   **Put all other tabs to sleep** respects it. A sleeping tab keeps its title, address, history and scroll position and reloads when you open it.
@@ -74,6 +85,9 @@ the evidence for each item, is [`docs/capabilities.md`](docs/capabilities.md). M
 - **Mouse gestures (Mac, off by default).** Hold the middle button and drag: left is back, right forward, down a new tab, down then right close, up scrolls to the top, and so on. The map is editable in Settings › Advanced.
   A middle click that does not move still opens a link in a new tab.
 - **Selection actions.** Select words and search them with any engine from the command palette or Selection Actions…, which also shows details found in the selected text.
+
+- **Address bar sources and buttons.** Settings › Search › Address Bar Results chooses which results show under the bar (search suggestions, open tabs, bookmarks, history, saved pages, commands) and in what order;
+  "Go to…" and "Search for…" always stay first. **Command chains** (Settings › Advanced) run several palette commands as one, and show up in the palette. **Break** pauses all media in every tab at once.
 
 ### Keyboard shortcuts
 
@@ -100,12 +114,15 @@ Every one can be changed in Settings › Shortcuts. The defaults:
 - **Cleaner links and pages.** Tracking parameters are stripped from links (Copy Clean Link does the same); plain-HTTP addresses are upgraded to HTTPS; **De-AMP** sends links through Google's AMP cache to the site's
   own page, and replaces an AMP page that names its own full version.
 - **No videos or sound starting by themselves (on by default).** A page can start media only after a real tap or key press (and for six seconds after one, so the page you open by tapping can start its own player), not
-  while you scroll. On a phone a scroll counts as a touch to WebKit, which is how a feed such as YouTube's could start videos as you scrolled. Playlists and "Autoplay next" wait for a tap, and a site that needs to
+  while you scroll. On the iPhone a second guard checks what is playing and pauses media that started with no tap in the last six seconds, whatever the page's script does. On a phone a scroll counts as a touch to WebKit, which is how a feed such as YouTube's could start videos as you scrolled. Playlists and "Autoplay next" wait for a tap, and a site that needs to
   play by itself (a voice-chat page, say) can be allowed in Site Privacy or with Repair This Page.
 - **Fingerprint randomizing (off by default).** Small, per-site changes to what canvas, WebGL read-back, audio and the processor count report, different for every site and every start, so a site cannot
   recognise this device by them. Each site has its own off switch for the few pages that draw pictures.
-- **YouTube ad skipping (off by default).** Hides the ad slots, presses Skip, and mutes and jumps past an ad that cannot be skipped. It watches the player instead of blocking requests, so a change on YouTube's
-  side can stop it, and it is not tried on youtube.com yet.
+- **Block ads on YouTube (on by default).** The ad schedule is removed from a video's own data before the player reads it, so there is no ad to play; ad slots are hidden, and an ad that still starts is skipped, or muted and run
+  to its end. The rules are plain data (names of fields and page elements, never code) and can be refreshed from this project's repository at most once a day while the switch and its update option are on (Settings › Privacy
+  & Security); every name is checked and a file with anything unexpected is refused whole. YouTube changes this often, so it can stop working until the rules are updated, and it has been tested on a copy of the player's data, not yet on every live page.
+- **Pop-ups.** A window a page opens by itself is blocked, with a card at the top: Open Once, Always Allow, or dismiss. A window opened by a click or a key press (a sign-in, a payment) is allowed and stays connected to the page that
+  opened it, so it can finish and close itself. Settings › Websites › Pop-ups lists the sites you allowed.
 - **Per-site controls.** JavaScript off for one site, never-sleep, zoom, notes, your own style sheet, a browser identity (user agent), WebRTC exceptions. A **style sheet for every website** applies CSS everywhere
   (hide a cookie banner, say), with a site's own sheet on top.
 - **Private tabs** use a separate, non-persistent store: no history, no session, no saved sign-ins, no extensions, no scripts of yours, and nothing in them is read by the browser's own tools.
@@ -122,13 +139,18 @@ Every one can be changed in Settings › Shortcuts. The defaults:
 
 ### Passwords
 
-- **Save and fill.** After you sign in, the browser offers to keep the password in your Keychain, on this device, for this profile. Filling asks for Touch ID or your password, only happens on the exact site,
-  never over plain HTTP and never in a private tab. The browser reads the form just before it is sent; pages cannot send it anything. Sign-ins that never reload the page can be missed.
+- **Save and fill.** After you sign in, the browser offers to keep the password in your Keychain, for this profile. It notices a sign-in sent by the form, by Enter, by a button or by the page's own script, including a sign-in
+  box that is a page from another site inside the page (App Store Connect's and Google's are). As soon as you type a password a small "Save password?" card also appears, so a sign-in nothing noticed can still be kept with one click.
+  Filling asks for Touch ID or your password, happens on the exact site, never over plain HTTP and never in a private tab; clicking into a password field offers your saved sign-in. Pages cannot send the browser anything but those
+  two moments.
+- **Keep passwords in iCloud Keychain (Settings › Websites).** Moves your saved passwords into iCloud Keychain, which Apple seals end to end, so they appear on your other Apple devices with the same Apple Account. If this copy of the
+  app cannot use iCloud Keychain it says so and keeps them on the device. **Not yet checked between two real devices.** A backup can also include them (tick the box when you export; the file is sealed with your passphrase).
 - **Check Passwords for Leaks** (Settings › Websites › Saved Sign-ins, behind Touch ID): each password is hashed on the device and only the first five characters of the hash go to haveibeenpwned.com, so no
   password, whole hash, site or user name leaves. It also flags a password used on more than one site. Nothing is stored from the answer.
 - **Sign-in boxes** that websites show (HTTP authentication) are remembered per site, realm and method.
 - **Import** passwords and history from Chrome, Firefox, Apple's Passwords and Safari (their exported files).
-- **Limits.** Browser Setu cannot use Safari's iCloud Passwords (Apple does not allow it for other browsers), and there are **no passkeys yet** (Apple must grant browsers the permission).
+- **Limits.** Browser Setu cannot use Safari's own saved passwords or its save prompt in a web view (Apple does not allow it for other browsers), and there are **no passkeys yet** (Apple must grant browsers the permission). A password manager's
+  extension (Bitwarden, 1Password) is the other way, where its extension works in WebKit.
 
 ### Extensions
 
@@ -155,6 +177,9 @@ Every one can be changed in Settings › Shortcuts. The defaults:
 
 ### Downloads, PDFs and documents
 
+- **Library panels.** Bookmarks, History and Downloads share one design: a heading with a count, a search field, filter chips with counts (Favorites and Tagged; Today to All; Documents, Images, Media, Archives, Apps), sections as
+  cards that fold, rows that light up under the pointer, and a proper empty state. Downloads shows progress rings, a queue bar (pause all, hold until a time) and Resume for interrupted files; History clears the last hour, today or everything.
+- **Short messages** ("Filled in.", "Password saved.") appear as a card that fades by itself, not a box to click away.
 - **Downloads you can see.** A card at the foot of the window shows progress while a file downloads, the Downloads button fills a ring and the Dock icon shows the percentage; when it finishes a card says
   "Downloaded" with Show in Finder and All Downloads (a file that can run code carries its warning in the same card instead of a box you have to dismiss).
 - **Downloads.** Resumable, with a queue (priorities, hold until a time, pause and resume all, retry with back-off) that survives a restart, an optional sort into folders by kind, **rules by site and kind**,
@@ -173,14 +198,15 @@ Every one can be changed in Settings › Shortcuts. The defaults:
 
 ### Themes, start page and settings
 
-- **Themes.** Eleven moods (Slime Night, Blood Moon, Synthwave, Aurora, Paper, Arctic and more) and ten classic palettes (Dracula, Nord, Gruvbox, Solarized, Catppuccin, Tokyo Night, Rosé Pine, One Dark…), drawn in
+- **Themes.** **Pure Black** (true black, for OLED screens), a **theme schedule** (a day theme and a night theme by time) and eleven more moods (Slime Night, Blood Moon, Synthwave, Aurora, Paper, Arctic and more) and ten classic palettes (Dracula, Nord, Gruvbox, Solarized, Catppuccin, Tokyo Night, Rosé Pine, One Dark…), drawn in
   code with no downloaded art, painted under the **whole window including the title bar**. Make your own **Custom** theme (two background colours, an accent, optionally a photo whose main colour becomes the accent, with a
   warning when an accent is hard to see). **Import and export theme files** (colours only, so they are safe to share), or turn any theme into your Custom one to adjust it.
 - **The toolbar takes the page's colour** (Settings › Appearance › Layout). It reads the page's theme colour, or its background when it names none. Under a theme the page adds a lighter touch; a colour that would
   clash with the window (a white page in a dark window) adds only a faint wash.
-- **Start page.** Native and quick: a greeting, a search field, favorites (an empty row says how to fill it), a Continue card, often-visited and recently closed places, tabs on your other devices and tabs sent to this one.
+- **Start page.** Native and quick: the date and a greeting, one large search field, favorites as cards, a Continue card with a preview of the page, often-visited and recently closed places as cards, tabs on your other devices and
+  tabs sent to this one. Every long list shows a few and "Show 8 more". Gradient or Plain background and Small, Regular or Large sizes apply as you choose them.
   **Customize** slides a panel in from the right without leaving the page: theme, accent, what shows, icon size, search engine; it applies the moment you touch it and there is nothing to save.
-- **Settings** (Mac: a toolbar of panels, with a search field that opens the right panel; iPhone: topics): General, Appearance, Tabs (layout, split view and windows help, groups, workspaces), Search, Privacy, Websites,
+- **Settings** (Mac: a rail of panels in three groups with a search field that opens the right panel, a title that frosts as the list scrolls under it, and long lists that end in "Show more"; iPhone: topics): General, Appearance, Tabs (layout, split view and windows help, groups, workspaces), Search, Privacy, Websites,
   Profiles, Performance, Extensions, Shortcuts, Advanced. Changes apply as you make them and are shared by every window.
 
 ### Accessibility
@@ -197,7 +223,7 @@ Every one can be changed in Settings › Shortcuts. The defaults:
 - **Send a tab to another device** from the tab menu, the More menu or the palette. It arrives once, as a web address only, and shows on that device's start page.
 - **Tabs on your other devices** are listed, never opened by themselves. **Wi-Fi sync** and **Send to Another Device** work straight between your own devices with a one-time 100-bit code and no server.
 - **Handoff and Spotlight.** Hand the page in front to your other devices, and find your bookmarks from Spotlight (both off for private tabs, history, passwords and page text).
-- **Encrypted backup file** of bookmarks, settings and research (passphrase-sealed; passwords, cookies and history are never in it) and **bookmark import and export** in the standard HTML format.
+- **Encrypted backup file** of bookmarks, settings and research (passphrase-sealed; **saved passwords only if you tick the box**; cookies and history are never in it; save it in iCloud Drive to keep a copy off the device) and **bookmark import and export** in the standard HTML format.
 - **Not run between two real devices yet:** the tests run two in-process browsers, so please report anything odd.
 
 ### iPhone and iPad
@@ -220,10 +246,11 @@ Browser Setu has no accounts, no analytics and no telemetry. The only network re
 | You press Update on a filter list (or enable automatic updates) | the list address, with no cookies or identifiers | the list publisher |
 | You add an extension from the Chrome Web Store | one package request | Google's store |
 | The downloadable Mac build checks for updates (daily, can be turned off) | the app's version | github.com |
+| The YouTube ad blocker and its update option are on (at most daily; "Check Now" any time) | one small rules file, no cookies or identifiers | raw.githubusercontent.com (this project) |
 | You press Check Passwords for Leaks | the first five characters of each password's SHA-1 hash, nothing else | haveibeenpwned.com |
 | You sync | an encrypted snapshot | your iCloud, or your own device over Wi-Fi |
 
-Tests in `apps/apple/Tests/PrivacyIntegrationTests.swift` fail if networking code appears anywhere else, and if page scripts gain a channel back to the app.
+Tests in `apps/apple/Tests/PrivacyIntegrationTests.swift` fail if networking code appears anywhere else, and if a page gains a channel back to the app. The browser's own three scripts (sign-in watching, the link under the pointer, and real clicks and key presses) report to the app from an isolated world that a page cannot reach; a test checks that those are the only message handlers and that none is registered for the page's own world.
 
 ## Updates
 
