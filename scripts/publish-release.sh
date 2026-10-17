@@ -15,7 +15,8 @@ SIGN="$("$SPARKLE_BIN/sign_update" --account browsersetu "$DMG")"        # spark
 TAG="v$VERSION"
 
 echo "▸ Creating release $TAG"
-gh release create "$TAG" "$DMG" --repo "$REPO" --title "Browser Setu $VERSION" --notes "$NOTES"
+ASSETS=("$DMG"); [ -f dist/sbom.cdx.json ] && ASSETS+=(dist/sbom.cdx.json dist/build-metadata.json)
+gh release create "$TAG" "${ASSETS[@]}" --repo "$REPO" --title "Browser Setu $VERSION" --notes "$NOTES"
 
 echo "▸ Updating the update feed"
 URL="https://github.com/$REPO/releases/download/$TAG/BrowserSetu-$VERSION.dmg"
