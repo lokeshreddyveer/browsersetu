@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "stripKeys": ["adPlacements", "playerAds", "adSlots", "adBreakHeartbeatParams"],
+  "hideSelectors": ["#masthead-ad", "#player-ads", ".ytp-ad-overlay-container", ".ytp-ad-text-overlay", ".video-ads.ytp-ad-module .ytp-ad-image-overlay", "ytd-ad-slot-renderer", "ytd-display-ad-renderer", "ytd-promoted-sparkles-web-renderer", "ytd-promoted-video-renderer", "ytd-in-feed-ad-layout-renderer", "ytd-banner-promo-renderer", "ytd-statement-banner-renderer", "#related ytd-ad-slot-renderer"],
+  "skipSelectors": [".ytp-skip-ad-button", ".ytp-ad-skip-button", ".ytp-ad-skip-button-modern", ".ytp-ad-skip-button-container button"]
+}

@@ -14,9 +14,16 @@ SPARKLE_BIN="$(find apps/apple/build ~/Documents/iptv/macos/.build -type d -path
 SIGN="$("$SPARKLE_BIN/sign_update" --account browsersetu "$DMG")"        # sparkle:edSignature="…" length="…"
 TAG="v$VERSION"
 
-echo "▸ Creating release $TAG"
 ASSETS=("$DMG"); [ -f dist/sbom.cdx.json ] && ASSETS+=(dist/sbom.cdx.json dist/build-metadata.json)
-gh release create "$TAG" "${ASSETS[@]}" --repo "$REPO" --title "Browser Setu $VERSION" --notes "$NOTES"
+if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+  # The same version again with a newer build: its files and notes are replaced; installed copies see the higher build number in the update feed.
+  echo "▸ Updating the existing release $TAG (new build $BUILD)"
+  gh release upload "$TAG" "${ASSETS[@]}" --repo "$REPO" --clobber
+  gh release edit "$TAG" --repo "$REPO" --title "Browser Setu $VERSION" --notes "$NOTES"
+else
+  echo "▸ Creating release $TAG"
+  gh release create "$TAG" "${ASSETS[@]}" --repo "$REPO" --title "Browser Setu $VERSION" --notes "$NOTES"
+fi
 
 echo "▸ Updating the update feed"
 URL="https://github.com/$REPO/releases/download/$TAG/BrowserSetu-$VERSION.dmg"
@@ -42,6 +49,9 @@ items = ""
 if os.path.exists(path):
     old = open(path).read()
     items = old[old.index("<item>") - 4: old.rindex("</channel>")] if "<item>" in old else ""
+    # Publishing the same build twice replaces its entry instead of listing it twice.
+    import re
+    items = re.sub(r"    <item>(?:(?!</item>).)*?<sparkle:version>" + re.escape(build) + r"</sparkle:version>.*?</item>\n", "", items, flags=re.S)
 open(path, "w").write(head + item + items + "  </channel>\n</rss>\n")
 PY
 git add appcast.xml && git commit -qm "Update feed for Browser Setu $VERSION" && git push -q origin HEAD
