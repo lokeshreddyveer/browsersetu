@@ -500,7 +500,7 @@ struct TopBar: View {
                 .disabled(model.active?.isBlank ?? true)
         }
         if model.shows(.downloads), priority.showDownloads {
-            ChromeButton(symbol: "arrow.down.circle", help: "Downloads", identifier: "downloads-button") { model.sheet = .downloads }
+            DownloadsToolbarButton(coordinator: model.downloads)
         }
         MoreMenu(priority: priority)
     }

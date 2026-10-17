@@ -49,6 +49,10 @@ struct PhoneRootView: View {
             if model.overviewVisible {
                 TabOverview().transition(.opacity)
             }
+            // A download is never silent: progress while it runs, a card when it is done.
+            DownloadToast(coordinator: model.downloads)
+                .padding(.horizontal, 12).padding(.bottom, 92)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         }
         .background((ThemeState.chrome ?? Color(.systemBackground)).ignoresSafeArea())
         .ignoresSafeArea(.keyboard, edges: showsDock ? .bottom : [])

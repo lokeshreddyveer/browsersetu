@@ -106,3 +106,29 @@ struct SplitViewMenuItems: View {
         }
     }
 }
+
+/// The Downloads button, with a ring that fills while something downloads, so the button itself shows that a download is under way.
+struct DownloadsToolbarButton: View {
+    @EnvironmentObject var model: BrowserModel
+    @ObservedObject var coordinator: DownloadCoordinator
+
+    var body: some View {
+        let items = Array(coordinator.active.values)
+        let average = items.isEmpty ? 0 : items.map(\.fraction).reduce(0, +) / Double(items.count)
+        Button { model.sheet = .downloads } label: {
+            ZStack {
+                if !items.isEmpty {
+                    Circle().stroke(Color.primary.opacity(0.15), lineWidth: 2)
+                    Circle().trim(from: 0, to: max(0.04, average)).stroke(Theme.accent, style: StrokeStyle(lineWidth: 2, lineCap: .round)).rotationEffect(.degrees(-90))
+                }
+                Image(systemName: items.isEmpty ? "arrow.down.circle" : "arrow.down").foregroundStyle(items.isEmpty ? Color.primary : Theme.accent)
+            }
+            .frame(width: items.isEmpty ? nil : 20, height: items.isEmpty ? nil : 20)
+        }
+        .buttonStyle(ChromeButtonStyle())
+        .help(items.isEmpty ? "Downloads" : "Downloading… \(Int((average * 100).rounded()))%")
+        .accessibilityLabel(items.isEmpty ? "Downloads" : "Downloads, \(Int((average * 100).rounded())) percent")
+        .accessibilityIdentifier("downloads-button")
+        .animation(.easeOut(duration: 0.2), value: items.isEmpty)
+    }
+}

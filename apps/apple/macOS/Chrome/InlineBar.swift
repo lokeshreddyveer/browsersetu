@@ -36,7 +36,7 @@ struct InlineBar: View {
                                  tint: model.activeBookmarked ? .yellow : nil) { model.toggleBookmark() }
                         .disabled(model.active?.isBlank ?? true)
                 }
-                if model.shows(.downloads) { ChromeButton(symbol: "arrow.down.circle", help: "Downloads", identifier: "downloads-button") { model.sheet = .downloads } }
+                if model.shows(.downloads) { DownloadsToolbarButton(coordinator: model.downloads) }
                 // One Row always keeps these three, as it always has.
                 ChromeButton(symbol: "plus", help: "New Tab", identifier: "new-tab-button") { model.newTab() }
                 ChromeButton(symbol: "square.on.square", help: "Show Tab Overview", identifier: "overview-button") {

@@ -154,6 +154,10 @@ struct MacRootView: View {
                             .zIndex(4)
                     }
                 }
+                DownloadToast(coordinator: model.downloads)
+                    .padding(.trailing, 14).padding(.bottom, model.showSpeedPill ? 40 : 16)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                    .zIndex(5)
                 if model.showSpeedPill && !model.focusMode {
                     // Out of the way in the bottom right corner; taps and scrolls pass through it to the page.
                     SpeedPill(height: 20)

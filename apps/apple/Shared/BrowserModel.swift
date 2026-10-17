@@ -146,6 +146,9 @@ final class BrowserModel: ObservableObject {
     @Published var startTile: StartTile = .regular { didSet { saveSetting("start_tile", startTile.rawValue) } }
     /// The side panel on the start page is open.
     @Published var startDrawerOpen = false
+    /// The card shown for a download that has just finished.
+    @Published var downloadBanner: DownloadBanner?
+    var bannerTask: Task<Void, Never>?
     @Published var themeID = "midnight" { didSet { saveSetting("theme", themeID); applyTheme() } }
     @Published var customTheme = CustomTheme()
     @Published var appearance: AppearanceMode = .system { didSet { saveSetting("appearance", appearance.rawValue); applySystemAppearance() } }
@@ -269,7 +272,8 @@ final class BrowserModel: ObservableObject {
         engine.downloads.onFinished = { [weak self] source, filename in
             try? self?.core.recordDownload(url: source?.absoluteString ?? "", filename: filename)
             self?.openFinishedPDFIfWanted(source: source, filename: filename)
-            if let warning = DownloadSafety.warning(forFilename: filename, from: source) { self?.notice = warning }
+            // A card at the foot of the window says it is done; a kind of file that can run code carries its warning in the same card instead of a box to dismiss.
+            self?.showDownloadBanner(filename: filename, fileURL: self?.engine.downloads.completed.first, warning: DownloadSafety.warning(forFilename: filename, from: source))
             #if os(iOS)
             // Wallet passes, contact cards and calendar events open in the system sheet that adds them.
             if let file = DownloadCoordinator.locate(filename: filename) { Task { @MainActor in DownloadedFiles.open(file) } }
