@@ -152,6 +152,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.browsersetu.mac
         # Named apart from the App Store build so both can be built in one products folder; the release script names the shipped copy "Browser Setu.app".
         PRODUCT_NAME: Browser Setu Direct
+        EXECUTABLE_NAME: Browser Setu
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         DEVELOPMENT_TEAM: X4MH29QNRS
         CODE_SIGN_IDENTITY: "Apple Development"
