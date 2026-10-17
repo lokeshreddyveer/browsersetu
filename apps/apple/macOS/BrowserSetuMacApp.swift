@@ -45,23 +45,14 @@ struct BrowserSetuMacApp: App {
     }
 
     var body: some Scene {
-        Window("Browser Setu", id: "main") {
-            MacRootView()
-                .environmentObject(model)
-                .task {
-                    await model.start()
-                    #if DIRECT_BUILD
-                    AppUpdater.shared.start()
-                    #endif
-                }
-                .onOpenURL { model.handleExternal($0) }
-                .handoff(model)
-                .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in model.downloads.suspendAllBeforeQuit() }
+        // One window per `BrowserModel`: the first window owns the browser's shared services, further windows share them.
+        WindowGroup("Browser Setu", id: "browser") {
+            BrowserWindowHost(primary: model)
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1200, height: 800)
         .onChange(of: scenePhase) { _, phase in if phase != .active { model.saveNow() } }
-        .commands { BrowserCommands(model: model) }
+        .commands { BrowserCommands(primary: model) }
 
         Settings {
             MacSettingsView().environmentObject(model).scrollIndicators(.hidden)
@@ -69,11 +60,84 @@ struct BrowserSetuMacApp: App {
     }
 }
 
+/// One browser window. The first claims the app's main model; each later one makes its own model that shares the database, engine, privacy rules and extensions.
+struct BrowserWindowHost: View {
+    @StateObject private var holder: WindowModelHolder
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismiss) private var dismiss
+
+    init(primary: BrowserModel) { _holder = StateObject(wrappedValue: WindowModelHolder(primary: primary)) }
+
+    var body: some View {
+        let model = holder.model
+        MacRootView()
+            .environmentObject(model)
+            .focusedSceneObject(model)
+            .background(WindowLifetime(model: model))
+            .task {
+                model.windows.onNeedWindow = { openWindow(id: "browser") }
+                model.onWindowShouldClose = { dismiss() }
+                if model.isSecondary {
+                    model.startSecondaryWindow()
+                } else {
+                    await model.start()
+                    #if DIRECT_BUILD
+                    AppUpdater.shared.start()
+                    #endif
+                    // The extra windows the last session had are opened again, each taking its tabs back.
+                    for _ in model.windows.pendingRestores { openWindow(id: "browser") }
+                }
+            }
+            .onOpenURL { model.handleExternal($0) }
+            .handoff(model)
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in model.downloads.suspendAllBeforeQuit(); model.saveNow() }
+    }
+}
+
+@MainActor
+final class WindowModelHolder: ObservableObject {
+    let model: BrowserModel
+    init(primary: BrowserModel) {
+        if !primary.windows.primaryClaimed { primary.windows.primaryClaimed = true; model = primary } else { model = BrowserModel(sharing: primary) }
+    }
+}
+
+/// Tells the model which window is in front, and when its window is closed by the person.
+struct WindowLifetime: NSViewRepresentable {
+    let model: BrowserModel
+    final class V: NSView {
+        weak var model: BrowserModel?
+        private var tokens: [NSObjectProtocol] = []
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            tokens.forEach { NotificationCenter.default.removeObserver($0) }; tokens = []
+            guard let window else { return }
+            tokens.append(NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { if let model = self?.model { model.windows.focused = model } }
+            })
+            tokens.append(NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.model?.windowWillClose() }
+            })
+        }
+        deinit { tokens.forEach { NotificationCenter.default.removeObserver($0) } }
+    }
+    func makeNSView(context: Context) -> V { let v = V(); v.model = model; return v }
+    func updateNSView(_ view: V, context: Context) { view.model = model }
+}
+
 struct BrowserCommands: Commands {
-    @ObservedObject var model: BrowserModel
+    @ObservedObject var primary: BrowserModel
+    /// The commands act on the window in front, or the first one when none is.
+    @FocusedObject private var focused: BrowserModel?
+    @Environment(\.openWindow) private var openWindow
+    private var model: BrowserModel { focused ?? primary }
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
+            Button("New Window") { openWindow(id: "browser") }.keyboardShortcut("n", modifiers: .command)
+            Button("Move Tab to New Window") { if let id = model.activeID { model.moveTabToNewWindow(id) } }
+                .disabled(model.activeID == nil || (model.isSecondary && model.tabs.count < 2))
+            Divider()
             Button("New Tab") { model.newTab() }.shortcut(.newTab, model.shortcuts)
             Button("New Private Tab") { model.openTab(url: nil, isPrivate: true) }.shortcut(.newPrivateTab, model.shortcuts)
             Button("Open Location") { model.focusAddressBar() }.shortcut(.openLocation, model.shortcuts)

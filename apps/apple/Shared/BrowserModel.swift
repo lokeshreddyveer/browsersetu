@@ -40,7 +40,7 @@ struct RecoveryState: Equatable {
 /// Application coordinator: owns the core, tab controllers and shell state.
 @MainActor
 final class BrowserModel: ObservableObject {
-    @Published private(set) var tabs: [TabController] = []
+    @Published var tabs: [TabController] = []
     @Published var activeID: UInt64?
     @Published private(set) var profileName: String
     @Published private(set) var profiles: [String] = []
@@ -115,7 +115,7 @@ final class BrowserModel: ObservableObject {
     @Published var overviewVisible = false
     /// iOS shows normal and private tabs as separate sets; macOS mixes them in one strip.
     @Published var privateMode = false
-    @Published private(set) var activeGroup = ""
+    @Published var activeGroup = ""
     @Published private(set) var groupNames: [String] = []
     let addressBar = AddressBarController()
 
@@ -148,14 +148,14 @@ final class BrowserModel: ObservableObject {
     /// "restore" reopens last session's tabs; "blank" starts with one empty tab.
     @Published var startup = "restore" { didSet { saveSetting("startup", startup) } }
     @Published private(set) var workspaces: [Workspace] = []
-    @Published private(set) var activeWorkspace = ""
+    @Published var activeWorkspace = ""
     // Find in page
     @Published var findVisible = false
     @Published var findText = ""
     @Published var findFailed = false
     // Focus mode and split view
     @Published var focusMode = false
-    @Published private(set) var closedTabs: [ClosedTab] = []
+    @Published var closedTabs: [ClosedTab] = []
     /// What the user wrote down about each tab (see TabOrganizer.swift), the containers they made, their saved split layouts, and whether tabs are drawn as a tree.
     @Published var tabMeta: [UInt64: TabMeta] = [:]
     @Published var containers: [String] = []
@@ -171,7 +171,7 @@ final class BrowserModel: ObservableObject {
     @Published var blockWebRTC = false { didSet { saveSetting("block_webrtc", blockWebRTC ? "1" : "0"); pushWebPolicy() } }
     var webRTCExceptions = Set<String>()
     @Published var tabTree = false { didSet { saveSetting("tab_tree", tabTree ? "1" : "0"); if tabTree { arrangeAsTree() } } }
-    @Published private(set) var splitTabID: UInt64?
+    @Published var splitTabID: UInt64?
     @Published var splitOrientation: SplitOrientation = .sideBySide { didSet { saveSetting("split_orientation", splitOrientation.rawValue) } }
     @Published var addressBarPosition: AddressBarPosition = .bottom { didSet { saveSetting("address_bar", addressBarPosition.rawValue) } }
     @Published var showContinue = true { didSet { saveSetting("show_continue", showContinue ? "1" : "0") } }
@@ -207,6 +207,7 @@ final class BrowserModel: ObservableObject {
     init(engine: BrowserEngine, root rootOverride: String? = nil, profile profileOverride: String? = nil,
          listFetcher: ListFetching = URLSessionListFetcher()) {
         self.engine = engine
+        extensionCenter = ExtensionCenter()
         persistsProfileChoice = rootOverride == nil
         let base: String
         if let rootOverride {
@@ -244,6 +245,27 @@ final class BrowserModel: ObservableObject {
         }
         extensionObserver = extensionCenter.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
         attachExtensions()
+        windows.add(self)
+        #if DEBUG
+        Self.liveModels.add(self)
+        #endif
+    }
+
+    /// Another window of the same browser: it shares everything with `primary` except what a window owns (its tabs, layout, workspace and sheets).
+    init(sharing primary: BrowserModel) {
+        engine = primary.engine
+        extensionCenter = primary.extensionCenter
+        persistsProfileChoice = primary.persistsProfileChoice
+        root = primary.root
+        profileName = primary.profileName
+        core = primary.core
+        privacy = primary.privacy
+        profiles = primary.profiles
+        windows = primary.windows
+        isSecondary = true
+        loadUISettings()
+        extensionObserver = extensionCenter.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
+        windows.add(self)
         #if DEBUG
         Self.liveModels.add(self)
         #endif
@@ -361,9 +383,14 @@ final class BrowserModel: ObservableObject {
     var safeStart = false
     private var sessionAllowedHosts = Set<String>()
     private var recentStrips: [Date] = []
-    private(set) var lifecycle: TabLifecycle?
+    var lifecycle: TabLifecycle?
     /// Installed web extensions and their toolbar buttons. Its changes republish through the model.
-    let extensionCenter = ExtensionCenter()
+    let extensionCenter: ExtensionCenter
+    /// All windows of this browser (this one included). Every window has its own model; they share the database, engine, privacy rules and extensions.
+    var windows = WindowRegistry()
+    var isSecondary = false
+    /// A secondary window asks its screen to close when its last tab leaves or closes.
+    var onWindowShouldClose: (() -> Void)?
     /// An extension fetched from the Chrome Web Store, waiting for the user to approve what it asks for.
     @Published var storeOffer: ExtensionInfo?
     /// The sidebar's list of extensions, opened from the puzzle-piece icon in its footer.
@@ -672,6 +699,7 @@ final class BrowserModel: ObservableObject {
         openingFirstTab = true
         restoreOrOpenFirstTab()
         openingFirstTab = false
+        if !isSecondary { windows.loadPendingRestores(from: self) }
         closeLeftoverScratchTabs()
         if lifecycle == nil {
             let manager = TabLifecycle(model: self)
@@ -809,10 +837,11 @@ final class BrowserModel: ObservableObject {
 
     func saveNow() {
         saveTask?.cancel()
+        if windows.count > 1 || isSecondary { windows.saveWindowLayout(in: self) }
         try? core.saveSession(activeTabId: activeID ?? 0)
     }
 
-    private func saveSoon() {
+    func saveSoon() {
         saveTask?.cancel()
         saveTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(1))
@@ -928,17 +957,21 @@ final class BrowserModel: ObservableObject {
         closing.shutdown()
         try? core.closeTab(tabId: id)
         if !closing.isPrivate { siteTabClosed(host: closedHost) }
-        if !tabs.contains(where: \.isPrivate) { engine.privateSessionEnded() }
+        if !tabs.contains(where: \.isPrivate), !windows.anotherWindowHasPrivateTabs(besides: self) { engine.privateSessionEnded() }
         if wasActive || active == nil {
             if let next = visibleTabs.first(where: { _ in true }) ?? tabs.first {
                 let neighbours = visibleTabs
                 select((neighbours.indices.contains(min(index, neighbours.count - 1)) && !neighbours.isEmpty
                         ? neighbours[min(index, neighbours.count - 1)] : next).id)
+            } else if isSecondary {
+                activeID = nil
+                onWindowShouldClose?()       // a window with no tab left closes; the first window always keeps one
             } else {
                 newTab()
             }
         }
         saveSoon()
+        if isSecondary || windows.count > 1 { windows.saveWindowLayout(in: self) }
     }
 
     func reopenClosedTab() { reopenClosedTab(at: closedTabs.count - 1) }
@@ -1607,6 +1640,7 @@ final class BrowserModel: ObservableObject {
     func saveSetting(_ key: String, _ value: String) {
         guard !applyingSettings else { return }
         try? core.setSetting(key: key, value: value)
+        windows.settingChanged(key, in: self)
     }
 
     /// Reads the profile's interface settings without writing them back.

@@ -252,6 +252,7 @@ enum ResearchExport {
 
 extension BrowserModel {
     var research: ResearchStore {
+        if isSecondary, let primary = windows.primary { return primary.research }
         if let existing = researchBacking { return existing }
         let store = ResearchStore(folder: profileFolder.appendingPathComponent("research", isDirectory: true))
         researchBacking = store

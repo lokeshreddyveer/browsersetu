@@ -10,12 +10,15 @@ final class ExtensionPackageTests: XCTestCase {
         let checksum = crc ?? ExtensionPackage.crc32(Data(content.utf8))
         func le16(_ v: Int) -> [UInt8] { [UInt8(v & 255), UInt8(v >> 8 & 255)] }
         func le32(_ v: Int) -> [UInt8] { [UInt8(v & 255), UInt8(v >> 8 & 255), UInt8(v >> 16 & 255), UInt8(v >> 24 & 255)] }
-        var local: [UInt8] = [0x50, 0x4B, 3, 4] + le16(20) + le16(0) + le16(method) + le16(0) + le16(0) + le32(Int(checksum)) + le32(body.count) + le32(size)
-        local += le16(n.count) + le16(0) + n + body
-        var central: [UInt8] = [0x50, 0x4B, 1, 2] + le16(20) + le16(20) + le16(0) + le16(method) + le16(0) + le16(0) + le32(Int(checksum))
-        central += le32(body.count) + le32(size) + le16(n.count) + le16(0) + le16(0) + le16(0) + le16(0) + le32(0) + le32(0) + n
-        let end: [UInt8] = [0x50, 0x4B, 5, 6] + le16(0) + le16(0) + le16(1) + le16(1) + le32(central.count) + le32(local.count) + le16(0)
-        return Data(local + central + end)
+        // Pieces are joined with `cat`: older Swift compilers cannot type-check a long chain of array additions.
+        func cat(_ parts: [[UInt8]]) -> [UInt8] { parts.flatMap { $0 } }
+        let sig1: [UInt8] = [0x50, 0x4B, 3, 4], sig2: [UInt8] = [0x50, 0x4B, 1, 2], sig3: [UInt8] = [0x50, 0x4B, 5, 6]
+        let crcBytes: [UInt8] = le32(Int(checksum))
+        let local: [UInt8] = cat([sig1, le16(20), le16(0), le16(method), le16(0), le16(0), crcBytes, le32(body.count), le32(size), le16(n.count), le16(0), n, body])
+        let central: [UInt8] = cat([sig2, le16(20), le16(20), le16(0), le16(method), le16(0), le16(0), crcBytes, le32(body.count), le32(size),
+                                    le16(n.count), le16(0), le16(0), le16(0), le16(0), le32(0), le32(0), n])
+        let end: [UInt8] = cat([sig3, le16(0), le16(0), le16(1), le16(1), le32(central.count), le32(local.count), le16(0)])
+        return Data(cat([local, central, end]))
     }
 
     /// Raw deflate, as a zip stores it.
@@ -90,20 +93,24 @@ final class ExtensionPackageTests: XCTestCase {
     private func zipMany(_ items: [(name: String, content: String)], centralOffsets: [Int]? = nil) -> Data {
         func le16(_ v: Int) -> [UInt8] { [UInt8(v & 255), UInt8(v >> 8 & 255)] }
         func le32(_ v: Int) -> [UInt8] { [UInt8(v & 255), UInt8(v >> 8 & 255), UInt8(v >> 16 & 255), UInt8(v >> 24 & 255)] }
+        func cat(_ parts: [[UInt8]]) -> [UInt8] { parts.flatMap { $0 } }
+        let sig1: [UInt8] = [0x50, 0x4B, 3, 4], sig2: [UInt8] = [0x50, 0x4B, 1, 2], sig3: [UInt8] = [0x50, 0x4B, 5, 6]
         var local: [UInt8] = [], central: [UInt8] = [], offsets: [Int] = []
         for item in items {
             let body = [UInt8](item.content.utf8), n = Array(item.name.utf8)
-            let checksum = Int(ExtensionPackage.crc32(Data(item.content.utf8)))
+            let checksum: [UInt8] = le32(Int(ExtensionPackage.crc32(Data(item.content.utf8))))
             offsets.append(local.count)
-            local += [0x50, 0x4B, 3, 4] + le16(20) + le16(0) + le16(0) + le16(0) + le16(0) + le32(checksum) + le32(body.count) + le32(body.count) + le16(n.count) + le16(0) + n + body
+            local += cat([sig1, le16(20), le16(0), le16(0), le16(0), le16(0), checksum, le32(body.count), le32(body.count), le16(n.count), le16(0), n, body])
         }
         for (index, item) in items.enumerated() {
             let body = [UInt8](item.content.utf8), n = Array(item.name.utf8)
-            let checksum = Int(ExtensionPackage.crc32(Data(item.content.utf8)))
-            central += [0x50, 0x4B, 1, 2] + le16(20) + le16(20) + le16(0) + le16(0) + le16(0) + le16(0) + le32(checksum) + le32(body.count) + le32(body.count)
-            central += le16(n.count) + le16(0) + le16(0) + le16(0) + le16(0) + le32(0) + le32((centralOffsets ?? offsets)[index]) + n
+            let checksum: [UInt8] = le32(Int(ExtensionPackage.crc32(Data(item.content.utf8))))
+            let offset: [UInt8] = le32((centralOffsets ?? offsets)[index])
+            central += cat([sig2, le16(20), le16(20), le16(0), le16(0), le16(0), le16(0), checksum, le32(body.count), le32(body.count),
+                            le16(n.count), le16(0), le16(0), le16(0), le16(0), le32(0), offset, n])
         }
-        return Data(local + central + [0x50, 0x4B, 5, 6] + le16(0) + le16(0) + le16(items.count) + le16(items.count) + le32(central.count) + le32(local.count) + le16(0))
+        let end: [UInt8] = cat([sig3, le16(0), le16(0), le16(items.count), le16(items.count), le32(central.count), le32(local.count), le16(0)])
+        return Data(cat([local, central, end]))
     }
 
     func testTheSameNameTwiceIsRefused() {
