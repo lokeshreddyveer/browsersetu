@@ -39,14 +39,16 @@ jobs:
       - run: scripts/build-xcframework.sh
       - run: cd apps/apple && xcodegen generate
       - name: Build macOS
-        run: cd apps/apple && xcodebuild -scheme BrowserSetuMac -destination 'platform=macOS' build
+        run: cd apps/apple && xcodebuild -scheme BrowserSetuMac -destination 'platform=macOS' CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= CODE_SIGN_ENTITLEMENTS=CI/BrowserSetuMacCI.entitlements build
       - name: macOS unit tests
-        run: cd apps/apple && xcodebuild -scheme BrowserSetuMac -destination 'platform=macOS' test -only-testing:BrowserSetuMacTests
+        run: cd apps/apple && xcodebuild -scheme BrowserSetuMac -destination 'platform=macOS' CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= CODE_SIGN_ENTITLEMENTS=CI/BrowserSetuMacCI.entitlements test -only-testing:BrowserSetuMacTests
+      - name: Build the downloadable Mac build (with the updater)
+        run: cd apps/apple && xcodebuild -scheme BrowserSetuMacDirect -destination 'platform=macOS' CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= build
       - name: Build iOS
         run: cd apps/apple && xcodebuild -scheme BrowserSetuiOS -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
       - name: iPhone unit tests
         run: cd apps/apple && xcodebuild -scheme BrowserSetuiOS -destination 'platform=iOS Simulator,name=iPhone 17' CODE_SIGNING_ALLOWED=NO test -only-testing:BrowserSetuiOSTests
       - name: Extension compatibility fixtures (must install and run)
-        run: cd apps/apple && xcodebuild -scheme BrowserSetuMac -destination 'platform=macOS' test -only-testing:BrowserSetuMacTests/ExtensionTests
+        run: cd apps/apple && xcodebuild -scheme BrowserSetuMac -destination 'platform=macOS' CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= CODE_SIGN_ENTITLEMENTS=CI/BrowserSetuMacCI.entitlements test -only-testing:BrowserSetuMacTests/ExtensionTests
       - name: Source and evidence checks
         run: scripts/check-privacy-kit-drift.sh
