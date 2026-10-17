@@ -651,12 +651,20 @@ struct BookmarkTransferSection: View {
         }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.html]) { result in
             guard case .success(let url) = result else { return }
-            let scoped = url.startAccessingSecurityScopedResource()
-            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-            guard let data = try? Data(contentsOf: url), data.count < 50_000_000 else { model.notice = "That file could not be read."; return }
-            let r = model.importBookmarks(html: String(decoding: data, as: UTF8.self))
-            model.notice = r.added == 0 && r.skipped == 0 ? "No bookmarks were found in that file."
-                : "Imported \(r.added) bookmark\(r.added == 1 ? "" : "s")" + (r.skipped > 0 ? ", skipped \(r.skipped) already saved." : ".")
+            // Read and parsed away from the main thread, then added in small batches, so a file with thousands of bookmarks never freezes the window.
+            let picked = url
+            Task {
+                let parsed: [BookmarkHTML.Entry]? = await Task.detached(priority: .userInitiated) {
+                    let scoped = picked.startAccessingSecurityScopedResource()
+                    defer { if scoped { picked.stopAccessingSecurityScopedResource() } }
+                    guard let data = try? Data(contentsOf: picked), data.count < 50_000_000 else { return nil }
+                    return BookmarkHTML.parse(String(decoding: data, as: UTF8.self))
+                }.value
+                guard let parsed else { model.notice = "That file could not be read."; return }
+                let r = await model.importBookmarks(entries: parsed)
+                model.notice = r.added == 0 && r.skipped == 0 ? "No bookmarks were found in that file."
+                    : "Imported \(r.added) bookmark\(r.added == 1 ? "" : "s")" + (r.skipped > 0 ? ", skipped \(r.skipped) already saved." : ".")
+            }
         }
         .fileExporter(isPresented: $exporting, document: document, contentType: .html,
                       defaultFilename: "Browser Setu Bookmarks") { result in
