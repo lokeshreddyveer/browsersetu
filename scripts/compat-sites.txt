@@ -1,0 +1,21 @@
+# Sites used to check that everyday browsing works. One address per line, with what it covers after a tab.
+https://www.wikipedia.org/	reading, fonts, international text
+https://www.youtube.com/	video playback, consent screens
+https://mail.google.com/	web app, sign-in redirect
+https://docs.google.com/	productivity app, sign-in redirect
+https://www.office.com/	productivity app, single sign-on
+https://www.amazon.com/	shopping, large pages, images
+https://www.paypal.com/	payment page, security checks
+https://www.chase.com/	online banking sign-in page
+https://meet.google.com/	camera and microphone prompts
+https://zoom.us/	conferencing page, downloads
+https://www.netflix.com/	streaming and DRM page
+https://www.reddit.com/	infinite scroll, heavy scripts
+https://github.com/	code pages, sign-in
+https://maps.google.com/	WebGL, location prompt
+https://webglsamples.org/aquarium/aquarium.html	WebGL
+https://www.w3.org/WAI/	accessibility content
+https://www.bbc.com/news	news, ads, trackers
+https://arxiv.org/pdf/1706.03762	built-in PDF viewing
+https://www.nytimes.com/	paywall, trackers, reading
+https://www.google.com/search?q=browser	search results

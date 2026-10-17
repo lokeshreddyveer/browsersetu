@@ -1,0 +1,1198 @@
+import SetuPrivacyCore
+import SetuPrivacyWebKit
+import SwiftUI
+import Network
+import WebKit
+#if os(macOS)
+import AppKit
+#endif
+
+/// WebKit implementation of the engine contract, shared by macOS and iOS.
+@MainActor
+final class WebKitEngine: BrowserEngine {
+    let name = "WebKit"
+    let downloads = DownloadCoordinator()
+
+    private let downloadDelegate: WebKitDownloads
+    private var privateStore: WKWebsiteDataStore?
+    private var proxy: (config: ProxyConfig, password: String?)?
+    private var webPolicy = WebPolicy()
+    let rules = ContentRuleInstaller()
+    private let tabs = NSHashTable<WebKitTab>.weakObjects()
+    /// A `WebKitExtensionManager` on systems that have WebKit extension support; type-erased because it is availability-gated.
+    private var extensionManager: AnyObject?
+    private var userScripts: [UserScript] = []
+
+    init() {
+        downloadDelegate = WebKitDownloads(coordinator: downloads)
+        downloads.resumer = { [weak self] data in
+            guard let self, let view = self.tabs.allObjects.first?.hostView as? WKWebView else { return }
+            self.downloadDelegate.resume(data, in: view)
+        }
+    }
+
+    func prepare() async {}
+
+    func makeConfiguration(isPrivate: Bool, profile: String, container: String? = nil) -> WKWebViewConfiguration {
+        let config = WKWebViewConfiguration()
+        if isPrivate {
+            if privateStore == nil { privateStore = .nonPersistent() }
+            config.websiteDataStore = privateStore!
+        } else if container == TabOrganizing.scratchContainer {
+            config.websiteDataStore = .nonPersistent()                     // gone with the tab
+        } else if let container {
+            config.websiteDataStore = WKWebsiteDataStore(forIdentifier: ProfileIdentity.dataStoreID(for: profile + "#" + container))
+        } else {
+            config.websiteDataStore = WKWebsiteDataStore(forIdentifier: ProfileIdentity.dataStoreID(for: profile))
+        }
+        applyProxy(to: config.websiteDataStore)
+        // A web view announces itself without the "Version/… Safari/…" part that Safari adds, and many sites (Google's home page
+        // among them) answer such a browser with a stripped-down page. Announce it the way Safari does, with this system's number.
+        config.applicationNameForUserAgent = "Version/\(ProcessInfo.processInfo.operatingSystemVersion.majorVersion).0 Safari/605.1.15"
+        config.upgradeKnownHostsToHTTPS = true
+        config.preferences.isFraudulentWebsiteWarningEnabled = true
+        config.defaultWebpagePreferences.allowsContentJavaScript = true
+        // The fullscreen button on web video: without this, YouTube and every other player has no working fullscreen.
+        config.preferences.isElementFullscreenEnabled = true
+        config.mediaTypesRequiringUserActionForPlayback = [.audio, .video]
+        #if os(iOS)
+        config.allowsPictureInPictureMediaPlayback = true
+        #endif
+        // Registered before the web view exists, so even its first request is filtered.
+        rules.register(config.userContentController)
+        if !isPrivate { UserScriptInstaller.addErrorCollector(to: config.userContentController) }
+        // The user's own scripts, in normal tabs only.
+        if !isPrivate { UserScriptInstaller.install(userScripts, policy: webPolicy, into: config.userContentController) }
+        else {
+            UserScriptInstaller.addScrollbarHider(to: config.userContentController)
+            if webPolicy.blockWebRTC { UserScriptInstaller.addWebRTCBlocker(to: config.userContentController, exceptions: webPolicy.exceptions) }
+        }
+        // Extensions never run in private tabs.
+        if !isPrivate, #available(macOS 15.4, iOS 18.4, *), let manager = extensionManager as? WebKitExtensionManager {
+            config.webExtensionController = manager.controller
+        }
+        return config
+    }
+
+    func makeTab(isPrivate: Bool, profile: String, container: String?, events: TabEngineEvents) -> TabEngine {
+        let tab = WebKitTab(configuration: makeConfiguration(isPrivate: isPrivate, profile: profile, container: container),
+                            events: events, downloads: downloadDelegate)
+        tabs.add(tab)
+        return tab
+    }
+
+    func applyProtection(_ snapshot: PolicySnapshot?) async -> InstallReport {
+        await rules.apply(snapshot)
+    }
+
+    func setUserScripts(_ scripts: [UserScript]) {
+        userScripts = scripts
+        for tab in tabs.allObjects {
+            guard let view = tab.hostView as? WKWebView, view.configuration.websiteDataStore.isPersistent else { continue }
+            UserScriptInstaller.install(scripts, policy: webPolicy, into: view.configuration.userContentController)
+        }
+    }
+
+    func setWebPolicy(blockWebRTC: Bool, exceptions: Set<String>) {
+        let new = WebPolicy(blockWebRTC: blockWebRTC, exceptions: exceptions)
+        guard new != webPolicy else { return }
+        webPolicy = new
+        // Open pages keep what they already loaded; the next load of each one follows the new policy.
+        for tab in tabs.allObjects {
+            guard let view = tab.hostView as? WKWebView else { continue }
+            if view.configuration.websiteDataStore.isPersistent { UserScriptInstaller.install(userScripts, policy: new, into: view.configuration.userContentController) }
+        }
+    }
+
+    func privateSessionEnded() {
+        privateStore = nil
+    }
+
+    func setProxy(_ proxy: ProxyConfig?, password: String?) {
+        self.proxy = proxy.map { ($0, password) }
+        for tab in tabs.allObjects { if let view = tab.hostView as? WKWebView { applyProxy(to: view.configuration.websiteDataStore) } }
+        if let privateStore { applyProxy(to: privateStore) }
+    }
+
+    /// Fails closed: if the proxy cannot be reached the page does not load, rather than going out directly.
+    private func applyProxy(to store: WKWebsiteDataStore) {
+        guard let proxy, let port = NWEndpoint.Port(rawValue: UInt16(clamping: proxy.config.port)) else {
+            if !store.proxyConfigurations.isEmpty { store.proxyConfigurations = [] }
+            return
+        }
+        let endpoint = NWEndpoint.hostPort(host: NWEndpoint.Host(proxy.config.host), port: port)
+        var configuration = proxy.config.kind == .socks5 ? ProxyConfiguration(socksv5Proxy: endpoint) : ProxyConfiguration(httpCONNECTProxy: endpoint, tlsOptions: nil)
+        if !proxy.config.username.isEmpty { configuration.applyCredential(username: proxy.config.username, password: proxy.password ?? "") }
+        configuration.allowFailover = false
+        store.proxyConfigurations = [configuration]
+    }
+
+    func cookies(profile: String, isPrivate: Bool) async -> [CookieInfo] {
+        let store: WKWebsiteDataStore
+        if isPrivate {
+            guard let privateStore else { return [] }
+            store = privateStore
+        } else {
+            store = WKWebsiteDataStore(forIdentifier: ProfileIdentity.dataStoreID(for: profile))
+        }
+        return await store.httpCookieStore.allCookies().map { CookieInfo(name: $0.name, value: $0.value, domain: $0.domain) }
+    }
+
+    func clearData(profile: String) async {
+        let store = WKWebsiteDataStore(forIdentifier: ProfileIdentity.dataStoreID(for: profile))
+        await store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast)
+    }
+
+    func attachExtensions(center: ExtensionCenter, profile: String, directory: URL, host: ExtensionHost) {
+        if #available(macOS 15.4, iOS 18.4, *) {
+            let manager = WebKitExtensionManager(profile: profile, directory: directory, center: center, host: host)
+            extensionManager = manager
+            center.attach(manager, supported: true)
+            Task { await manager.start() }
+        } else {
+            extensionManager = nil
+            center.attach(nil, supported: false)
+        }
+    }
+
+    func siteData(profile: String) async -> [SiteDataInfo] {
+        let store = WKWebsiteDataStore(forIdentifier: ProfileIdentity.dataStoreID(for: profile))
+        let records = await store.dataRecords(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes())
+        return records
+            .map { SiteDataInfo(host: $0.displayName, kinds: Self.kinds($0.dataTypes)) }
+            .filter { !$0.host.isEmpty }
+            .sorted { $0.host < $1.host }
+    }
+
+    func removeSiteData(host: String, profile: String) async {
+        let store = WKWebsiteDataStore(forIdentifier: ProfileIdentity.dataStoreID(for: profile))
+        let records = await store.dataRecords(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes()).filter { $0.displayName == host }
+        guard !records.isEmpty else { return }
+        await store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), for: records)
+    }
+
+    private static func kinds(_ types: Set<String>) -> [String] {
+        let names: [(String, String)] = [
+            (WKWebsiteDataTypeCookies, "Cookies"),
+            (WKWebsiteDataTypeLocalStorage, "Local storage"),
+            (WKWebsiteDataTypeIndexedDBDatabases, "IndexedDB"),
+            (WKWebsiteDataTypeServiceWorkerRegistrations, "Service workers"),
+            (WKWebsiteDataTypeDiskCache, "Cache"),
+            (WKWebsiteDataTypeFetchCache, "Cache"),
+        ]
+        var seen = Set<String>(), result: [String] = []
+        for (type, label) in names where types.contains(type) && seen.insert(label).inserted { result.append(label) }
+        if result.isEmpty, !types.isEmpty { result.append("Other") }
+        return result
+    }
+
+    func removeProfileData(profile: String) async {
+        try? await WKWebsiteDataStore.remove(forIdentifier: ProfileIdentity.dataStoreID(for: profile))
+    }
+
+    /// Identifiers of website data stores that still exist (diagnostics and tests).
+    static func existingDataStoreIDs() async -> [UUID] {
+        await WKWebsiteDataStore.allDataStoreIdentifiers
+    }
+}
+
+// MARK: - Tab
+
+@MainActor
+final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
+    let webView: WKWebView
+    private weak var events: TabEngineEvents?
+    private let downloads: WebKitDownloads
+    private var observers: [NSKeyValueObservation] = []
+    #if os(iOS)
+    private var lastScrollY: CGFloat?
+    private var lastBoundsHeight: CGFloat = 0
+    #endif
+
+    init(configuration: WKWebViewConfiguration, events: TabEngineEvents, downloads: WebKitDownloads) {
+        self.events = events
+        self.downloads = downloads
+        #if os(macOS)
+        let reporting = ScrollReportingWebView(frame: .zero, configuration: configuration)
+        webView = reporting
+        #else
+        webView = WKWebView(frame: .zero, configuration: configuration)
+        #endif
+        super.init()
+        #if os(macOS)
+        reporting.onScroll = { [weak self] delta in self?.events?.engineScrolled(deltaY: Double(delta)) }
+        reporting.onKey = { [weak self] event in
+            guard let self, !self.editableFocused, event.modifierFlags.intersection([.command, .control, .option]).isEmpty,
+                  let key = event.characters, key.count == 1 else { return false }
+            return self.events?.engineVimKey(key) ?? false
+        }
+        // Whether a text field has the keyboard is read from the page after a click or any key the browser did not use; no message ever comes from the page.
+        reporting.onInteraction = { [weak self] in self?.refreshEditableFocus() }
+        #endif
+        webView.navigationDelegate = self
+        webView.uiDelegate = self
+        webView.allowsBackForwardNavigationGestures = true
+        #if os(macOS)
+        webView.allowsMagnification = true
+        #endif
+        observe()
+    }
+
+    var hostView: PlatformView { webView }
+    /// A text field on the page has the keyboard.
+    private var editableFocused = true
+    #if os(iOS)
+    private var lastViewportInsets = UIEdgeInsets.zero
+    #endif
+
+    private func refreshEditableFocus() {
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(60))
+            guard let self else { return }
+            let script = "var a = document.activeElement; if (!a) return false; var t = (a.tagName || '').toLowerCase(); return t === 'input' || t === 'textarea' || t === 'select' || a.isContentEditable === true;"
+            editableFocused = ((try? await webView.callAsyncJavaScript(script, contentWorld: .defaultClient)) as? Bool) ?? true
+        }
+    }
+
+    func scrollBy(_ points: Double) {
+        Task { _ = try? await webView.callAsyncJavaScript("window.scrollBy({ top: points, behavior: 'smooth' });", arguments: ["points": points], contentWorld: .defaultClient) }
+    }
+
+    func showHTML(_ html: String, baseURL: URL?) { webView.loadHTMLString(html, baseURL: baseURL) }
+
+    func setDesktopMode(_ on: Bool) {
+        #if os(iOS)
+        webView.configuration.defaultWebpagePreferences.preferredContentMode = on ? .desktop : .mobile
+        webView.reload()
+        #endif
+    }
+
+    func setMobileSite(_ on: Bool) {
+        #if os(macOS)
+        webView.customUserAgent = on
+            ? "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
+            : nil
+        webView.reload()
+        #endif
+    }
+
+    func setJavaScriptEnabled(_ on: Bool) {
+        webView.configuration.defaultWebpagePreferences.allowsContentJavaScript = on
+        webView.reload()
+    }
+
+    /// Makes a light page dark by inverting it, keeping pictures and video as they are. A page that is already dark is left alone.
+    /// Runs in the browser's own isolated world and changes nothing but one style element.
+    /// Darkening turns a light page dark by inverting it. A page that is already dark (its own dark mode) must be left alone, or it is
+    /// inverted back to light-on-dark mush with invisible text. What is painted behind the page is found the way the eye would: the element
+    /// in the middle of the window and each one around it, outward, until one has a solid background.
+    func setPageDarkening(_ on: Bool) {
+        let script = on ? """
+        if (document.getElementById('bs-dark')) return true;
+        const solid = (e) => {
+          const m = getComputedStyle(e).backgroundColor.match(/[\\d.]+/g) || [];
+          const a = m.length >= 4 ? parseFloat(m[3]) : (m.length >= 3 ? 1 : 0);
+          return a > 0.5 ? [+m[0], +m[1], +m[2]] : null;
+        };
+        let el = document.elementFromPoint(innerWidth / 2, innerHeight / 2), color = null;
+        while (el && !color) { color = solid(el); el = el.parentElement; }
+        color = color || solid(document.documentElement) || [255, 255, 255];
+        const luminance = 0.299 * color[0] + 0.587 * color[1] + 0.114 * color[2];
+        if (luminance < 140) return false;
+        const style = document.createElement('style');
+        style.id = 'bs-dark';
+        style.textContent = 'html{filter:invert(0.9) hue-rotate(180deg) contrast(0.95)!important;background:#fff} img,video,picture,canvas{filter:invert(0.9) hue-rotate(180deg)!important}';
+        document.documentElement.appendChild(style);
+        return true;
+        """ : "const s = document.getElementById('bs-dark'); if (s) s.remove(); return true;"
+        Task { _ = try? await webView.callAsyncJavaScript(script, contentWorld: .defaultClient) }
+    }
+
+    /// Which look the websites are asked for, apart from the browser's own: nil follows the system.
+    /// Room at the foot of the page for a toolbar floating over it, so the last of the page can be scrolled clear of the bar.
+    func setViewportInsets(top: CGFloat, bottom: CGFloat) {
+        #if os(iOS)
+        let insets = UIEdgeInsets(top: top, left: 0, bottom: bottom, right: 0)
+        guard webView.scrollView.contentInset.bottom != 0 || insets != lastViewportInsets else { return }
+        lastViewportInsets = insets
+        // Public API (iOS 15 and later): the page lays itself out inside these insets, so its fixed headers and bottom tab bars sit clear of the status bar and the dock.
+        UIView.animate(withDuration: 0.25, delay: 0, options: [.curveEaseInOut, .allowUserInteraction]) {
+            self.webView.setMinimumViewportInset(insets, maximumViewportInset: insets)
+            self.webView.scrollView.contentInset.bottom = 0
+            self.webView.scrollView.verticalScrollIndicatorInsets = .zero
+        }
+        #endif
+    }
+
+    func setWebsiteAppearance(_ mode: String) {
+        #if os(iOS)
+        webView.overrideUserInterfaceStyle = mode == "dark" ? .dark : (mode == "light" ? .light : .unspecified)
+        #else
+        webView.appearance = mode == "dark" ? NSAppearance(named: .darkAqua) : (mode == "light" ? NSAppearance(named: .aqua) : nil)
+        #endif
+    }
+
+    func setSiteStyle(_ css: String?) {
+        // The style text is passed as data, never joined into the script, so it cannot become code.
+        let script = "const old = document.getElementById('bs-site-style'); if (old) old.remove(); if (css) { const s = document.createElement('style'); s.id = 'bs-site-style'; s.textContent = css; document.documentElement.appendChild(s); } return true;"
+        Task { _ = try? await webView.callAsyncJavaScript(script, arguments: ["css": css ?? NSNull()], contentWorld: .defaultClient) }
+    }
+
+    func scrollToEdge(bottom: Bool) {
+        #if os(iOS)
+        let scroll = webView.scrollView
+        let y = bottom ? max(-scroll.adjustedContentInset.top, scroll.contentSize.height - scroll.bounds.height + scroll.adjustedContentInset.bottom)
+                       : -scroll.adjustedContentInset.top
+        scroll.setContentOffset(CGPoint(x: scroll.contentOffset.x, y: y), animated: true)
+        #else
+        Task { _ = try? await webView.callAsyncJavaScript("window.scrollTo({ top: edge ? Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0) : 0, behavior: 'smooth' });", arguments: ["edge": bottom], contentWorld: .defaultClient) }
+        #endif
+    }
+
+    /// The size of the whole page, so the PDF and the full-page picture cover all of it and not only what is on screen.
+    private func contentSize() async -> CGSize? {
+        let script = "return [Math.max(document.documentElement.scrollWidth, document.body ? document.body.scrollWidth : 0), Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0)];"
+        guard let result = try? await webView.callAsyncJavaScript(script, contentWorld: .defaultClient) as? [Any], result.count == 2,
+              let w = (result[0] as? NSNumber)?.doubleValue, let h = (result[1] as? NSNumber)?.doubleValue, w > 0, h > 0 else { return nil }
+        return CGSize(width: min(w, 4000), height: min(h, 30000))
+    }
+
+    func probeMediaCapabilities() async -> [String: Any]? {
+        let script = """
+        const out = {};
+        const v = document.createElement('video');
+        out.hls = v.canPlayType('application/vnd.apple.mpegurl') || v.canPlayType('application/x-mpegURL') || '';
+        const MS = window.ManagedMediaSource || window.MediaSource;
+        out.managedMse = !!window.ManagedMediaSource;
+        if (window.MediaSource) { out.mse = { h264: MediaSource.isTypeSupported('video/mp4; codecs="avc1.640028"') }; }
+        out.fullscreen = { video: !!(v.webkitEnterFullscreen || v.requestFullscreen), element: !!(document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen) };
+        out.pip = { webkit: !!v.webkitSupportsPresentationMode && v.webkitSupportsPresentationMode('picture-in-picture'), standard: !!document.pictureInPictureEnabled };
+        out.airplay = { picker: !!v.webkitShowPlaybackTargetPicker, event: 'WebKitPlaybackTargetAvailabilityEvent' in window };
+        const eme = {};
+        if (navigator.requestMediaKeySystemAccess) {
+          const cfg = [{ initDataTypes: ['cenc', 'sinf', 'skd'], videoCapabilities: [{ contentType: 'video/mp4; codecs="avc1.42E01E"' }], audioCapabilities: [{ contentType: 'audio/mp4; codecs="mp4a.40.2"' }] }];
+          for (const [key, id] of [['fairplay', 'com.apple.fps'], ['fairplay1', 'com.apple.fps.1_0'], ['widevine', 'com.widevine.alpha'], ['playready', 'com.microsoft.playready']]) {
+            try { await navigator.requestMediaKeySystemAccess(id, cfg); eme[key] = 'supported'; } catch (e) { eme[key] = (e && e.name) || 'unsupported'; }
+          }
+        }
+        out.eme = eme;
+        const decoding = {};
+        const tests = { h264: 'video/mp4; codecs="avc1.640028"', hevc: 'video/mp4; codecs="hvc1.1.6.L120.90"', vp9: 'video/webm; codecs="vp09.00.10.08"', av1: 'video/mp4; codecs="av01.0.08M.08"' };
+        if (navigator.mediaCapabilities) {
+          for (const [k, type] of Object.entries(tests)) {
+            try {
+              const r = await navigator.mediaCapabilities.decodingInfo({ type: 'file', video: { contentType: type, width: 1920, height: 1080, bitrate: 6000000, framerate: 30 } });
+              decoding[k] = { supported: r.supported, smooth: r.smooth, powerEfficient: r.powerEfficient };
+            } catch (e) { decoding[k] = {}; }
+          }
+        }
+        out.decoding = decoding;
+        return out;
+        """
+        return try? await webView.callAsyncJavaScript(script, contentWorld: .defaultClient) as? [String: Any]
+    }
+
+    func pageHasSensitiveForm() async -> Bool {
+        let r = try? await webView.callAsyncJavaScript("""
+        return !!document.querySelector('input[type=password], input[autocomplete^="cc-"], input[autocomplete="one-time-code"], input[name*="card" i], input[name*="cvv" i]');
+        """, contentWorld: .defaultClient)
+        return (r as? NSNumber)?.boolValue ?? true
+    }
+
+    func scrollFraction() async -> Double? {
+        let r = try? await webView.callAsyncJavaScript("const h = document.documentElement.scrollHeight - window.innerHeight; return h > 600 ? window.scrollY / h : null;", contentWorld: .defaultClient)
+        return (r as? NSNumber)?.doubleValue
+    }
+
+    func scrollTo(fraction: Double) async {
+        _ = try? await webView.callAsyncJavaScript("const h = document.documentElement.scrollHeight - window.innerHeight; if (h > 600 && window.scrollY < 40) window.scrollTo({ top: h * f, behavior: 'smooth' });", arguments: ["f": fraction], contentWorld: .defaultClient)
+    }
+
+    private static let draftFieldScript = """
+    const bad = ["pass","pin","otp","code","card","cvv","cvc","ssn","secret","token","iban","account","security","social"];
+    const out = [];
+    document.querySelectorAll('textarea, input[type=text], input:not([type])').forEach((el, i) => {
+      const type = (el.getAttribute('type') || (el.tagName === 'TEXTAREA' ? 'textarea' : 'text')).toLowerCase();
+      const ac = (el.getAttribute('autocomplete') || '').toLowerCase();
+      const name = ((el.name || '') + ' ' + (el.id || '') + ' ' + ac).toLowerCase();
+      if (el.disabled || el.readOnly || bad.some(w => name.includes(w)) || ac.includes('cc-') || ac.includes('one-time')) return;
+      const min = el.tagName === 'TEXTAREA' ? 12 : 30;
+      if ((el.value || '').length < min) return;
+      out.push({ key: i + ':' + (el.name || el.id || ''), value: el.value.slice(0, 20000) });
+    });
+    return out.slice(0, 10);
+    """
+
+    func formDraftFields() async -> [[String: Any]]? {
+        try? await webView.callAsyncJavaScript(Self.draftFieldScript, contentWorld: .defaultClient) as? [[String: Any]]
+    }
+
+    func restoreFormDraft(_ fields: [[String: Any]]) async -> Int {
+        let r = try? await webView.callAsyncJavaScript("""
+        let n = 0; const els = document.querySelectorAll('textarea, input[type=text], input:not([type])');
+        for (const f of fields) {
+          const i = parseInt(f.key.split(':')[0], 10); const el = els[i];
+          if (el && !el.disabled && !el.readOnly && (el.value || '') === '' && (el.name || el.id || '') === f.key.split(':').slice(1).join(':')) {
+            el.value = f.value; el.dispatchEvent(new Event('input', { bubbles: true })); n++;
+          }
+        }
+        return n;
+        """, arguments: ["fields": fields], contentWorld: .defaultClient)
+        return (r as? NSNumber)?.intValue ?? 0
+    }
+
+    func extractPageData() async -> [String: Any]? {
+        let script = """
+        const abs = u => { try { return new URL(u, document.baseURI).href; } catch (e) { return ''; } };
+        const seen = new Set(); const images = [];
+        for (const i of document.images) {
+          const url = abs(i.currentSrc || i.src);
+          if (!url || url.startsWith('data:') || seen.has(url) || (i.naturalWidth < 80 && i.naturalHeight < 80)) continue;
+          seen.add(url); images.push({ url, alt: i.alt || '', w: i.naturalWidth, h: i.naturalHeight });
+          if (images.length >= 200) break;
+        }
+        const tables = Array.from(document.querySelectorAll('table')).slice(0, 30).map(t => ({
+          caption: t.caption ? t.caption.innerText.trim() : '',
+          rows: Array.from(t.rows).slice(0, 2000).map(r => Array.from(r.cells).map(c => c.innerText.replace(/\\s+/g, ' ').trim()))
+        })).filter(t => t.rows.length > 1);
+        const exts = /\\.(pdf|docx?|xlsx?|pptx?|csv|txt|rtf|epub|zip)(\\?|#|$)/i; const docs = []; const dseen = new Set();
+        for (const a of document.querySelectorAll('a[href]')) {
+          const url = abs(a.href); const m = url.match(exts);
+          if (m && !dseen.has(url)) { dseen.add(url); docs.push({ url, title: (a.innerText || a.title || url).trim().slice(0, 120), kind: m[1].toLowerCase() }); }
+          if (docs.length >= 100) break;
+        }
+        const headings = Array.from(document.querySelectorAll('h1,h2,h3,h4')).slice(0, 300).map(h => ({ level: Number(h.tagName[1]), text: h.innerText.replace(/\\s+/g, ' ').trim().slice(0, 160) })).filter(h => h.text);
+        return { images, tables, documents: docs, headings };
+        """
+        return try? await webView.callAsyncJavaScript(script, contentWorld: .defaultClient) as? [String: Any]
+    }
+
+    func scrollToHeading(_ index: Int) async {
+        _ = try? await webView.callAsyncJavaScript("""
+        const all = Array.from(document.querySelectorAll('h1,h2,h3,h4')).filter(h => h.innerText.trim()).slice(0, 300);
+        if (all[idx]) all[idx].scrollIntoView({ behavior: 'smooth', block: 'start' });
+        """, arguments: ["idx": index], contentWorld: .defaultClient)
+    }
+
+    func controlVideo(index: Int, action: String, value: Double) async {
+        _ = try? await webView.callAsyncJavaScript("""
+        const m = document.querySelectorAll('video, audio')[index]; if (!m) return;
+        if (action === 'play') m.play(); else if (action === 'pause') m.pause();
+        else if (action === 'speed') m.playbackRate = value;
+        else if (action === 'seek') m.currentTime = value;
+        else if (action === 'pictureInPicture') {
+          if (m.webkitSetPresentationMode) m.webkitSetPresentationMode(m.webkitPresentationMode === 'picture-in-picture' ? 'inline' : 'picture-in-picture');
+          else if (document.pictureInPictureEnabled) { document.pictureInPictureElement ? document.exitPictureInPicture() : m.requestPictureInPicture(); }
+        } else if (action === 'fullscreen') { if (m.webkitEnterFullscreen) m.webkitEnterFullscreen(); else m.requestFullscreen(); }
+        """, arguments: ["index": index, "action": action, "value": value], contentWorld: .defaultClient)
+    }
+
+    func fillCouponField(_ code: String) async -> Bool {
+        let r = try? await webView.callAsyncJavaScript("""
+        const words = /coupon|promo|discount|voucher|gift.?card|offer.?code/i;
+        const field = Array.from(document.querySelectorAll('input[type=text], input:not([type])')).find(el => !el.disabled && words.test([el.name, el.id, el.placeholder, el.getAttribute('aria-label')].join(' ')));
+        if (!field) return false;
+        field.focus(); field.value = code; field.dispatchEvent(new Event('input', { bubbles: true })); field.dispatchEvent(new Event('change', { bubbles: true }));
+        return true;
+        """, arguments: ["code": code], contentWorld: .defaultClient)
+        return (r as? NSNumber)?.boolValue ?? false
+    }
+
+    func mediaElements() async -> [[String: Any]]? {
+        let script = """
+        return Array.from(document.querySelectorAll('video, audio')).slice(0, 8).map(m => ({
+          tag: m.tagName.toLowerCase(), src: m.currentSrc || m.src || '', blob: (m.currentSrc || m.src || '').startsWith('blob:'),
+          currentTime: m.currentTime, duration: isFinite(m.duration) ? m.duration : 0, paused: m.paused, rate: m.playbackRate, readyState: m.readyState, networkState: m.networkState, hasMediaKeys: !!m.mediaKeys,
+          errorCode: m.error ? m.error.code : null, errorMessage: m.error ? (m.error.message || '') : null
+        }));
+        """
+        return try? await webView.callAsyncJavaScript(script, contentWorld: .defaultClient) as? [[String: Any]]
+    }
+
+    func selectedText() async -> String? {
+        let result = try? await webView.callAsyncJavaScript("return String(window.getSelection ? window.getSelection() : '');", contentWorld: .defaultClient) as? String
+        let text = result?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return text.isEmpty ? nil : String(text.prefix(2000))
+    }
+
+    func setUserAgent(_ value: String?) { webView.customUserAgent = value }
+
+    func securityReport() async -> SecurityReport? {
+        guard let url = webView.url else { return nil }
+        var certificates: [SecurityReport.Certificate] = []
+        if let trust = webView.serverTrust, let chain = SecTrustCopyCertificateChain(trust) as? [SecCertificate] {
+            for (index, certificate) in chain.prefix(4).enumerated() {
+                let subject = SecCertificateCopySubjectSummary(certificate) as String? ?? "Unknown"
+                let issuer = index + 1 < chain.count ? (SecCertificateCopySubjectSummary(chain[index + 1]) as String? ?? "Unknown") : subject
+                var expires: Date?
+                #if os(macOS)
+                if let values = SecCertificateCopyValues(certificate, [kSecOIDX509V1ValidityNotAfter] as CFArray, nil) as? [CFString: Any],
+                   let entry = values[kSecOIDX509V1ValidityNotAfter] as? [CFString: Any], let seconds = entry[kSecPropertyKeyValue] as? Double {
+                    expires = Date(timeIntervalSinceReferenceDate: seconds)
+                }
+                #endif
+                certificates.append(SecurityReport.Certificate(subject: subject, issuer: issuer, expires: expires))
+            }
+        }
+        let script = """
+        const secure = location.protocol === 'https:';
+        const mixed = secure ? performance.getEntriesByType('resource').filter(e => e.name.startsWith('http://')).map(e => e.name).slice(0, 40) : [];
+        const forms = secure ? Array.from(document.forms).map(f => f.action || '').filter(a => a.startsWith('http://')).slice(0, 10) : [];
+        const nav = performance.getEntriesByType('navigation')[0];
+        return { mixed: mixed, forms: forms, redirects: nav ? nav.redirectCount : 0, transport: nav ? nav.nextHopProtocol : '' };
+        """
+        let found = (try? await webView.callAsyncJavaScript(script, contentWorld: .defaultClient) as? [String: Any]) ?? [:]
+        return SecurityReport(url: url.absoluteString, isHTTPS: url.scheme == "https", certificates: certificates,
+                              mixedContent: found["mixed"] as? [String] ?? [], insecureForms: found["forms"] as? [String] ?? [],
+                              redirects: found["redirects"] as? Int ?? 0, transport: found["transport"] as? String ?? "")
+    }
+
+    func pageMetadata() async -> [String: String]? {
+        let script = """
+        const meta = (n) => { const e = document.querySelector('meta[name="' + n + '"],meta[property="' + n + '"]'); return e && e.content ? e.content.trim() : ''; };
+        let author = meta('author') || meta('article:author') || meta('twitter:creator');
+        let published = meta('article:published_time') || meta('datePublished') || meta('date') || meta('pubdate') || meta('og:updated_time');
+        for (const s of document.querySelectorAll('script[type="application/ld+json"]')) {
+          try {
+            const j = JSON.parse(s.textContent);
+            const items = Array.isArray(j) ? j : (j['@graph'] || [j]);
+            for (const it of items) {
+              if (!author && it && it.author) author = typeof it.author === 'string' ? it.author : (Array.isArray(it.author) ? it.author.map(a => a.name || a).join(', ') : (it.author.name || ''));
+              if (!published && it && (it.datePublished || it.dateCreated)) published = it.datePublished || it.dateCreated;
+            }
+          } catch (e) {}
+        }
+        return { title: meta('og:title') || document.title || '', author: author || '', published: published || '', site: meta('og:site_name') || location.hostname.replace(/^www\\./, '') };
+        """
+        guard let result = try? await webView.callAsyncJavaScript(script, contentWorld: .defaultClient) as? [String: Any] else { return nil }
+        return result.compactMapValues { ($0 as? String).map { String($0.prefix(300)) } }
+    }
+
+    func loginFormOrigin() async -> String? {
+        try? await webView.callAsyncJavaScript(LoginScripts.probe, contentWorld: .defaultClient) as? String
+    }
+
+    func fillLogin(origin: String, user: String, password: String) async -> Bool {
+        let r = try? await webView.callAsyncJavaScript(LoginScripts.fill, arguments: ["origin": origin, "user": user, "password": password], contentWorld: .defaultClient)
+        return (r as? Bool) ?? false
+    }
+
+    /// Reads a filled-in sign-in form just before it is sent, so the browser can offer to keep it. Gives up after a second so a stuck page never holds up a navigation.
+    private func captureLoginBeforeNavigation() async -> [String: Any]? {
+        await withTaskGroup(of: [String: Any]?.self) { group in
+            group.addTask { @MainActor in try? await self.webView.callAsyncJavaScript(LoginScripts.capture, contentWorld: .defaultClient) as? [String: Any] }
+            group.addTask { try? await Task.sleep(for: .seconds(1)); return nil }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
+    }
+
+    func pageDiagnostics() async -> [String: Any]? {
+        let script = """
+        const nav = performance.getEntriesByType('navigation')[0];
+        const res = performance.getEntriesByType('resource').slice(0, 400).map(r => ({ name: r.name.slice(0, 300), type: r.initiatorType || 'other', start: r.startTime, duration: r.duration, transfer: r.transferSize || 0, decoded: r.decodedBodySize || 0, status: r.responseStatus || 0 }));
+        if (nav) res.unshift({ name: location.href.slice(0, 300), type: 'document', start: 0, duration: nav.duration, transfer: nav.transferSize || 0, decoded: nav.decodedBodySize || 0, status: nav.responseStatus || 0 });
+        const area = (s) => { const out = []; try { for (let i = 0; i < Math.min(s.length, 200); i++) { const k = s.key(i); out.push({ key: k, value: String(s.getItem(k)).slice(0, 2000), size: (s.getItem(k) || '').length }); } } catch (e) {} return out; };
+        const cookies = document.cookie ? document.cookie.split('; ').slice(0, 100).map(c => { const i = c.indexOf('='); return { key: c.slice(0, i), value: c.slice(i + 1, i + 200), size: c.length }; }) : [];
+        const paint = performance.getEntriesByName('first-paint')[0];
+        return { resources: res, local: area(localStorage), session: area(sessionStorage), cookies: cookies, errors: window.__bsErrors || [],
+                 perf: { load: nav ? nav.loadEventEnd : 0, dcl: nav ? nav.domContentLoadedEventEnd : 0, paint: paint ? paint.startTime : null, requests: res.length, transfer: res.reduce((a, r) => a + r.transfer, 0), nodes: document.getElementsByTagName('*').length } };
+        """
+        return try? await webView.callAsyncJavaScript(script, contentWorld: .defaultClient) as? [String: Any]
+    }
+
+    /// Runs what the person typed in the scratchpad, in the extension-style isolated world: it sees the page's elements but not its own variables.
+    func runScratch(_ code: String) async -> String {
+        let body = "const __r = await (async () => { " + code + "\n})(); return __r === undefined ? 'undefined' : (typeof __r === 'string' ? __r : JSON.stringify(__r, null, 2));"
+        do {
+            let value = try await webView.callAsyncJavaScript(body, contentWorld: .defaultClient)
+            return (value as? String).map { String($0.prefix(20000)) } ?? "undefined"
+        } catch { return "Error: " + error.localizedDescription }
+    }
+
+
+    func setInspectable(_ on: Bool) { webView.isInspectable = on }
+
+    func pageText() async -> String? {
+        let result = try? await webView.callAsyncJavaScript("return (document.body ? document.body.innerText : '').slice(0, 15000);", contentWorld: .defaultClient) as? String
+        let text = result?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return text.isEmpty ? nil : text
+    }
+
+    func pagePDF() async -> Data? {
+        guard webView.url != nil else { return nil }
+        let config = WKPDFConfiguration()
+        if let size = await contentSize() { config.rect = CGRect(origin: .zero, size: size) }
+        return try? await webView.pdf(configuration: config)
+    }
+
+    func screenshot(fullPage: Bool) async -> Data? {
+        guard webView.url != nil else { return nil }
+        if fullPage {
+            guard let pdf = await pagePDF() else { return nil }
+            return PageImage.png(fromPDF: pdf)
+        }
+        guard let image = try? await webView.takeSnapshot(configuration: WKSnapshotConfiguration()) else { return nil }
+        return PageImage.png(from: image)
+    }
+
+    func presentNativeFind() {
+        #if os(iOS)
+        webView.isFindInteractionEnabled = true
+        webView.findInteraction?.presentFindNavigator(showingReplace: false)
+        #endif
+    }
+
+    /// Finds the main article and returns its text blocks. Runs in the browser's own isolated world and only reads the page.
+    func readableContent() async -> ReadableArticle? {
+        let script = """
+        const roots = Array.from(document.querySelectorAll('article, main, [role="main"], #content, .post, .article, .entry-content'));
+        let best = null, score = 0;
+        for (const el of (roots.length ? roots : [document.body])) {
+          const s = Array.from(el.querySelectorAll('p')).reduce((a, p) => a + (p.innerText || '').length, 0);
+          if (s > score) { score = s; best = el; }
+        }
+        if (!best || score < 400) return null;
+        const blocks = [];
+        best.querySelectorAll('h1,h2,h3,h4,p,li,blockquote,pre,img').forEach(el => {
+          const t = el.tagName.toLowerCase();
+          if (el.closest('nav,header,footer,aside,form,[aria-hidden="true"],.comments,.related,.share')) return;
+          if (t === 'img') {
+            const src = el.currentSrc || el.src;
+            if (src && el.naturalWidth > 240) blocks.push({ t: 'img', v: src, a: el.alt || '' });
+            return;
+          }
+          const text = (el.innerText || '').trim();
+          if (!text || (t === 'p' && text.length < 25)) return;
+          blocks.push({ t: t, v: text });
+        });
+        return { title: document.title, site: location.hostname.replace(/^www\\./, ''), blocks: blocks.slice(0, 800) };
+        """
+        let result = try? await webView.callAsyncJavaScript(script, contentWorld: .defaultClient)
+        return ReadableArticle.from(result)
+    }
+    var currentURL: URL? { webView.url }
+
+    var zoomFactor: Double {
+        get { webView.pageZoom }
+        set { webView.pageZoom = newValue }
+    }
+
+    func isBusy() async -> Bool {
+        if webView.isLoading { return true }
+        // Spelled out: `.none` alone would be read as Optional.none and make every tab look busy.
+        if webView.cameraCaptureState != WKMediaCaptureState.none || webView.microphoneCaptureState != WKMediaCaptureState.none { return true }
+        return await webView.requestMediaPlaybackState() == .playing
+    }
+
+    func printPage() {
+        #if os(macOS)
+        let operation = webView.printOperation(with: NSPrintInfo.shared)
+        operation.showsPrintPanel = true
+        operation.showsProgressPanel = true
+        // A page in a background tab has no size yet, and the operation needs one to lay the page out.
+        if webView.window == nil { operation.view?.frame = NSRect(x: 0, y: 0, width: 612, height: 792) }
+        if let window = webView.window ?? NSApp.keyWindow {
+            operation.runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil)
+        } else {
+            operation.run()
+        }
+        #else
+        let controller = UIPrintInteractionController.shared
+        controller.printFormatter = webView.viewPrintFormatter()
+        controller.present(animated: true)
+        #endif
+    }
+
+    func webArchive() async -> Data? {
+        guard webView.url != nil else { return nil }
+        return await withCheckedContinuation { continuation in
+            webView.createWebArchiveData { result in continuation.resume(returning: try? result.get()) }
+        }
+    }
+
+    func captureState() -> Any? { webView.interactionState }
+    func restoreState(_ state: Any) { webView.interactionState = state }
+
+    func load(_ url: URL) { webView.load(URLRequest(url: url)) }
+    func reload() { webView.reload() }
+
+    func setGestures(_ options: GestureOptions) {
+        webView.allowsBackForwardNavigationGestures = options.backForward
+        #if os(macOS)
+        webView.allowsMagnification = options.pinchZoom
+        #else
+        webView.scrollView.pinchGestureRecognizer?.isEnabled = options.pinchZoom
+        webView.scrollView.showsVerticalScrollIndicator = false
+        webView.scrollView.showsHorizontalScrollIndicator = false
+        if options.pullToRefresh {
+            if refresher == nil {
+                let control = UIRefreshControl()
+                control.addTarget(self, action: #selector(pulledToRefresh), for: .valueChanged)
+                refresher = control
+            }
+            webView.scrollView.refreshControl = refresher
+        } else {
+            webView.scrollView.refreshControl = nil
+        }
+        #endif
+    }
+
+    #if os(iOS)
+    private var refresher: UIRefreshControl?
+    @objc private func pulledToRefresh() { webView.reload() }
+    private func stopRefreshing() { refresher?.endRefreshing() }
+    #else
+    private func stopRefreshing() {}
+    #endif
+    func stop() { webView.stopLoading() }
+    func goBack() { webView.goBack() }
+    func goForward() { webView.goForward() }
+    func close() { observers.removeAll() }
+
+    func find(_ text: String, backwards: Bool) async -> Bool {
+        guard !text.isEmpty else { clearFind(); return false }
+        let config = WKFindConfiguration()
+        config.backwards = backwards
+        config.wraps = true
+        config.caseSensitive = false
+        return (try? await webView.find(text, configuration: config).matchFound) ?? false
+    }
+
+    func clearFind() {
+        Task { _ = try? await webView.find("", configuration: WKFindConfiguration()) }
+    }
+
+    func snapshot() async -> Data? {
+        guard webView.url != nil else { return nil }
+        let config = WKSnapshotConfiguration()
+        config.snapshotWidth = 480
+        guard let image = try? await webView.takeSnapshot(configuration: config) else { return nil }
+        // The picture is turned into PNG data away from the main thread: doing it there froze the window for a moment on every tab switch.
+        nonisolated(unsafe) let picture = image
+        return await Task.detached(priority: .utility) { () -> Data? in
+            #if os(macOS)
+            guard let tiff = picture.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) else { return nil }
+            return rep.representation(using: .png, properties: [:])
+            #else
+            return picture.pngData()
+            #endif
+        }.value
+    }
+
+    func showErrorPage(title: String, detail: String, baseURL: URL?) {
+        webView.loadHTMLString(ErrorPage.html(title: title, detail: detail), baseURL: baseURL)
+    }
+
+    private func observe() {
+        func track<V>(_ kp: KeyPath<WKWebView, V>, _ apply: @escaping (TabEngineEvents, WKWebView) -> Void) {
+            observers.append(webView.observe(kp, options: [.initial, .new]) { [weak self] wv, _ in
+                MainActor.assumeIsolated {
+                    guard let self, let events = self.events else { return }
+                    apply(events, wv)
+                }
+            })
+        }
+        track(\.title) { e, wv in if let t = wv.title { e.engineTitleChanged(t) } }
+        track(\.url) { e, wv in if let u = wv.url { e.engineURLChanged(u) } }
+        track(\.isLoading) { e, wv in e.engineLoadingChanged(isLoading: wv.isLoading, canGoBack: wv.canGoBack, canGoForward: wv.canGoForward) }
+        track(\.canGoBack) { e, wv in e.engineLoadingChanged(isLoading: wv.isLoading, canGoBack: wv.canGoBack, canGoForward: wv.canGoForward) }
+        track(\.canGoForward) { e, wv in e.engineLoadingChanged(isLoading: wv.isLoading, canGoBack: wv.canGoBack, canGoForward: wv.canGoForward) }
+        track(\.estimatedProgress) { e, wv in e.engineProgress(wv.estimatedProgress) }
+        track(\.hasOnlySecureContent) { e, wv in e.engineSecurityChanged(wv.hasOnlySecureContent) }
+        track(\.themeColor) { e, wv in e.engineThemeColorChanged(PageTint(wv.themeColor)) }
+        #if os(iOS)
+        if #available(iOS 26.0, *) {
+            // The system fades and blurs page content under the status bar and home indicator. Nothing should be drawn there.
+            webView.scrollView.topEdgeEffect.isHidden = true
+            webView.scrollView.bottomEdgeEffect.isHidden = true
+        }
+        observers.append(webView.scrollView.observe(\.contentOffset, options: [.new]) { [weak self] scrollView, _ in
+            MainActor.assumeIsolated { self?.scrolled(scrollView) }
+        })
+        #endif
+    }
+
+    #if os(iOS)
+    /// Turns the page's scroll position into "how far did it move toward the top". Only the user's own movement counts, and
+    /// the rubber band beyond either end is ignored. Reaching the very top always counts as scrolling back up.
+    private func scrolled(_ scrollView: UIScrollView) {
+        let y = scrollView.contentOffset.y
+        defer { lastScrollY = y; lastBoundsHeight = scrollView.bounds.height }
+        // The page was resized (the bars came or went): the offset moved by itself, not because the user scrolled.
+        guard abs(scrollView.bounds.height - lastBoundsHeight) < 1 else { return }
+        guard let last = lastScrollY, scrollView.isDragging || scrollView.isDecelerating else { return }
+        let top = -scrollView.adjustedContentInset.top
+        let bottom = scrollView.contentSize.height - scrollView.bounds.height + scrollView.adjustedContentInset.bottom
+        if y <= top + 1 { events?.engineScrolled(deltaY: 100); return }
+        guard y < bottom else { return }
+        events?.engineScrolled(deltaY: Double(last - y))
+    }
+    #endif
+
+    // MARK: Navigation delegate
+
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
+        guard let target = navigationAction.request.url, let events else { return .cancel }
+        let main = navigationAction.targetFrame?.isMainFrame ?? true
+        // A sign-in form is read here, while the page is still showing it, only when the browser asked and only for a submit or a script-made navigation.
+        if main, webView.url != nil, navigationAction.navigationType == .formSubmitted || navigationAction.navigationType == .other,
+           events.engineWantsLoginCapture(), let found = LoginRules.capture(await captureLoginBeforeNavigation()) {
+            events.engineLoginSubmitted(origin: found.origin, user: found.user, password: found.password)
+        }
+        #if os(iOS)
+        // A link to a site that has an installed app, followed from another site: ask before the system hands it to the app.
+        if main, navigationAction.navigationType == .linkActivated, let scheme = target.scheme?.lowercased(), scheme == "http" || scheme == "https",
+           let app = ExternalApps.app(forHost: target.host), app.scheme.isEmpty == false,
+           let appURL = URL(string: app.scheme + "://"), UIApplication.shared.canOpenURL(appURL),
+           ExternalApps.app(forHost: webView.url?.host) != app {
+            let request = navigationAction.request
+            let host = (target.host ?? "").lowercased()
+            let rule = ExternalApps.sites[host] ?? (ExternalApps.mode == .ask ? nil : ExternalApps.mode.rawValue)
+            Task { @MainActor in
+                var choice: Int
+                switch rule {
+                case "app": choice = 0
+                case "browser": choice = 1
+                default:
+                    choice = await Dialogs.choose(title: "Open in \(app.name)?",
+                                                  message: "This link can open in the \(app.name) app instead of the browser.",
+                                                  buttons: ["Open in \(app.name)", "Always Open in \(app.name)", "Always Stay for \(host)", "Stay in Browser Setu"])
+                    switch choice {
+                    case 1: ExternalApps.remember?(host, "app"); choice = 0
+                    case 2: ExternalApps.remember?(host, "browser"); choice = 1
+                    case 3: choice = 1
+                    default: break
+                    }
+                }
+                if choice == 0 { UIApplication.shared.open(target, options: [.universalLinksOnly: true]) { opened in
+                    // If the app could not take it after all, the page still opens here.
+                    if !opened { webView.load(request) }
+                } } else {
+                    // Loaded by the browser itself, which the system does not hand to an app.
+                    webView.load(request)
+                }
+            }
+            return .cancel
+        }
+        #endif
+        // A page's own "Download" button often hands the browser a data: or blob: address (a key, a profile, an export). As a download that is only a file
+        // saved to Downloads, never a page that runs; shown as a page it stays blocked. Only a click on a link marked as a download qualifies.
+        if navigationAction.shouldPerformDownload, navigationAction.navigationType == .linkActivated,
+           let scheme = target.scheme?.lowercased(), scheme == "data" || scheme == "blob" {
+            return .download
+        }
+        let decision = events.engineDecideNavigation(url: target, mainFrame: main)
+        #if os(iOS)
+        // Staying means staying. The system hands a tapped web address that belongs to an installed app (YouTube, Maps, ...) to that app. Loading the
+        // same request from here is not a tap, so it is never handed over: the tap is cancelled and the page is loaded by the browser itself (public API
+        // only). Unless the user chose the app for this site. Redirects the page makes on its own are not covered by this.
+        if decision == .allow, navigationAction.targetFrame?.isMainFrame == true, navigationAction.navigationType == .linkActivated,
+           let scheme = target.scheme?.lowercased(), scheme == "http" || scheme == "https", !navigationAction.shouldPerformDownload,
+           ExternalApps.sites[(target.host ?? "").lowercased()] != "app", ExternalApps.mode != .app {
+            let request = navigationAction.request
+            Task { @MainActor in webView.load(request) }
+            return .cancel
+        }
+        #endif
+        switch decision {
+        case .allow: return navigationAction.shouldPerformDownload ? .download : .allow
+        case .external, .deny: return .cancel
+        }
+    }
+
+    func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse) async -> WKNavigationResponsePolicy {
+        if let http = navigationResponse.response as? HTTPURLResponse,
+           let disposition = http.value(forHTTPHeaderField: "Content-Disposition"),
+           disposition.lowercased().hasPrefix("attachment") {
+            return .download
+        }
+        return navigationResponse.canShowMIMEType ? .allow : .download
+    }
+
+    /// Sites that ask for a name and password with a browser sign-in box. Certificate problems are never overridden:
+    /// those go back to the system, which refuses the connection.
+    func webView(_ webView: WKWebView, respondTo challenge: URLAuthenticationChallenge) async -> (URLSession.AuthChallengeDisposition, URLCredential?) {
+        let space = challenge.protectionSpace
+        guard ChallengeAction.action(forAuthenticationMethod: space.authenticationMethod) == .askUser else {
+            return (.performDefaultHandling, nil)
+        }
+        // A saved sign-in is tried once. If the site refuses it, it is forgotten (the password has probably changed) and the user is asked.
+        // What the sign-in box belongs to, in full: a saved sign-in is only offered back to exactly this (scheme, host, port, realm, method), over HTTPS.
+        let signInSpace = SignInSpace(scheme: space.protocol ?? "", host: space.host, port: space.port, realm: space.realm ?? "",
+                                      method: space.authenticationMethod, isProxy: space.proxyType != nil)
+        if challenge.previousFailureCount == 0, let saved = events?.engineSavedSignIn(space: signInSpace) {
+            return (.useCredential, URLCredential(user: saved.user, password: saved.password, persistence: .forSession))
+        }
+        if challenge.previousFailureCount > 0 { events?.engineForgetSignIn(space: signInSpace) }
+        // A wrong password comes back as a second challenge; asking again forever would trap the page.
+        guard challenge.previousFailureCount < 3 else { return (.cancelAuthenticationChallenge, nil) }
+        let canRemember = !(events?.enginePrivate ?? true) && signInSpace.allowsAutomatic
+        guard let entered = await Dialogs.credentials(host: space.host, realm: space.realm, isProxy: space.proxyType != nil, canRemember: canRemember) else {
+            return (.cancelAuthenticationChallenge, nil)
+        }
+        if entered.remember { events?.engineRememberSignIn(space: signInSpace, user: entered.user, password: entered.password) }
+        return (.useCredential, URLCredential(user: entered.user, password: entered.password, persistence: .forSession))
+    }
+
+    func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
+        download.delegate = downloads
+    }
+
+    func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
+        download.delegate = downloads
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        #if os(macOS)
+        refreshEditableFocus()
+        #endif
+        stopRefreshing()
+        events?.engineDidFinishLoading()
+        readIconLinks(in: webView)
+        #if os(iOS)
+        paintBehindPage(webView)
+        Task { @MainActor [weak self, weak webView] in
+            try? await Task.sleep(for: .milliseconds(700))      // a page that sets its dark background late is read again
+            if let webView { self?.paintBehindPage(webView) }
+        }
+        #endif
+    }
+
+    #if os(iOS)
+    /// The strip under the status bar (and above the page on a phone) is not part of the page, so it showed white on a dark page and the clock
+    /// vanished. It is painted with the page's own background colour, read from the page (read-only), as the page's theme colour if it gave none.
+    private func paintBehindPage(_ webView: WKWebView) {
+        let script = """
+        const solid = (e) => {
+          const m = getComputedStyle(e).backgroundColor.match(/[\\d.]+/g) || [];
+          const a = m.length >= 4 ? parseFloat(m[3]) : (m.length >= 3 ? 1 : 0);
+          return a > 0.5 ? [+m[0], +m[1], +m[2]] : null;
+        };
+        // The element at the top edge, and the ones around it, outward until one has a solid background; then the middle of the page.
+        for (const [x, y] of [[innerWidth / 2, 2], [4, 2], [innerWidth / 2, innerHeight / 2]]) {
+          let el = document.elementFromPoint(x, y), color = null;
+          while (el && !color) { color = solid(el); el = el.parentElement; }
+          if (color) return color;
+        }
+        return solid(document.documentElement) || null;
+        """
+        Task { @MainActor [weak self, weak webView] in
+            guard let webView else { return }
+            let rgb = (try? await webView.callAsyncJavaScript(script, contentWorld: .defaultClient)) as? [Int]
+            let color: UIColor? = rgb.flatMap { $0.count == 3 ? UIColor(red: CGFloat($0[0]) / 255, green: CGFloat($0[1]) / 255, blue: CGFloat($0[2]) / 255, alpha: 1) : nil }
+            // Unknown: let WebKit choose the strip colour itself, from the page, rather than guessing white or black.
+            webView.underPageBackgroundColor = color
+            webView.scrollView.backgroundColor = color
+            if webView.themeColor == nil, let rgb, rgb.count == 3 {
+                self?.events?.engineThemeColorChanged(PageTint(red: Double(rgb[0]) / 255, green: Double(rgb[1]) / 255, blue: Double(rgb[2]) / 255))
+            }
+        }
+    }
+    #endif
+
+    /// Reads the page's icon links. The script runs in the browser's own isolated world, so the page cannot see or change it, and it
+    /// only reads: nothing is written to the page.
+    private func readIconLinks(in webView: WKWebView) {
+        let script = """
+        return Array.from(document.querySelectorAll('link[rel]'))
+          .filter(l => /(^|\\s)(icon|apple-touch-icon|apple-touch-icon-precomposed)(\\s|$)/i.test(l.rel) && l.href)
+          .map(l => ({ href: l.href, rel: l.rel.toLowerCase(), sizes: l.sizes ? l.sizes.value : '' }));
+        """
+        Task { @MainActor [weak self, weak webView] in
+            guard let webView, let result = try? await webView.callAsyncJavaScript(script, contentWorld: .defaultClient) as? [[String: Any]] else {
+                self?.events?.engineIconsFound([]); return
+            }
+            // A large touch icon is a clean square; otherwise the largest declared size; otherwise the order given.
+            func area(_ sizes: String) -> Int {
+                let parts = sizes.split(separator: " ").first?.lowercased().split(separator: "x").compactMap { Int($0) } ?? []
+                return parts.count == 2 ? parts[0] * parts[1] : 0
+            }
+            let ranked = result.sorted {
+                let a = ($0["rel"] as? String ?? "").contains("apple-touch") ? 1 : 0, b = ($1["rel"] as? String ?? "").contains("apple-touch") ? 1 : 0
+                if a != b { return a > b }
+                return area($0["sizes"] as? String ?? "") > area($1["sizes"] as? String ?? "")
+            }
+            self?.events?.engineIconsFound(ranked.compactMap { ($0["href"] as? String).flatMap(URL.init(string:)) })
+        }
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        stopRefreshing()
+        report(error)
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        stopRefreshing()
+        report(error)
+    }
+
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        events?.engineProcessCrashed()
+    }
+
+    private func report(_ error: Error) {
+        let ns = error as NSError
+        guard ns.code != NSURLErrorCancelled, ns.domain != "WebKitErrorDomain" || ns.code != 102 else { return }
+        events?.engineLoadFailed(url: ns.userInfo[NSURLErrorFailingURLErrorKey] as? URL, description: ns.localizedDescription)
+    }
+
+    // MARK: UI delegate
+
+    func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
+                 for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+        if let target = navigationAction.request.url {
+            events?.engineOpenInNewTab(url: target, userInitiated: navigationAction.navigationType != .other)
+        }
+        return nil
+    }
+
+    func webViewDidClose(_ webView: WKWebView) {
+        events?.engineRequestClose()
+    }
+
+    func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String,
+                 initiatedByFrame frame: WKFrameInfo) async {
+        _ = await Dialogs.choose(title: frame.request.url?.host ?? "Alert", message: message, buttons: ["OK"])
+    }
+
+    func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String,
+                 initiatedByFrame frame: WKFrameInfo) async -> Bool {
+        await Dialogs.choose(title: frame.request.url?.host ?? "Confirm", message: message,
+                             buttons: ["OK", "Cancel"]) == 0
+    }
+
+    func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String,
+                 defaultText: String?, initiatedByFrame frame: WKFrameInfo) async -> String? {
+        await Dialogs.promptText(title: frame.request.url?.host ?? "Prompt", message: prompt,
+                                 placeholder: defaultText ?? "")
+    }
+
+    func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin,
+                 initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType) async -> WKPermissionDecision {
+        let originString = "\(origin.protocol)://\(origin.host)" + (origin.port != 0 ? ":\(origin.port)" : "")
+        let kinds: [PermissionType]
+        switch type {
+        case .camera: kinds = [.camera]
+        case .microphone: kinds = [.microphone]
+        default: kinds = [.camera, .microphone]
+        }
+        guard let events else { return .deny }
+        return await events.engineRequestPermission(origin: originString, kinds: kinds) ? .grant : .deny
+    }
+
+    #if os(macOS)
+    func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters,
+                 initiatedByFrame frame: WKFrameInfo) async -> [URL]? {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = parameters.allowsMultipleSelection
+        panel.canChooseDirectories = parameters.allowsDirectories
+        return panel.runModal() == .OK ? panel.urls : nil
+    }
+    #endif
+}
+
+// MARK: - Downloads
+
+/// Forwards WKDownload events to the engine-neutral coordinator.
+@MainActor
+final class WebKitDownloads: NSObject, WKDownloadDelegate {
+    private let coordinator: DownloadCoordinator
+    private var ids: [ObjectIdentifier: UUID] = [:]
+    private var observers: [ObjectIdentifier: NSKeyValueObservation] = [:]
+
+    init(coordinator: DownloadCoordinator) {
+        self.coordinator = coordinator
+    }
+
+    nonisolated func download(_ download: WKDownload, decideDestinationUsing response: URLResponse,
+                              suggestedFilename: String) async -> URL? {
+        await MainActor.run {
+            let started = coordinator.begin(suggestedName: suggestedFilename, sourceHost: download.originalRequest?.url?.host, cancel: { download.cancel { _ in } })
+            let key = ObjectIdentifier(download)
+            ids[key] = started.id
+            observers[key] = download.progress.observe(\.fractionCompleted) { [weak self] p, _ in
+                let f = p.fractionCompleted
+                Task { @MainActor in self?.coordinator.update(started.id, fraction: f) }
+            }
+            return started.destination
+        }
+    }
+
+    nonisolated func downloadDidFinish(_ download: WKDownload) {
+        Task { @MainActor in
+            let key = ObjectIdentifier(download)
+            if let id = ids[key] { coordinator.finish(id, source: download.originalRequest?.url) }
+            forget(key)
+        }
+    }
+
+    nonisolated func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
+        Task { @MainActor in
+            let key = ObjectIdentifier(download)
+            if let id = ids[key] {
+                // With resume data (and a server that allows it) the download can carry on; otherwise it is dropped as before.
+                if let resumeData, !resumeData.isEmpty { coordinator.interrupt(id, resumeData: resumeData, source: download.originalRequest?.url) }
+                else { coordinator.discard(id) }
+            }
+            forget(key)
+        }
+    }
+
+    /// Carries on a stopped download from its resume data, using any open page's web view.
+    func resume(_ data: Data, in webView: WKWebView) {
+        webView.resumeDownload(fromResumeData: data) { [weak self] download in download.delegate = self }
+    }
+
+    private func forget(_ key: ObjectIdentifier) {
+        ids[key] = nil
+        observers[key] = nil
+    }
+}
+
+// MARK: - Page theme colour
+
+extension PageTint {
+    #if os(macOS)
+    init?(_ color: NSColor?) {
+        guard let rgb = color?.usingColorSpace(.sRGB) else { return nil }
+        self.init(red: Double(rgb.redComponent), green: Double(rgb.greenComponent), blue: Double(rgb.blueComponent))
+    }
+    #else
+    init?(_ color: UIColor?) {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        guard let color, color.getRed(&r, green: &g, blue: &b, alpha: &a) else { return nil }
+        self.init(red: Double(r), green: Double(g), blue: Double(b))
+    }
+    #endif
+}
+
+#if os(macOS)
+/// A web view that tells the shell how far the user scrolled. It only reads the scroll event the view already
+/// receives; nothing is injected into the page.
+final class ScrollReportingWebView: WKWebView {
+    var onScroll: ((CGFloat) -> Void)?
+    /// Asked first about each typed character; true means the browser used it and the page does not see it.
+    var onKey: ((NSEvent) -> Bool)?
+    /// A click or a key the page got: focus may have moved.
+    var onInteraction: (() -> Void)?
+
+    override func keyDown(with event: NSEvent) {
+        if onKey?(event) == true { return }
+        super.keyDown(with: event)
+        onInteraction?()
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        super.mouseUp(with: event)
+        onInteraction?()
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        super.scrollWheel(with: event)
+        // Momentum after the fingers lift would keep folding the toolbar; only deliberate movement counts.
+        if event.momentumPhase == [] { onScroll?(event.scrollingDeltaY) }
+    }
+}
+#endif

@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = ["crates/domain", "crates/storage", "crates/ffi"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "UNLICENSED"
+publish = false
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }

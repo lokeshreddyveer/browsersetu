@@ -1,0 +1,142 @@
+Browser Setu uses the following open-source software. Thank you to everyone who makes and maintains it.
+
+WEB ENGINE
+WebKit — the web engine built into macOS and iOS, provided by Apple.
+
+DATA
+The Public Suffix List — https://publicsuffix.org — Mozilla Public License 2.0. Used to keep privacy rules from matching a whole public suffix such as "co.uk".
+
+PRIVACY PROTECTION
+VayuSetu protection code — written by the same author and shared with this app.
+
+RUST LIBRARIES (the browser's core: storage, tabs and navigation rules)
+anstyle 1.0.14 — MIT or Apache-2.0
+anyhow 1.0.104 — MIT or Apache-2.0
+askama 0.16.1 — MIT or Apache-2.0
+askama_derive 0.16.1 — MIT or Apache-2.0
+askama_macros 0.16.1 — MIT or Apache-2.0
+askama_parser 0.16.1 — MIT or Apache-2.0
+autocfg 1.5.1 — Apache-2.0 or MIT
+basic-toml 0.1.10 — MIT or Apache-2.0
+bitflags 2.13.2 — MIT or Apache-2.0
+bumpalo 3.20.3 — MIT or Apache-2.0
+bytes 1.12.1 — MIT
+camino 1.2.6 — MIT or Apache-2.0
+cargo-platform 0.3.3 — MIT or Apache-2.0
+cargo_metadata 0.23.1 — MIT
+cc 1.8.0 — MIT or Apache-2.0
+cfg-if 1.0.5 — MIT or Apache-2.0
+clap 4.6.7 — MIT or Apache-2.0
+clap_builder 4.6.7 — MIT or Apache-2.0
+clap_derive 4.6.7 — MIT or Apache-2.0
+clap_lex 1.1.1 — MIT or Apache-2.0
+displaydoc 0.2.7 — MIT or Apache-2.0
+equivalent 1.0.3 — Apache-2.0 or MIT
+errno 0.3.14 — MIT or Apache-2.0
+fallible-iterator 0.3.0 — MIT or Apache-2.0
+fallible-streaming-iterator 0.1.9 — MIT or Apache-2.0
+fastrand 2.5.0 — Apache-2.0 or MIT
+find-msvc-tools 0.1.14 — MIT or Apache-2.0
+foldhash 0.2.0 — Zlib
+form_urlencoded 1.2.2 — MIT or Apache-2.0
+fs-err 3.3.2 — MIT or Apache-2.0
+getrandom 0.4.3 — MIT or Apache-2.0
+glob 0.3.4 — MIT or Apache-2.0
+goblin 0.8.2 — MIT
+hashbrown 0.16.1 — MIT or Apache-2.0
+hashbrown 0.17.1 — MIT or Apache-2.0
+hashlink 0.12.2 — MIT or Apache-2.0
+heck 0.5.0 — MIT or Apache-2.0
+icu_collections 2.3.0 — Unicode-3.0
+icu_locale_core 2.3.0 — Unicode-3.0
+icu_normalizer 2.3.0 — Unicode-3.0
+icu_normalizer_data 2.3.0 — Unicode-3.0
+icu_properties 2.3.0 — Unicode-3.0
+icu_properties_data 2.3.0 — Unicode-3.0
+icu_provider 2.3.1 — Unicode-3.0
+idna 1.1.0 — MIT or Apache-2.0
+idna_adapter 1.2.2 — Apache-2.0 or MIT
+indexmap 2.14.2 — Apache-2.0 or MIT
+itoa 1.0.18 — MIT or Apache-2.0
+js-sys 0.3.106 — MIT or Apache-2.0
+libc 0.2.190 — MIT or Apache-2.0
+libsqlite3-sys 0.38.2 — MIT
+linux-raw-sys 0.12.1 — Apache-2.0 WITH LLVM-exception or Apache-2.0 or MIT
+litemap 0.8.3 — Unicode-3.0
+log 0.4.34 — MIT or Apache-2.0
+memchr 2.8.3 — Unlicense or MIT
+minimal-lexical 0.2.1 — MIT or Apache-2.0
+nom 7.1.3 — MIT
+once_cell 1.21.4 — MIT or Apache-2.0
+percent-encoding 2.3.2 — MIT or Apache-2.0
+pkg-config 0.3.34 — MIT or Apache-2.0
+plain 0.2.3 — MIT or Apache-2.0
+potential_utf 0.1.6 — Unicode-3.0
+proc-macro2 1.0.107 — MIT or Apache-2.0
+quote 1.0.47 — MIT or Apache-2.0
+r-efi 6.0.0 — MIT or Apache-2.0 or LGPL-2.1-or-later
+rsqlite-vfs 0.1.1 — MIT
+rusqlite 0.40.2 — MIT
+rustc-hash 2.1.3 — Apache-2.0 or MIT
+rustix 1.1.5 — Apache-2.0 WITH LLVM-exception or Apache-2.0 or MIT
+rustversion 1.0.23 — MIT or Apache-2.0
+scroll 0.12.0 — MIT
+scroll_derive 0.12.1 — MIT
+semver 1.0.28 — MIT or Apache-2.0
+serde 1.0.229 — MIT or Apache-2.0
+serde_core 1.0.229 — MIT or Apache-2.0
+serde_derive 1.0.229 — MIT or Apache-2.0
+serde_json 1.0.154 — MIT or Apache-2.0
+serde_spanned 1.1.2 — MIT or Apache-2.0
+shlex 2.0.1 — MIT or Apache-2.0
+siphasher 1.0.4 — MIT or Apache-2.0
+smallvec 1.16.3 — MIT or Apache-2.0
+smawk 0.3.3 — MIT
+sqlite-wasm-rs 0.5.5 — MIT
+stable_deref_trait 1.2.1 — MIT or Apache-2.0
+static_assertions 1.1.0 — MIT or Apache-2.0
+strsim 0.11.1 — MIT
+syn 2.0.119 — MIT or Apache-2.0
+syn 3.0.9 — MIT or Apache-2.0
+synstructure 0.14.0 — MIT
+tempfile 3.27.0 — MIT or Apache-2.0
+textwrap 0.16.4 — MIT
+thiserror 2.0.21 — MIT or Apache-2.0
+thiserror-impl 2.0.21 — MIT or Apache-2.0
+tinystr 0.8.4 — Unicode-3.0
+toml 1.1.8+spec-1.1.0 — MIT or Apache-2.0
+toml_datetime 1.1.2+spec-1.1.0 — MIT or Apache-2.0
+toml_parser 1.1.5+spec-1.1.0 — MIT or Apache-2.0
+toml_writer 1.1.3+spec-1.1.0 — MIT or Apache-2.0
+unicode-ident 1.0.27 — (MIT or Apache-2.0) AND Unicode-3.0
+unicode-width 0.2.2 — MIT or Apache-2.0
+uniffi 0.32.2 — MPL-2.0
+uniffi_bindgen 0.32.2 — MPL-2.0
+uniffi_core 0.32.2 — MPL-2.0
+uniffi_internal_macros 0.32.2 — MPL-2.0
+uniffi_macros 0.32.2 — MPL-2.0
+uniffi_meta 0.32.2 — MPL-2.0
+uniffi_pipeline 0.32.2 — MPL-2.0
+uniffi_udl 0.32.2 — MPL-2.0
+url 2.5.8 — MIT or Apache-2.0
+utf8_iter 1.0.4 — Apache-2.0 or MIT
+vcpkg 0.2.15 — MIT or Apache-2.0
+wasm-bindgen 0.2.129 — MIT or Apache-2.0
+wasm-bindgen-macro 0.2.129 — MIT or Apache-2.0
+wasm-bindgen-macro-support 0.2.129 — MIT or Apache-2.0
+wasm-bindgen-shared 0.2.129 — MIT or Apache-2.0
+weedle2 5.0.0 — MIT
+windows-link 0.2.1 — MIT or Apache-2.0
+windows-sys 0.61.2 — MIT or Apache-2.0
+winnow 1.0.4 — MIT
+writeable 0.6.4 — Unicode-3.0
+yoke 0.8.3 — Unicode-3.0
+yoke-derive 0.8.4 — Unicode-3.0
+zerofrom 0.1.8 — Unicode-3.0
+zerofrom-derive 0.1.8 — Unicode-3.0
+zerotrie 0.2.5 — Unicode-3.0
+zerovec 0.11.8 — Unicode-3.0
+zerovec-derive 0.11.6 — Unicode-3.0
+zmij 1.0.23 — MIT
+
+Each library is used under the terms of the licence shown. Where two licences are listed, either one applies. Full licence texts are published with each library on crates.io and in its source repository.
