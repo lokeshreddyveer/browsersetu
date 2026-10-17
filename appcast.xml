@@ -4,6 +4,15 @@
     <title>Browser Setu</title>
     <item>
       <title>Browser Setu 0.3.3</title>
+      <pubDate>Sat, 17 Oct 2026 22:41:39 -0000</pubDate>
+      <sparkle:version>10</sparkle:version>
+      <sparkle:shortVersionString>0.3.3</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <description><![CDATA[Build 10 of 0.3.3. Passwords now save and fill (including App Store Connect-style sign-in frames, with a Save password card and an iCloud Keychain option); YouTube ads blocked by default; pop-up handling; right-click menus; drag to customize sidebar and address bar buttons; redesigned Bookmarks, History and Downloads panels, start page and Settings; first-run setup; Pure Black theme; smoother lists. See the README and docs/releases/0.3.3-build-10.md.]]></description>
+      <enclosure url="https://github.com/lokeshreddyveer/browsersetu/releases/download/v0.3.3/BrowserSetu-0.3.3.dmg" type="application/octet-stream" sparkle:edSignature="4vX1R6NRNul4Q18JgVym8gI4233cpkj1efqfAbuaGYxPXndqYr1bV7ExgoWrGsKFQvunbyBQRRftkfvBpqtIBQ==" length="16627000"/>
+    </item>
+    <item>
+      <title>Browser Setu 0.3.3</title>
       <pubDate>Sat, 17 Oct 2026 18:20:09 -0000</pubDate>
       <sparkle:version>8</sparkle:version>
       <sparkle:shortVersionString>0.3.3</sparkle:shortVersionString>
@@ -47,5 +56,5 @@
       <description><![CDATA[First public release. A native WebKit browser for macOS with a Rust core: tabs, sidebar layouts, workspaces, content blocking, per-site privacy, saved passwords in your Keychain, web extensions, research collections, developer tools, and automatic updates. Early release: see docs/capabilities.md for what has been checked and what has not.]]></description>
       <enclosure url="https://github.com/lokeshreddyveer/browsersetu/releases/download/v0.2.0/BrowserSetu-0.2.0.dmg" type="application/octet-stream" sparkle:edSignature="grmp8aD3U/KjtKeEkUcI3ESkfohsFjkds81VYV6rBzRGW6/JUxDLtcQ1hg178QCZEWXFRCB4AwrzLHSqGC2VCw==" length="14528271"/>
     </item>
-          </channel>
+            </channel>
 </rss>
