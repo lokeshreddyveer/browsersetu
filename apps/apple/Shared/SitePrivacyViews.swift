@@ -19,7 +19,7 @@ struct SitePrivacyView: View {
             if let host {
                 Section("What \(TabOrganizing.siteName(forHost: host)) has here") { reportRows }
                 Section("Safety of this page") { securityRows }
-                Section("Browser identity and WebRTC") { identityRows(host: host) }
+                Section("Identity, scripts and sleep") { identityRows(host: host) }
                 Section {
                     Button("Forget This Site Completely…", role: .destructive) { confirmForget = true }
                 } footer: {
@@ -62,6 +62,12 @@ struct SitePrivacyView: View {
                 Label(finding.text, systemImage: finding.severity == .danger ? "exclamationmark.octagon.fill" : (finding.severity == .caution ? "exclamationmark.triangle.fill" : "checkmark.shield.fill"))
                     .foregroundStyle(finding.severity == .danger ? Color.red : (finding.severity == .caution ? Color.orange : Color.green))
             }
+            if let identity = model.active?.identity {
+                VStack(alignment: .leading, spacing: 2) {
+                    Label(identity.headline, systemImage: identity.isVerified ? "checkmark.seal.fill" : "lock.fill").foregroundStyle(identity.isVerified ? Color.green : Color.secondary)
+                    Text(identity.detail).font(.caption).foregroundStyle(.secondary)
+                }
+            }
             LabeledContent("Connection", value: security.isHTTPS ? (security.transport.isEmpty ? "encrypted" : "encrypted (\(security.transport))") : "not encrypted")
             LabeledContent("Redirects on the way", value: "\(security.redirects)")
             ForEach(Array(security.certificates.enumerated()), id: \.offset) { index, cert in
@@ -86,6 +92,17 @@ struct SitePrivacyView: View {
             Toggle("Allow WebRTC on \(TabOrganizing.siteName(forHost: host)) (video calls)", isOn: Binding(
                 get: { key.map { model.webRTCExceptions.contains($0) } ?? false },
                 set: { model.setWebRTCException(host: host, allowed: $0) }))
+        }
+        Toggle("Allow JavaScript on this site", isOn: Binding(
+            get: { model.scriptsAllowed(forHost: host) },
+            set: { model.setScripts(host: host, allowed: $0) }))
+        Toggle("Never put this site's tabs to sleep", isOn: Binding(
+            get: { model.neverSleeps(host: host) },
+            set: { model.setNeverSleeps(host: host, $0) }))
+        if model.randomizeFingerprint {
+            Toggle("Randomize canvas, audio and processor details here", isOn: Binding(
+                get: { key.map { !model.fingerprintExceptions.contains($0) } ?? true },
+                set: { model.setFingerprintException(host: host, allowed: !$0) }))
         }
         Text("WebRTC lets a page learn this device's address on your network. Switching it off applies to pages opened after the change. Camera and microphone requests are asked about separately.")
             .font(.caption).foregroundStyle(.secondary)

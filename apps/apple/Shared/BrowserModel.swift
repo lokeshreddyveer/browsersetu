@@ -142,6 +142,10 @@ final class BrowserModel: ObservableObject {
     /// Sites with their own look for websites, apart from the Settings choice: "light" or "dark", by site.
     @Published private(set) var siteAppearance: [String: String] = [:]
     /// The look of the whole browser (Themes.swift): "midnight" is the default.
+    @Published var userThemes: [UserTheme] = []
+    @Published var startTile: StartTile = .regular { didSet { saveSetting("start_tile", startTile.rawValue) } }
+    /// The side panel on the start page is open.
+    @Published var startDrawerOpen = false
     @Published var themeID = "midnight" { didSet { saveSetting("theme", themeID); applyTheme() } }
     @Published var customTheme = CustomTheme()
     @Published var appearance: AppearanceMode = .system { didSet { saveSetting("appearance", appearance.rawValue); applySystemAppearance() } }
@@ -184,8 +188,17 @@ final class BrowserModel: ObservableObject {
     var tempPermissions: [String: Double] = [:]
     @Published var blockWebRTC = false { didSet { saveSetting("block_webrtc", blockWebRTC ? "1" : "0"); pushWebPolicy() } }
     var webRTCExceptions = Set<String>()
+    /// Sites with scripts switched off, sites whose tabs never go to sleep, and the page switches (see PageDefenses.swift).
+    @Published var jsOffSites = Set<String>()
+    @Published var neverSleepSites = Set<String>()
+    @Published var fingerprintExceptions = Set<String>()
+    @Published var randomizeFingerprint = false { didSet { saveSetting("fingerprint_noise", randomizeFingerprint ? "1" : "0"); pushWebPolicy() } }
+    @Published var deAMP = true { didSet { saveSetting("de_amp", deAMP ? "1" : "0"); pushWebPolicy() } }
+    @Published var blockVideoAds = false { didSet { saveSetting("video_ads", blockVideoAds ? "1" : "0"); pushWebPolicy() } }
     @Published var tabTree = false { didSet { saveSetting("tab_tree", tabTree ? "1" : "0"); if tabTree { arrangeAsTree() } } }
-    @Published var splitTabID: UInt64?
+    @Published var splitTabID: UInt64? { didSet { if splitTabID == nil { thirdSplitTabID = nil } } }
+    /// A third panel beside the split pair; only ever set while `splitTabID` is.
+    @Published var thirdSplitTabID: UInt64?
     @Published var splitOrientation: SplitOrientation = .sideBySide { didSet { saveSetting("split_orientation", splitOrientation.rawValue) } }
     @Published var addressBarPosition: AddressBarPosition = .bottom { didSet { saveSetting("address_bar", addressBarPosition.rawValue) } }
     @Published var showContinue = true { didSet { saveSetting("show_continue", showContinue ? "1" : "0") } }
@@ -404,6 +417,8 @@ final class BrowserModel: ObservableObject {
     /// All windows of this browser (this one included). Every window has its own model; they share the database, engine, privacy rules and extensions.
     var windows = WindowRegistry()
     var isSecondary = false
+    /// A guest window: every tab is private, nothing is remembered, and the person's bookmarks and passwords are not offered. Mac only.
+    @Published var isGuest = false
     /// A secondary window asks its screen to close when its last tab leaves or closes.
     var onWindowShouldClose: (() -> Void)?
     /// An extension fetched from the Chrome Web Store, waiting for the user to approve what it asks for.
@@ -569,6 +584,15 @@ final class BrowserModel: ObservableObject {
     @Published var syncSettingsToo = false { didSet { saveSetting("sync_settings", syncSettingsToo ? "1" : "0") } }
     @Published var remoteTabs: [RemoteTabs] = []
     @Published var lastSync: Date?
+    /// Which kinds of thing sync carries (settings and passwords keep their own switches), tabs sent between devices, and when sync last worked.
+    @Published var syncCategorySet: Set<SyncCategory> = SyncCategory.defaultOn
+    @Published var outbox: [SentTab] = []
+    @Published var inbox: [SentTab] = []
+    var sentSeen = Set<String>()
+    @Published var lastPush: Date?
+    @Published var lastPull: Date?
+    @Published var syncError: String?
+    @Published var isSyncing = false
     @Published var syncStatus = ""
     /// iPhone: how much of the page's foot the floating toolbar covers; set by the screen, applied to every tab's scroll view.
     var phoneBottomInset: CGFloat = 0 { didSet { if oldValue != phoneBottomInset { for tab in tabs { tab.applyBottomInset() } } } }
@@ -869,7 +893,8 @@ final class BrowserModel: ObservableObject {
     // MARK: Tabs
 
     @discardableResult
-    func openTab(url: URL?, isPrivate: Bool, select makeActive: Bool = true, opener: TabController? = nil, container: String? = nil, scratch: Bool = false) -> TabController {
+    func openTab(url: URL?, isPrivate requestedPrivate: Bool, select makeActive: Bool = true, opener: TabController? = nil, container: String? = nil, scratch: Bool = false) -> TabController {
+        let isPrivate = requestedPrivate || isGuest
         let info = core.createTab(url: "about:blank", private: isPrivate)
         // Written down before the tab exists: its engine reads the container to choose where the page keeps its data.
         var meta = TabMeta()
@@ -966,7 +991,7 @@ final class BrowserModel: ObservableObject {
             closedTabs.append(ClosedTab(url: url, title: closing.title, group: closing.group, workspace: closing.workspace))
             if closedTabs.count > 20 { closedTabs.removeFirst() }
         }
-        if splitTabID == id { splitTabID = nil }
+        forgetSplitPanel(id)
         if tabMeta[id] != nil { tabMeta[id] = nil; saveTabMeta() }
         let closedHost = closing.url?.host
         closing.shutdown()
@@ -1265,6 +1290,15 @@ final class BrowserModel: ObservableObject {
     }
 
     var splitTab: TabController? { tabs.first { $0.id == splitTabID } }
+    var thirdSplitTab: TabController? { splitTabID == nil ? nil : tabs.first { $0.id == thirdSplitTabID } }
+
+    /// The tabs showing in panels, in order, each once: the active tab, then the second and third panels.
+    var splitPanels: [TabController] {
+        guard let active else { return [] }
+        var out = [active]
+        for tab in [splitTab, thirdSplitTab] { if let tab, !out.contains(where: { $0.id == tab.id }) { out.append(tab) } }
+        return out
+    }
 
     /// Shows `tab` next to the active tab. Each panel owns its own live view; a tab can only be in one place.
     func openSplit(with tab: TabController) {
@@ -1284,13 +1318,47 @@ final class BrowserModel: ObservableObject {
         splitTabID = tab.id
     }
 
+    /// Adds a third panel to an open split. A fourth is not offered: three pages still leave each one wide enough to read.
+    func addThirdPanel(with tab: TabController) {
+        guard splitTabID != nil else { openSplit(with: tab); return }
+        guard tab.id != activeID, tab.id != splitTabID, tab.isPrivate == activeIsPrivate else {
+            notice = tab.isPrivate != activeIsPrivate ? "Private and normal tabs can’t share a split view." : nil
+            return
+        }
+        tab.ensureLoaded()
+        thirdSplitTabID = tab.id
+    }
+
+    func addThirdPanelNewTab() {
+        guard splitTabID != nil else { openSplitNewTab(); return }
+        let current = activeID
+        let tab = openTab(url: nil, isPrivate: activeIsPrivate, select: false)
+        if let current { activeID = current }
+        thirdSplitTabID = tab.id
+    }
+
+    func removeThirdPanel() { thirdSplitTabID = nil }
+
     func closeSplit() { splitTabID = nil }
 
-    func swapSplit() {
-        guard let other = splitTabID, let current = activeID else { return }
-        splitTabID = current
-        select(other)
-        splitTabID = current
+    /// A tab that was in a panel is gone: closing the second panel promotes the third; closing the third leaves the pair.
+    func forgetSplitPanel(_ id: UInt64) {
+        if splitTabID == id { splitTabID = thirdSplitTabID; thirdSplitTabID = nil }
+        else if thirdSplitTabID == id { thirdSplitTabID = nil }
+    }
+
+    /// Makes another panel the active one and puts the active tab in its place. With no argument, swaps with the second panel.
+    func swapSplit(with other: UInt64? = nil) {
+        guard let current = activeID, let target = other ?? splitTabID, target != current else { return }
+        if target == thirdSplitTabID {
+            thirdSplitTabID = current
+            select(target)
+            thirdSplitTabID = current
+        } else if target == splitTabID {
+            splitTabID = current
+            select(target)
+            splitTabID = current
+        }
     }
 
     // MARK: Tab groups
@@ -1736,11 +1804,13 @@ final class BrowserModel: ObservableObject {
         tempPermissions = Self.decodeMap(get("temp_permissions"), as: Double.self)
         webRTCExceptions = Set(Self.decodeMap(get("webrtc_exceptions"), as: [String].self)["list"] ?? [])
         blockWebRTC = get("block_webrtc") == "1"
+        loadPageDefenseSettings(get)
         rememberLayoutPerWorkspace = get("layout_per_workspace") != "0"
         syncGroupName = get("sync_group") ?? profileName
         syncDevices = Self.decodeMap(get("sync_devices"), as: [SyncDevice].self)["list"] ?? []
         syncHistory = Self.decodeMap(get("sync_history"), as: [String].self)["list"] ?? []
         syncAskOnConflict = get("sync_ask") == "1"
+        loadSyncAdvanced(get)
         iCloudSync = get("sync_icloud") == "1"
         permissionDates = Self.decodeMap(get("permission_dates"), as: Double.self)
         permissionExpiry = get("permission_expiry").flatMap(PermissionExpiry.init(rawValue:)) ?? .month
@@ -1961,6 +2031,7 @@ final class BrowserModel: ObservableObject {
         "strip_tracking", "tab_groups", "tab_layout", "tab_previews", "tint_toolbar", "toolbar_autohide", "toolbar_items",
         "workspaces", "double_click", "collapse_on_scroll", "search_template", "search_suggestions", "speed_pill", "pill_collapsed", "site_icons", "shortcuts", "homepage", "saved_sessions", "organize_downloads", "site_notes", "search_shortcuts", "bookmark_tags", "site_styles", "phone_toolbar", "address_display", "address_icon", "search_panel_bottom", "search_panel_bottom2", "swipe_address", "app_links", "app_link_sites", "blur_private_switcher", "permission_expiry", "favorites_order", "overview_style", "overview_grouped", "overview_sort", "dark_pages", "dark_sites", "website_appearance", "site_appearance", "theme", "theme_custom", "low_power_memory", "clear_on_quit", "remember_reading", "keep_form_drafts", "site_zoom", "group_colors",
         "save_logins", "mouse_gestures", "mouse_gesture_map", "site_open_rules", "download_concurrent", "spotlight_bookmarks", "vim_on", "vim_keymap", "workflows", "download_rules", "extension_profiles", "site_delete_rules", "site_user_agents", "containers", "split_templates", "tab_tree", "block_webrtc", "webrtc_exceptions",
+        "site_js_off", "never_sleep_sites", "fingerprint_noise", "fingerprint_exceptions", "de_amp", "video_ads", "user_themes", "start_tile",
     ]
 
     /// The same, with the slow key derivation and encryption on a background thread so the window never stalls.
@@ -2124,6 +2195,9 @@ extension BrowserModel {
             .init(id: "vim-mode", title: workbench.vimEnabled ? "Turn Off Vim Keys" : "Turn On Vim Keys", subtitle: "j k gg G H L and more, when no text field has the keyboard", symbol: "keyboard", shortcut: "") { [self] in workbench.vimEnabled.toggle() },
             .init(id: "site-privacy", title: "Site Privacy: What This Site Stores, Safety Check, Forget", subtitle: "", symbol: "lock.shield", shortcut: "") { [self] in sheet = .sitePrivacy },
             .init(id: "forget-site", title: "Forget This Site Completely", subtitle: "Data, history, permissions, sign-ins", symbol: "trash.slash", shortcut: "") { [self] in Task { await forgetActiveSiteCompletely() } },
+            .init(id: "sync-now", title: "Sync Now", subtitle: syncHealth.title, symbol: "arrow.triangle.2.circlepath.icloud", shortcut: "") { [self] in Task { await syncNowCloud() } },
+            .init(id: "never-sleep", title: neverSleeps(host: active?.url?.host) ? "Allow This Site to Sleep" : "Never Put This Site to Sleep", subtitle: "Its tabs stay loaded when memory is short", symbol: "moon.zzz", shortcut: "") { [self] in setNeverSleeps(host: active?.url?.host, !neverSleeps(host: active?.url?.host)) },
+            .init(id: "site-js", title: scriptsAllowed(forHost: active?.url?.host) ? "Turn JavaScript Off for This Site" : "Turn JavaScript On for This Site", subtitle: "The page reloads", symbol: "curlybraces", shortcut: "") { [self] in setScripts(host: active?.url?.host, allowed: !scriptsAllowed(forHost: active?.url?.host)) },
             .init(id: "webrtc", title: blockWebRTC ? "Allow WebRTC" : "Switch WebRTC Off", subtitle: "Pages cannot learn this device's network address", symbol: "network.slash", shortcut: "") { [self] in blockWebRTC.toggle() },
             .init(id: "research", title: "Research Collections", subtitle: "Pages, highlights, notes and citations", symbol: "books.vertical.fill", shortcut: "") { [self] in sheet = .research },
             .init(id: "research-add-page", title: "Add This Page to Research", subtitle: "", symbol: "plus.rectangle.on.folder", shortcut: "") { [self] in Task { await addPageToResearch() } },
@@ -2183,11 +2257,16 @@ extension BrowserModel {
             .init(id: "timeline", title: "Tab Activity", subtitle: "Which tabs you used, and when", symbol: "clock.arrow.circlepath", shortcut: "") { [self] in sheet = .timeline },
             .init(id: "close-duplicates", title: "Close Duplicate Tabs", subtitle: "", symbol: "square.on.square.dashed", shortcut: "") { [self] in closeDuplicateTabs() },
         ]
+        for device in sendTargets where active?.isBlank == false && active?.isPrivate == false {
+            all.append(.init(id: "send-\(device.id)", title: "Send This Tab to \(device.name)", subtitle: "", symbol: "paperplane", shortcut: "") { [self] in if let tab = active { sendTab(tab, to: device) } })
+        }
         all.append(.init(id: "find", title: "Find in Page", subtitle: "", symbol: "magnifyingglass", shortcut: "⌘F") { [self] in showFind() })
         all.append(.init(id: "focus", title: focusMode ? "Exit Focus Mode" : "Enter Focus Mode", subtitle: "", symbol: "rectangle.compress.vertical", shortcut: "⌥⌘F") { [self] in toggleFocusMode() })
         all.append(.init(id: "split-new", title: "Split View: New Tab on the Side", subtitle: "", symbol: "rectangle.split.2x1", shortcut: "") { [self] in openSplitNewTab() })
         if splitTabID != nil {
             all.append(.init(id: "split-close", title: "Close Split View", subtitle: "", symbol: "rectangle", shortcut: "") { [self] in closeSplit() })
+            if thirdSplitTabID == nil { all.append(.init(id: "split-third", title: "Split View: Add a Third Panel", subtitle: "A new tab beside the other two", symbol: "rectangle.split.3x1", shortcut: "") { [self] in addThirdPanelNewTab() }) }
+            else { all.append(.init(id: "split-third-close", title: "Split View: Remove the Third Panel", subtitle: "", symbol: "rectangle.split.2x1", shortcut: "") { [self] in removeThirdPanel() }) }
             all.append(.init(id: "split-swap", title: "Swap Split Panels", subtitle: "", symbol: "arrow.left.arrow.right", shortcut: "") { [self] in swapSplit() })
         }
         for ws in workspaces where ws.name != activeWorkspace {

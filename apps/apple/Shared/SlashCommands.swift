@@ -80,11 +80,13 @@ enum SlashParse: Equatable {
 
 /// Which tabs match words typed after a command. All the words must appear, in the title or the address.
 enum TabMatch {
+    /// Every typed word must be in the title or address, allowing a slip of the keys in the longer ones.
     static func matches(title: String, url: String, words: String) -> Bool {
         let terms = words.lowercased().split(whereSeparator: \.isWhitespace).map(String.init)
         guard !terms.isEmpty else { return true }
         let haystack = (title + " " + url).lowercased()
-        return terms.allSatisfy { haystack.contains($0) }
+        if terms.allSatisfy({ haystack.contains($0) }) { return true }
+        return FuzzyText.matches(words, in: title + " " + url)
     }
 }
 
@@ -92,6 +94,10 @@ enum TabMatch {
 enum TextSnippet {
     static func make(in text: String, around word: String, radius: Int = 48) -> String? {
         guard !word.isEmpty, let range = text.range(of: word, options: [.caseInsensitive, .diacriticInsensitive]) else { return nil }
+        return make(in: text, range: range, radius: radius)
+    }
+
+    static func make(in text: String, range: Range<String.Index>, radius: Int = 48) -> String {
         let start = text.index(range.lowerBound, offsetBy: -radius, limitedBy: text.startIndex) ?? text.startIndex
         let end = text.index(range.upperBound, offsetBy: radius, limitedBy: text.endIndex) ?? text.endIndex
         var piece = String(text[start..<end]).replacingOccurrences(of: "\n", with: " ").replacingOccurrences(of: "\t", with: " ")

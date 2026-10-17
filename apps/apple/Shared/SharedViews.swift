@@ -396,7 +396,7 @@ struct ProfileSettingsSection: View {
                         Spacer()
                         if name != model.profileName { Button("Switch") { model.switchProfile(name) } }
                         if name != model.profileName && name != "default" {
-                            Button(role: .destructive) { Task { if await model.requireAuthentication("Delete a profile and its data") { await model.removeProfile(name) } } } label: { Image(systemName: "trash") }
+                            Button(role: .destructive) { Task { if await model.requireAuthentication("Delete a profile and its data") { await model.removeProfile(name) } } } label: { Image(systemName: "trash").accessibilityLabel("Delete") }
                                 .buttonStyle(.borderless).help("Delete profile “\(name)”")
                         }
                     }
@@ -575,8 +575,8 @@ struct WorkspacesSettingsSection: View {
                         Text(ws.name)
                         Spacer()
                         Text("\(model.workspaceTabCount(ws.name))").foregroundStyle(.secondary)
-                        Button { model.moveWorkspace(ws.name, by: -1) } label: { Image(systemName: "chevron.up") }.buttonStyle(.borderless)
-                        Button { model.moveWorkspace(ws.name, by: 1) } label: { Image(systemName: "chevron.down") }.buttonStyle(.borderless)
+                        Button { model.moveWorkspace(ws.name, by: -1) } label: { Image(systemName: "chevron.up").accessibilityLabel("Move workspace up") }.buttonStyle(.borderless)
+                        Button { model.moveWorkspace(ws.name, by: 1) } label: { Image(systemName: "chevron.down").accessibilityLabel("Move workspace down") }.buttonStyle(.borderless)
                         Button("Rename") { rename(ws.name) }.buttonStyle(.borderless)
                         Button("Delete", role: .destructive) { model.deleteWorkspace(ws.name) }.buttonStyle(.borderless)
                     }
@@ -648,6 +648,7 @@ struct PrivacySettingsSection: View {
             SiteIconsSection()
             ThreatListSection()
             ProxySection()
+            PageDefensesSection()
             SitePermissionsSection()
             WebsiteDataSection()
             BrowsingDataSection()
@@ -863,6 +864,7 @@ struct PerformanceSettingsSection: View {
     var body: some View {
         Group {
             MemorySettingsSection()
+            NeverSleepSection()
             ResourceMonitorSection()
             Section("Split View") {
                 Text(model.splitTabID == nil ? "Split view is closed." : "Split view keeps two pages live at once, which uses more memory.")
@@ -977,6 +979,7 @@ struct SettingsView: View {
             TabsSettingsSection()
             GesturesSection()
             SiteZoomSection()
+            GlobalStyleSection()
         case "privacy":
             PrivacySettingsSection()
             SensitiveLockSection()
@@ -1051,6 +1054,7 @@ struct SettingsView: View {
             PasswordsInfoSection()
             PermissionActivitySection()
             SiteZoomSection()
+            GlobalStyleSection()
             DownloadsSettingsSection()
             PerformanceSettingsSection()
             #if os(iOS)
@@ -1085,7 +1089,7 @@ struct WebStoreBanner: View {
                 Text("Add this extension?").font(.system(size: 12.5, weight: .medium)).lineLimit(1)
                 Button { model.addFromChromeWebStore(id: id) } label: {
                     Text(model.storeBusy ? "Adding…" : "Add")
-                        .font(.system(size: 12, weight: .semibold)).foregroundStyle(.white)
+                        .scaledFont(12, weight: .semibold).foregroundStyle(.white)
                         .padding(.horizontal, 12).frame(height: 22)
                         .background(Capsule(style: .continuous).fill(Theme.accent))
                 }
@@ -1184,7 +1188,7 @@ struct ExtensionPermissionsSheet: View {
                         model.extensionCenter.setPermission(info.id, key: row.key, isSite: row.isSite, granted: on)
                         refresh()
                     }))
-                    if row.custom { Button(role: .destructive) { model.extensionCenter.removeSiteRule(info.id, key: row.key); refresh() } label: { Image(systemName: "trash") }.buttonStyle(.borderless) }
+                    if row.custom { Button(role: .destructive) { model.extensionCenter.removeSiteRule(info.id, key: row.key); refresh() } label: { Image(systemName: "trash").accessibilityLabel("Delete") }.buttonStyle(.borderless) }
                 }
             }
         }
@@ -1394,14 +1398,14 @@ struct DownloadQueueControls: View {
                         Menu(item.priority.title) {
                             ForEach(DownloadPriority.allCases.reversed()) { p in Button(p.title) { coordinator.setPriority(item.id, p) } }
                         }.fixedSize()
-                        Button(role: .destructive) { coordinator.cancelWaiting(item.id) } label: { Image(systemName: "xmark") }.buttonStyle(.borderless)
+                        Button(role: .destructive) { coordinator.cancelWaiting(item.id) } label: { Image(systemName: "xmark").accessibilityLabel("Cancel download") }.buttonStyle(.borderless)
                     }
                 }
                 ForEach(coordinator.scheduled) { item in
                     HStack {
                         VStack(alignment: .leading) { Text(item.filename).lineLimit(1); Text("Starts when the hold ends").font(.caption).foregroundStyle(.secondary) }
                         Spacer()
-                        Button(role: .destructive) { coordinator.removeScheduled(item.id) } label: { Image(systemName: "xmark") }.buttonStyle(.borderless)
+                        Button(role: .destructive) { coordinator.removeScheduled(item.id) } label: { Image(systemName: "xmark").accessibilityLabel("Remove from schedule") }.buttonStyle(.borderless)
                     }
                 }
                 if !held, !coordinator.scheduled.isEmpty { Button("Start Them Now") { coordinator.startScheduledNow() } }

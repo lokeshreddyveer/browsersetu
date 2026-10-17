@@ -57,6 +57,7 @@ struct TabMenuItems: View {
 
     var body: some View {
         Button(tab.pinned ? "Unpin Tab" : "Pin Tab") { model.togglePin(tab) }
+        SendTabMenu(tab: tab)
         Button(tab.isLocked ? "Unlock Tab" : "Lock Tab") { model.toggleLock(tab) }
         Button("Duplicate Tab") { model.duplicateTab(tab) }.disabled(tab.isBlank)
         Button("Put Tab to Sleep") { Task { await model.hibernate(tab) } }
@@ -65,7 +66,12 @@ struct TabMenuItems: View {
             Button("Close \(model.duplicateCount(of: tab)) Duplicate Tab\(model.duplicateCount(of: tab) == 1 ? "" : "s")") { model.closeDuplicates(of: tab) }
         }
         #if os(macOS)
-        if tab.id != model.activeID { Button("Open in Split View") { model.openSplit(with: tab) } }
+        if tab.id != model.activeID {
+            if model.splitTabID != nil, tab.id != model.splitTabID, tab.id != model.thirdSplitTabID {
+                Button("Add to Split View as a Third Panel") { model.addThirdPanel(with: tab) }
+                Button("Replace the Second Panel") { model.openSplit(with: tab) }
+            } else { Button("Open in Split View") { model.openSplit(with: tab) } }
+        }
         Menu("Move to Window") {
             Button("New Window") { model.moveTabToNewWindow(tab.id) }.disabled(model.tabs.count < 2 && model.isSecondary)
             if !model.otherWindows.isEmpty {
@@ -257,7 +263,7 @@ struct TabListRow: View {
                 Text(displayHost(tab.url)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 0)
-            Button { model.closeTab(id: tab.id) } label: { Image(systemName: "xmark").font(.caption.weight(.bold)).foregroundStyle(.secondary).frame(width: 30, height: 30) }
+            Button { model.closeTab(id: tab.id) } label: { Image(systemName: "xmark").font(.caption.weight(.bold)).foregroundStyle(.secondary).frame(width: 30, height: 30).accessibilityLabel("Close") }
                 .buttonStyle(.plain).accessibilityLabel("Close tab")
         }
         .padding(.horizontal, 12).padding(.vertical, model.density.listRowPadding - 1)
@@ -298,7 +304,7 @@ struct TabCard: View {
                     .frame(height: 130).frame(maxWidth: .infinity)
                     .clipped()
                 Button { model.closeTab(id: tab.id) } label: {
-                    Image(systemName: "xmark.circle.fill").font(.title3)
+                    Image(systemName: "xmark.circle.fill").font(.title3).accessibilityLabel("Close tab")
                         .symbolRenderingMode(.palette).foregroundStyle(.white, .black.opacity(0.55))
                 }
                 .buttonStyle(.plain).padding(6)
@@ -426,7 +432,7 @@ struct TabOverview: View {
                     TextField("Search Tabs", text: $query).textFieldStyle(.plain).focused($searchFocused)
                         .accessibilityIdentifier("tab-search")
                     if !query.isEmpty {
-                        Button { query = "" } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain).foregroundStyle(.secondary)
+                        Button { query = "" } label: { Image(systemName: "xmark.circle.fill").accessibilityLabel("Clear") }.buttonStyle(.plain).foregroundStyle(.secondary)
                     }
                 }
                 .padding(.horizontal, 10).padding(.vertical, 7)
@@ -445,7 +451,7 @@ struct TabOverview: View {
                 Button(selection.active ? "Cancel" : "Select") { animated(.easeInOut(duration: 0.2)) { if selection.active { selection.end() } else { selection.active = true } } }
                     .accessibilityIdentifier("overview-select")
                 viewMenu
-                Button { model.newTab(); model.hideOverview() } label: { Image(systemName: "plus") }
+                Button { model.newTab(); model.hideOverview() } label: { Image(systemName: "plus").accessibilityLabel("New tab") }
                     .help("New Tab").accessibilityLabel("New tab")
                 Button("Done") { model.hideOverview() }.keyboardShortcut(.defaultAction)
                     .accessibilityIdentifier("overview-done")

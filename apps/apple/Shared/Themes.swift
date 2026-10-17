@@ -38,9 +38,35 @@ struct BrowserTheme: Identifiable, Equatable {
     let glow: RGB
     let scheme: AppearanceMode?
     let decoration: ThemeDecoration
+    /// Where the gallery files it: the moods, the classic palettes, or the person's own.
+    var family = "Mood"
 
     static let midnight = BrowserTheme(id: "midnight", name: "Midnight", note: "The default", accent: RGB(0.05, 0.50, 0.60), chrome: nil,
                                        top: RGB(0.045, 0.055, 0.095), bottom: RGB(0.055, 0.058, 0.068), glow: RGB(0.067, 0.106, 0.188), scheme: nil, decoration: .none)
+
+    /// Palettes people already know from editors and terminals, drawn here as whole-browser themes.
+    static let palettes: [BrowserTheme] = [
+        BrowserTheme(id: "dracula", name: "Dracula", note: "Purple, pink and a dark slate", accent: RGB(hex: 0xBD93F9), chrome: RGB(hex: 0x21222C),
+                     top: RGB(hex: 0x282A36), bottom: RGB(hex: 0x1E1F29), glow: RGB(hex: 0x44475A), scheme: .dark, decoration: .none, family: "Palette"),
+        BrowserTheme(id: "nord", name: "Nord", note: "Arctic blues, calm and low contrast", accent: RGB(hex: 0x88C0D0), chrome: RGB(hex: 0x272C36),
+                     top: RGB(hex: 0x2E3440), bottom: RGB(hex: 0x242933), glow: RGB(hex: 0x434C5E), scheme: .dark, decoration: .none, family: "Palette"),
+        BrowserTheme(id: "gruvbox", name: "Gruvbox Dark", note: "Warm retro browns and yellow", accent: RGB(hex: 0xFABD2F), chrome: RGB(hex: 0x1D2021),
+                     top: RGB(hex: 0x282828), bottom: RGB(hex: 0x1D2021), glow: RGB(hex: 0x504945), scheme: .dark, decoration: .none, family: "Palette"),
+        BrowserTheme(id: "gruvboxlight", name: "Gruvbox Light", note: "The same warmth on cream", accent: RGB(hex: 0xD65D0E), chrome: RGB(hex: 0xEBDBB2),
+                     top: RGB(hex: 0xFBF1C7), bottom: RGB(hex: 0xEBDBB2), glow: RGB(hex: 0xF2E5BC), scheme: .light, decoration: .none, family: "Palette"),
+        BrowserTheme(id: "solarized", name: "Solarized Dark", note: "Deep teal with a soft blue", accent: RGB(hex: 0x268BD2), chrome: RGB(hex: 0x00212B),
+                     top: RGB(hex: 0x002B36), bottom: RGB(hex: 0x001E26), glow: RGB(hex: 0x073642), scheme: .dark, decoration: .none, family: "Palette"),
+        BrowserTheme(id: "solarizedlight", name: "Solarized Light", note: "Sand and blue", accent: RGB(hex: 0x268BD2), chrome: RGB(hex: 0xEEE8D5),
+                     top: RGB(hex: 0xFDF6E3), bottom: RGB(hex: 0xEEE8D5), glow: RGB(hex: 0xF5EBCB), scheme: .light, decoration: .none, family: "Palette"),
+        BrowserTheme(id: "catppuccin", name: "Catppuccin Mocha", note: "Soft pastel on a warm dark", accent: RGB(hex: 0xCBA6F7), chrome: RGB(hex: 0x181825),
+                     top: RGB(hex: 0x1E1E2E), bottom: RGB(hex: 0x11111B), glow: RGB(hex: 0x313244), scheme: .dark, decoration: .none, family: "Palette"),
+        BrowserTheme(id: "tokyonight", name: "Tokyo Night", note: "Neon blues over a deep indigo", accent: RGB(hex: 0x7AA2F7), chrome: RGB(hex: 0x16161E),
+                     top: RGB(hex: 0x1A1B26), bottom: RGB(hex: 0x13141C), glow: RGB(hex: 0x292E42), scheme: .dark, decoration: .none, family: "Palette"),
+        BrowserTheme(id: "rosepine", name: "Rosé Pine", note: "Dusky rose and iris", accent: RGB(hex: 0xC4A7E7), chrome: RGB(hex: 0x16141F),
+                     top: RGB(hex: 0x191724), bottom: RGB(hex: 0x12101B), glow: RGB(hex: 0x26233A), scheme: .dark, decoration: .none, family: "Palette"),
+        BrowserTheme(id: "onedark", name: "One Dark", note: "The editor classic", accent: RGB(hex: 0x61AFEF), chrome: RGB(hex: 0x21252B),
+                     top: RGB(hex: 0x282C34), bottom: RGB(hex: 0x1B1F27), glow: RGB(hex: 0x3E4451), scheme: .dark, decoration: .none, family: "Palette"),
+    ]
 
     static let all: [BrowserTheme] = [
         midnight,
@@ -195,7 +221,8 @@ extension View {
 extension BrowserModel {
     var activeTheme: BrowserTheme {
         if themeID == "custom" { return customTheme.theme }
-        return BrowserTheme.all.first { $0.id == themeID } ?? .midnight
+        if themeID.hasPrefix("user-") { return userTheme(id: themeID) ?? .midnight }
+        return (BrowserTheme.all + BrowserTheme.palettes).first { $0.id == themeID } ?? .midnight
     }
 
     var themeIsActive: Bool { themeID != "midnight" }
@@ -240,6 +267,7 @@ extension BrowserModel {
     }
 
     func loadThemeSettings() {
+        loadUserThemes()
         customTheme = (get("theme_custom").flatMap { $0.data(using: .utf8) }.flatMap { try? JSONDecoder().decode(CustomTheme.self, from: $0) }) ?? CustomTheme()
     }
 
@@ -254,6 +282,8 @@ extension BrowserModel {
         guard (try? jpeg.write(to: photoURL, options: .atomic)) != nil else { return }
         var value = customTheme
         value.hasPhoto = true
+        // The photo picks the accent, kept visible against the background; "Match Accent to Photo" does it again after a hand-picked one.
+        if let found = ThemeColor.dominantAccent(from: jpeg) { value.accent = found.readable(against: value.top) }
         setCustomTheme(value)
         if themeID != "custom" { themeID = "custom" }
         objectWillChange.send()
@@ -297,20 +327,38 @@ struct ThemesSection: View {
 
     var body: some View {
         Section {
-            LazyVGrid(columns: columns, spacing: 12) {
-                ForEach(BrowserTheme.all) { theme in card(theme, selected: model.themeID == theme.id) { model.chooseTheme(theme.id) } }
-                card(model.customTheme.theme, selected: model.themeID == "custom") { model.chooseTheme("custom") }
+            VStack(alignment: .leading, spacing: 14) {
+                gallery("Moods", BrowserTheme.all)
+                gallery("Classic palettes", BrowserTheme.palettes)
+                if !model.userThemes.isEmpty { gallery("Yours", model.userThemes.compactMap(\.theme)) }
+                gallery(nil, [model.customTheme.theme])
             }
             .padding(.vertical, 4)
             if model.themeID == "custom" { editor }
+            ThemeToolsRows()
             if model.themeIsActive { Button("Back to the Default Look") { model.chooseTheme("midnight") } }
         } header: {
             Text("Themes")
         } footer: {
-            Text("A theme changes the whole browser: its accent, the window and sidebar, and the opening page. Websites keep their own colours. Your photo stays on this device.")
+            Text("A theme changes the whole browser: its accent, the window and sidebar, and the opening page. Websites keep their own colours. Your photo stays on this device. Theme files hold colours only, so they are safe to share.")
         }
         .fileImporter(isPresented: $choosingPhoto, allowedContentTypes: [.image]) { result in
             if case .success(let url) = result { model.setThemePhoto(from: url) }
+        }
+    }
+
+    @ViewBuilder private func gallery(_ title: String?, _ themes: [BrowserTheme]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let title { Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary) }
+            LazyVGrid(columns: columns, spacing: 12) {
+                ForEach(themes) { theme in
+                    card(theme, selected: model.themeID == theme.id) { animated(.easeOut(duration: 0.2)) { model.chooseTheme(theme.id) } }
+                        .contextMenu {
+                            if theme.id != "custom" { Button("Edit as Custom") { model.editAsCustom(theme) } }
+                            if theme.id.hasPrefix("user-") { Button("Delete Theme", role: .destructive) { model.deleteUserTheme(theme.id) } }
+                        }
+                }
+            }
         }
     }
 
@@ -321,6 +369,12 @@ struct ThemesSection: View {
                     ThemeBackdrop(theme: theme, photo: theme.id == "custom" ? model.themePhoto : nil, photoDim: model.customTheme.photoDim).frame(height: 62)
                     Capsule().fill(theme.accent.color).frame(width: 30, height: 6).padding(8)
                 }
+                .overlay(alignment: .topTrailing) {
+                    Image(systemName: "checkmark.circle.fill").font(.system(size: 16)).symbolRenderingMode(.palette)
+                        .foregroundStyle(theme.accent.luminance > 0.6 ? Color.black : Color.white, theme.accent.color)
+                        .padding(5).opacity(selected ? 1 : 0).scaleEffect(selected ? 1 : 0.6)
+                }
+                .animation(.easeOut(duration: 0.18), value: selected)
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(selected ? theme.accent.color : Color.primary.opacity(0.12), lineWidth: selected ? 2 : 0.5))
                 Text(theme.name).font(.system(size: 11.5, weight: selected ? .semibold : .regular)).lineLimit(1).foregroundStyle(.primary)
@@ -335,8 +389,18 @@ struct ThemesSection: View {
         ColorPicker("Accent", selection: binding(\.accent))
         ColorPicker("Background, top", selection: binding(\.top))
         ColorPicker("Background, bottom", selection: binding(\.bottom))
+        let ratio = model.customTheme.accent.contrast(with: model.customTheme.top)
+        if ratio < 3 {
+            HStack(spacing: 8) {
+                Label("This accent is hard to see on this background.", systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange)
+                Spacer()
+                Button("Fix It") { var v = model.customTheme; v.accent = v.accent.readable(against: v.top); model.setCustomTheme(v) }.buttonStyle(.borderless)
+            }
+            .transition(.opacity)
+        }
         Button(model.customTheme.hasPhoto ? "Change Photo…" : "Choose a Photo…") { choosingPhoto = true }
         if model.customTheme.hasPhoto {
+            Button("Match Accent to Photo") { if !model.matchAccentToPhoto() { model.notice = "That photo has no colour to take an accent from." } }
             HStack {
                 Text("Darken photo")
                 Slider(value: Binding(get: { model.customTheme.photoDim }, set: { var v = model.customTheme; v.photoDim = $0; model.setCustomTheme(v) }), in: 0...0.8)

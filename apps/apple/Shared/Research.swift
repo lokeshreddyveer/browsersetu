@@ -505,7 +505,7 @@ struct ResearchView: View {
             if let file = store.savedFile(for: item) { Button("Open Copy") { reading = file }.controlSize(.small) }
             if item.kind == .highlight, item.url != nil { Button("Go to Passage") { model.goToPassage(item) }.controlSize(.small) }
             else if let url = item.url.flatMap(URL.init(string:)) { Button("Open") { model.openTab(url: url, isPrivate: false) }.controlSize(.small) }
-            Button(role: .destructive) { store.remove(item.id, from: collection.id) } label: { Image(systemName: "trash") }.buttonStyle(.borderless)
+            Button(role: .destructive) { store.remove(item.id, from: collection.id) } label: { Image(systemName: "trash").accessibilityLabel("Delete") }.buttonStyle(.borderless)
         }
     }
 

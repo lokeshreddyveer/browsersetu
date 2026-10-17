@@ -72,6 +72,12 @@ final class AddressBarController: ObservableObject {
             case .search(let url): result.append(Suggestion(kind: .search, title: "Search for “\(query)”", subtitle: "", target: url))
             }
         }
+        // A sum or a unit conversion is answered on the spot, right under the first row; choosing it copies the answer.
+        if let answer = QuickAnswer.answer(for: query) {
+            result.append(Suggestion(kind: .command, title: "= " + answer.text, subtitle: answer.reading + " · Return copies the answer", target: "quick-answer-" + answer.reading) { [weak model] in
+                copyToPasteboard(answer.text); model?.notice = "Copied " + answer.text
+            })
+        }
         for tab in model.tabs where !tab.isBlank && tab.id != model.activeID {
             let url = tab.url?.absoluteString ?? ""
             if tab.title.localizedCaseInsensitiveContains(query) || url.localizedCaseInsensitiveContains(query) {
@@ -80,7 +86,7 @@ final class AddressBarController: ObservableObject {
             }
         }
         var seen = Set<String>()
-        for b in ((try? model.core.listBookmarks(query: query)) ?? []).prefix(3) {
+        for b in (model.isGuest ? [] : ((try? model.core.listBookmarks(query: query)) ?? [])).prefix(3) {
             seen.insert(b.url)
             result.append(Suggestion(kind: .bookmark, title: b.title.isEmpty ? b.url : b.title, subtitle: b.url, target: b.url))
         }
@@ -207,7 +213,7 @@ struct SuggestionsList: View {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(rows, id: \.element.id) { index, s in
                     if let title = header(for: s.kind), index == 0 || header(for: address.suggestions[index - 1].kind) != title {
-                        Text(title).font(.system(size: 11, weight: .semibold)).tracking(0.6).foregroundStyle(.secondary).textCase(.uppercase)
+                        Text(title).scaledFont(11, weight: .semibold).tracking(0.6).foregroundStyle(.secondary).textCase(.uppercase)
                             .padding(.horizontal, 18).padding(.top, 8).padding(.bottom, 2)
                             .transition(.opacity)
                     }
@@ -303,12 +309,12 @@ struct SuggestionRow: View {
                 // History, bookmarks, tabs and engine suggestions: the title and the site on one line.
                 HStack(spacing: 8) {
                     titleText.lineLimit(1)
-                    if showsSubtitle, let line = subtitle { Text(line).font(.system(size: 12)).foregroundStyle(secondary).lineLimit(1).layoutPriority(-1) }
+                    if showsSubtitle, let line = subtitle { Text(line).scaledFont(12).foregroundStyle(secondary).lineLimit(1).layoutPriority(-1) }
                 }
             } else {
                 VStack(alignment: .leading, spacing: 1) {
                     titleText.lineLimit(1)
-                    if let line = subtitle { Text(line).font(.system(size: 12)).foregroundStyle(secondary).lineLimit(1) }
+                    if let line = subtitle { Text(line).scaledFont(12).foregroundStyle(secondary).lineLimit(1) }
                 }
             }
             Spacer(minLength: 8)
@@ -355,7 +361,7 @@ struct SuggestionRow: View {
             Text("Search ").font(.system(size: 14)).foregroundColor(secondary)
                 + Text("“\(Self.query(from: suggestion.title))”").font(.system(size: 14, weight: .semibold)).foregroundColor(primary)
         default:
-            Text(Self.highlight(suggestion.title, tokens: tokens)).font(.system(size: 14)).foregroundStyle(primary)
+            Text(Self.highlight(suggestion.title, tokens: tokens)).scaledFont(14).foregroundStyle(primary)
         }
     }
 
@@ -374,7 +380,7 @@ struct SuggestionRow: View {
     @ViewBuilder private var trailing: some View {
         switch suggestion.kind {
         case .openTab:
-            Text("Switch").font(.system(size: 11, weight: .semibold)).padding(.horizontal, 8).padding(.vertical, 3)
+            Text("Switch").scaledFont(11, weight: .semibold).padding(.horizontal, 8).padding(.vertical, 3)
                 .background(Capsule().fill(selected ? Color.white.opacity(0.25) : Color.teal.opacity(0.2)))
                 .foregroundStyle(selected ? .white : Color.teal)
         case .bookmark:
@@ -386,7 +392,7 @@ struct SuggestionRow: View {
             EmptyView()
             #endif
         default:
-            if selected { Text("↩").font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.9)) }
+            if selected { Text("↩").scaledFont(12, weight: .semibold).foregroundStyle(.white.opacity(0.9)) }
         }
     }
 
@@ -438,9 +444,9 @@ private struct KeyHints: View {
 
     private func hint(_ key: String, _ text: String) -> some View {
         HStack(spacing: 5) {
-            Text(key).font(.system(size: 10, weight: .semibold)).padding(.horizontal, 5).padding(.vertical, 1.5)
+            Text(key).scaledFont(10, weight: .semibold).padding(.horizontal, 5).padding(.vertical, 1.5)
                 .background(RoundedRectangle(cornerRadius: 4, style: .continuous).fill(Color.primary.opacity(0.1)))
-            Text(text).font(.system(size: 11))
+            Text(text).scaledFont(11)
         }
         .foregroundStyle(.secondary)
     }

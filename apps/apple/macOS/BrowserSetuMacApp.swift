@@ -135,6 +135,7 @@ struct BrowserCommands: Commands {
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
             Button("New Window") { openWindow(id: "browser") }.keyboardShortcut("n", modifiers: .command)
+            Button("New Guest Window") { model.openGuestWindow() }.keyboardShortcut("n", modifiers: [.command, .shift, .option])
             Button("Move Tab to New Window") { if let id = model.activeID { model.moveTabToNewWindow(id) } }
                 .disabled(model.activeID == nil || (model.isSecondary && model.tabs.count < 2))
             Divider()
@@ -193,6 +194,9 @@ struct BrowserCommands: Commands {
         }
         CommandMenu("Split View") {
             Button("New Tab in Split View") { model.openSplitNewTab() }
+            Button(model.thirdSplitTabID == nil ? "Add a Third Panel" : "Remove the Third Panel") {
+                if model.thirdSplitTabID == nil { model.addThirdPanelNewTab() } else { model.removeThirdPanel() }
+            }
             Button("Close Split View") { model.closeSplit() }.disabled(model.splitTabID == nil)
             Button("Swap Panels") { model.swapSplit() }.disabled(model.splitTabID == nil)
             Button("Change Direction") { model.splitOrientation = model.splitOrientation == .sideBySide ? .stacked : .sideBySide }

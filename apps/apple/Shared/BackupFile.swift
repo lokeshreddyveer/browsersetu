@@ -36,6 +36,8 @@ struct BackupPayload: Codable, Equatable {
     var seq: Int? = nil
     /// Sync only: the extensions installed on that device, for information (they are never installed by sync).
     var extensions: [SyncExtension]? = nil
+    /// Sync only: tabs this device sent to other devices. Each stays until its recipient has had a week to see it.
+    var outbox: [SentTab]? = nil
 }
 
 struct SyncExtension: Codable, Equatable, Identifiable {

@@ -23,6 +23,13 @@ struct SiteInfoView: View {
                     .font(.caption).foregroundStyle(Theme.privateAccent)
             }
             row("Connection", value: connection)
+            if let identity = tab.identity {
+                VStack(alignment: .leading, spacing: 3) {
+                    Label(identity.headline, systemImage: identity.isVerified ? "checkmark.seal.fill" : "lock.fill")
+                        .font(.callout.weight(.medium)).foregroundStyle(identity.isVerified ? Color.green : Color.secondary)
+                    Text(identity.detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+            }
             if let origin {
                 Divider()
                 Text("Permissions").font(.subheadline.weight(.semibold))

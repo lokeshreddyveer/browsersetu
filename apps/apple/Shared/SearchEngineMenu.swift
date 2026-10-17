@@ -41,14 +41,14 @@ struct SearchEngineMenu: View {
                         #endif
                     } else {
                         Text(String(name.prefix(1)))
-                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .scaledFont(11, weight: .bold, design: .rounded)
                             .foregroundStyle(.white)
                             .frame(width: 22, height: 22)
                             .background(Theme.tileColor(for: name), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                     }
                 }
                 if !compact {
-                    Text(name).font(.system(size: 12.5, weight: .medium)).lineLimit(1)
+                    Text(name).scaledFont(12.5, weight: .medium).lineLimit(1)
                     Image(systemName: "chevron.up.chevron.down").font(.system(size: 8, weight: .bold)).foregroundStyle(.secondary)
                 }
             }

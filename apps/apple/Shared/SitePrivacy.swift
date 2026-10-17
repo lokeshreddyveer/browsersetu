@@ -186,6 +186,9 @@ extension BrowserModel {
         if siteAppearance[key] != nil { settings.append("appearance") }
         if siteUserAgents[key] != nil { settings.append("browser identity") }
         if darkSites.contains(key) { settings.append("dark pages") }
+        if jsOffSites.contains(key) { settings.append("JavaScript off") }
+        if neverSleepSites.contains(key) { settings.append("never sleeps") }
+        if fingerprintExceptions.contains(key) { settings.append("not randomized") }
         return SiteReport(host: site, firstPartyCookies: first, thirdPartyCookies: third, storage: storage, permissions: permissions, savedSignIns: signIns, historyEntries: history, settings: settings)
     }
 
@@ -216,6 +219,9 @@ extension BrowserModel {
         if siteAppearance[key] != nil { setSiteAppearance(host, nil); changed += 1 }
         if siteUserAgents[key] != nil { setSiteUserAgent(host, nil); changed += 1 }
         if darkSites.contains(key) { setDarkSite(host, false); changed += 1 }
+        if jsOffSites.contains(key) { setScripts(host: host, allowed: true); changed += 1 }
+        if neverSleepSites.contains(key) { setNeverSleeps(host: host, false); changed += 1 }
+        if fingerprintExceptions.contains(key) { setFingerprintException(host: host, allowed: false); changed += 1 }
         result.settings = changed
         for tab in tabs where tab.url?.host.map(TabOrganizing.siteName(forHost:)) == site { tab.applySavedZoom(); tab.applySiteStyle() }
         return result
@@ -314,7 +320,10 @@ extension BrowserModel {
         for tab in tabs where FaviconStore.key(forHost: tab.url?.host) == key { tab.engine.setUserAgent(siteUserAgent(forHost: tab.url?.host)); if !tab.isBlank { tab.reload() } }
     }
 
-    func pushWebPolicy() { engine.setWebPolicy(blockWebRTC: blockWebRTC, exceptions: webRTCExceptions) }
+    func pushWebPolicy() {
+        engine.setWebPolicy(WebPolicy(blockWebRTC: blockWebRTC, exceptions: webRTCExceptions, randomizeFingerprint: randomizeFingerprint,
+                                      fingerprintExceptions: fingerprintExceptions, deAMP: deAMP, blockVideoAds: blockVideoAds))
+    }
 
     func setWebRTCException(host: String?, allowed: Bool) {
         guard let key = FaviconStore.key(forHost: host) else { return }

@@ -231,7 +231,7 @@ struct PDFEditorView: View {
                 Button("Save a Copy") { save() }
                 Button("Save a Protected Copy…") { protecting = true }
             }
-            if let copy = session.savedCopy { ShareLink(item: copy) { Image(systemName: "square.and.arrow.up") } }
+            if let copy = session.savedCopy { ShareLink(item: copy) { Image(systemName: "square.and.arrow.up").accessibilityLabel("Share the saved copy") } }
             Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
         }
         .padding(10)

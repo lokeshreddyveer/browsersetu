@@ -403,7 +403,7 @@ struct TabSearchPanel: View {
                     .textFieldStyle(.plain).font(.system(size: 13)).focused($focused)
                     .accessibilityIdentifier("tab-search-field")
                     .onSubmit { activate(list) }
-                Button { close() } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary) }
+                Button { close() } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary).accessibilityLabel("Close") }
                     .buttonStyle(.plain).help("Close")
             }
             .padding(.horizontal, 10).frame(height: 32)
@@ -612,7 +612,7 @@ private struct SidebarDownloadsList: View {
                             HStack {
                                 Text(d.filename).font(.system(size: 13)).lineLimit(1).truncationMode(.middle)
                                 Spacer()
-                                Button { coordinator.cancel(d.id) } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                                Button { coordinator.cancel(d.id) } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary).accessibilityLabel("Cancel download") }
                                     .buttonStyle(.plain).help("Cancel")
                             }
                             ProgressView(value: d.fraction).controlSize(.small)
@@ -628,7 +628,7 @@ private struct SidebarDownloadsList: View {
                             }
                             Spacer(minLength: 0)
                             Button("Resume") { coordinator.resume(d.id) }.buttonStyle(.borderless).font(.system(size: 12))
-                            Button { coordinator.dismissInterrupted(d.id) } label: { Image(systemName: "xmark") }.buttonStyle(.borderless).help("Remove")
+                            Button { coordinator.dismissInterrupted(d.id) } label: { Image(systemName: "xmark").accessibilityLabel("Dismiss") }.buttonStyle(.borderless).help("Remove")
                         }
                         .padding(.horizontal, 12).padding(.vertical, 6)
                     }
@@ -976,7 +976,7 @@ struct PeekSidebar: View {
         // The same surface as the Sidebar layout's pinned sidebar, so the two look exactly alike.
         .background(WindowBackdrop())
         .clipShape(RoundedRectangle(cornerRadius: Radius.floating, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Radius.floating, style: .continuous).strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.6))
+        .hairline(RoundedRectangle(cornerRadius: Radius.floating, style: .continuous), opacity: 0.10, width: 0.6)
         .overlay(alignment: model.sidebarPosition == .left ? .trailing : .leading) {
             // Straddles the edge, so it can be grabbed from either side of it.
             SidebarResizeHandle().padding(.vertical, 40).offset(x: model.sidebarPosition == .left ? 6 : -6)
@@ -1020,7 +1020,7 @@ struct SidebarDownloadQueue: View {
                         Text(item.filename).font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
                         Spacer(minLength: 0)
                         Menu(item.priority.title) { ForEach(DownloadPriority.allCases.reversed()) { p in Button(p.title) { coordinator.setPriority(item.id, p) } } }.menuStyle(.borderlessButton).fixedSize()
-                        Button { coordinator.cancelWaiting(item.id) } label: { Image(systemName: "xmark") }.buttonStyle(.borderless)
+                        Button { coordinator.cancelWaiting(item.id) } label: { Image(systemName: "xmark").accessibilityLabel("Cancel download") }.buttonStyle(.borderless)
                     }
                 }
                 ForEach(coordinator.scheduled) { item in
@@ -1028,7 +1028,7 @@ struct SidebarDownloadQueue: View {
                         Image(systemName: "clock").font(.system(size: 12)).foregroundStyle(.secondary).frame(width: 18)
                         Text(item.filename).font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
                         Spacer(minLength: 0)
-                        Button { coordinator.removeScheduled(item.id) } label: { Image(systemName: "xmark") }.buttonStyle(.borderless)
+                        Button { coordinator.removeScheduled(item.id) } label: { Image(systemName: "xmark").accessibilityLabel("Remove from schedule") }.buttonStyle(.borderless)
                     }
                 }
             }

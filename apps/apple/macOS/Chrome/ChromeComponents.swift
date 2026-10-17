@@ -98,7 +98,7 @@ struct PageCard: ViewModifier {
         if enabled {
             content
                 .clipShape(RoundedRectangle(cornerRadius: Radius.page, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: Radius.page, style: .continuous).strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5))
+                .hairline(RoundedRectangle(cornerRadius: Radius.page, style: .continuous), opacity: 0.10, width: 0.5)
                 .shadow(color: .black.opacity(0.12), radius: 4, y: 1)
                 .padding(.leading, leading).padding(.trailing, trailing).padding(.bottom, WindowInset.gap).padding(.top, top)
         } else {
@@ -358,8 +358,8 @@ struct MacOmnibox: View {
             .buttonStyle(.plain)
             .opacity(1)
             .animation(.easeOut(duration: 0.15), value: hovering)
-            .help("Site Information")
-            .accessibilityLabel("Site information")
+            .help(tab.identity.map { $0.headline + ". " + $0.detail } ?? "Site Information")
+            .accessibilityLabel(tab.identity.map { "Site information. " + $0.headline } ?? "Site information")
             .onChange(of: showInfo) { _, shown in holdChrome(shown) }
             .onDisappear { if showInfo { holdChrome(false) } }
             .popover(isPresented: $showInfo, arrowEdge: .bottom) { SiteInfoView(tab: tab).environmentObject(model) }
@@ -392,6 +392,12 @@ struct MacOmnibox: View {
                     .accessibilityHidden(true)
                     .transition(.opacity.combined(with: .scale(scale: 0.8)))
             }
+            if let label = tab.identity?.shortLabel, !address.isEditing, !inSidebar, !floating, !tabField, !tab.isPrivate {
+                // A site whose certificate names a checked organisation shows who it is, quietly, beside the padlock's address.
+                Text(label).font(.system(size: 11, weight: .medium)).foregroundStyle(Color.green.opacity(0.85)).lineLimit(1).truncationMode(.tail)
+                    .frame(maxWidth: 140).help(tab.identity?.detail ?? "").accessibilityLabel(tab.identity?.headline ?? "")
+                    .transition(.opacity)
+            }
             if shield && !address.isEditing {
                 ShieldPill(privacy: model.privacy, host: tab.url?.host, inField: true)
                     .transition(.opacity.combined(with: .scale(scale: 0.8)))
@@ -399,6 +405,7 @@ struct MacOmnibox: View {
             if showReload && !address.isEditing {
                 Button { tab.isLoading ? tab.stop() : tab.reload() } label: {
                     Image(systemName: tab.isLoading ? "xmark" : "arrow.clockwise")
+                        .accessibilityLabel(tab.isLoading ? "Stop loading" : "Reload")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.secondary)
                         .frame(width: 22, height: 22)
@@ -411,6 +418,7 @@ struct MacOmnibox: View {
                 .transition(.opacity.combined(with: .scale(scale: 0.8)))
             }
         }
+        .motion(.easeOut(duration: 0.2), value: tab.identity)
         .padding(.horizontal, bare ? 2 : 10)
         .frame(height: height)
     }
@@ -663,7 +671,7 @@ struct MoreMenu: View {
                 Button { NSApp.orderFrontStandardAboutPanel(nil) } label: { Label("About BrowserSetu", systemImage: "info.circle") }
             }
         } label: {
-            Image(systemName: "ellipsis").font(.system(size: 13, weight: .medium)).frame(width: 32, height: 32).contentShape(Rectangle())
+            Image(systemName: "ellipsis").font(.system(size: 13, weight: .medium)).frame(width: 32, height: 32).contentShape(Rectangle()).accessibilityLabel("More")
         }
         .menuStyle(.button)
         .menuIndicator(.hidden)

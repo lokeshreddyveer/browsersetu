@@ -35,6 +35,7 @@ enum SettingsIndex {
         SettingEntry(title: "Gestures", words: "swipe pull refresh pinch back forward tab switching", phone: "interface", mac: "advanced"),
         SettingEntry(title: "Page Zoom", words: "text size zoom per site", phone: "interface", mac: "websites"),
         SettingEntry(title: "Protection Level", words: "vayusetu blocker trackers ads shield filter", phone: "privacy", mac: "privacy"),
+        SettingEntry(title: "AMP, YouTube Ads and Fingerprint Randomizing", words: "amp pages youtube ads skip mute fingerprint canvas audio randomize javascript off site", phone: "privacy", mac: "privacy"),
         SettingEntry(title: "Clear on Quit", words: "history cookies erase when closing", phone: "privacy", mac: "privacy"),
         SettingEntry(title: "Lock Sensitive Settings", words: "face id touch id passcode", phone: "privacy", mac: "privacy"),
         SettingEntry(title: "Searchable Copy of Pages", words: "search my pages index history text", phone: "privacy", mac: "privacy"),

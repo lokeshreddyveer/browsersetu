@@ -128,7 +128,7 @@ extension MacSettingsView {
                 }
                 .frame(width: 280)
                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5))
+                .hairline(RoundedRectangle(cornerRadius: 10, style: .continuous), opacity: 0.12, width: 0.5)
                 .shadow(color: .black.opacity(0.25), radius: 12, y: 4)
             }
         }
@@ -175,6 +175,7 @@ struct SettingsPanelView: View {
             SecurityFactsSection()
             ThreatListSection()
             ProxySection()
+            PageDefensesSection()
             SensitiveLockSection()
             ClearOnQuitSection()
             PageMemorySection()
@@ -186,11 +187,13 @@ struct SettingsPanelView: View {
             PasswordsInfoSection()
             PermissionActivitySection()
             SiteZoomSection()
+            GlobalStyleSection()
             WebsiteDataSection()
         case .profiles:
             ProfileSettingsSection()
         case .performance:
             MemorySettingsSection()
+            NeverSleepSection()
             ResourceMonitorSection()
         case .extensions:
             ExtensionsSettingsSection()

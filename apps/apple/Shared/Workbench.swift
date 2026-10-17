@@ -243,6 +243,14 @@ final class Workbench: ObservableObject {
 
     // MARK: Site rules
 
+    /// Re-reads the rules and workflows after sync changed them.
+    func reloadSyncedRules() {
+        guard let model else { return }
+        func get(_ key: String) -> String? { (try? model.core.getSetting(key: key)) ?? nil }
+        siteRules = BrowserModel.decodeMap(get("site_open_rules"), as: [SiteOpenRule].self)["list"] ?? []
+        workflows = BrowserModel.decodeMap(get("workflows"), as: [Workflow].self)["list"] ?? []
+    }
+
     func setSiteRules(_ list: [SiteOpenRule]) { siteRules = list; saveMap("site_open_rules", "list", list) }
 
     @discardableResult

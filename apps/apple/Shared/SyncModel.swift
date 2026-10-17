@@ -40,13 +40,17 @@ extension BrowserModel {
     /// Stamps what changed on this device since the last sync: new or edited things get a fresh stamp, removed things become tombstones.
     func observeLocalChanges(now: Date = Date()) {
         let device = syncDeviceID
-        SyncMerge.observe(ledger: &syncLedger.bookmarks, current: currentBookmarks(), clock: &syncClock, device: device, now: now)
-        SyncMerge.observe(ledger: &syncLedger.workspaces, current: currentWorkspaces(), clock: &syncClock, device: device, now: now)
-        SyncMerge.observe(ledger: &syncLedger.sessions, current: currentSessions(), clock: &syncClock, device: device, now: now)
-        // Settings are always published; whether another device takes them in is that device's own choice.
-        SyncMerge.observe(ledger: &syncLedger.settings, current: currentSettings(), clock: &syncClock, device: device, now: now)
+        // A kind of thing that is switched off is neither sent nor taken in. Its part of the ledger is simply dropped (not turned into deletions), so switching it
+        // off never deletes anything on another device.
+        if syncs(.bookmarks) { SyncMerge.observe(ledger: &syncLedger.bookmarks, current: currentBookmarks(), clock: &syncClock, device: device, now: now) } else { syncLedger.bookmarks = [:] }
+        if syncs(.workspaces) { SyncMerge.observe(ledger: &syncLedger.workspaces, current: currentWorkspaces(), clock: &syncClock, device: device, now: now) } else { syncLedger.workspaces = [:] }
+        if syncs(.sessions) { SyncMerge.observe(ledger: &syncLedger.sessions, current: currentSessions(), clock: &syncClock, device: device, now: now) } else { syncLedger.sessions = [:] }
+        // Settings are published unless they are site rules that are switched off; whether another device takes them in is that device's own choice.
+        syncLedger.settings = syncLedger.settings.filter { syncSettingAllowedOut($0.key) }
+        SyncMerge.observe(ledger: &syncLedger.settings, current: currentSettings().filter { syncSettingAllowedOut($0.key) }, clock: &syncClock, device: device, now: now)
         if syncPasswords { SyncMerge.observe(ledger: &syncLedger.logins, current: currentLogins(), clock: &syncClock, device: device, now: now) }
         else { syncLedger.logins = [:] }
+        observeHistory(now: now)
         syncLedger = SyncMerge.pruned(syncLedger, now: now)
     }
 
@@ -68,7 +72,8 @@ extension BrowserModel {
         var snapshot = BackupPayload(created: Date(), bookmarks: [], settings: [:])
         snapshot.state = syncLedger
         snapshot.seq = syncSeq
-        snapshot.tabs = SyncRules.cleanTabs(tabs)
+        snapshot.tabs = syncs(.openTabs) ? SyncRules.cleanTabs(tabs) : []
+        snapshot.outbox = outbox.filter { Date().timeIntervalSince1970 - $0.sent < SentTab.lifetime }
         snapshot.extensions = Array(extensionCenter.extensions.prefix(60).map { SyncExtension(name: $0.name, chromeID: nil, version: $0.version) })
         snapshot.device = syncDeviceName
         snapshot.deviceID = syncDeviceID
@@ -96,8 +101,9 @@ extension BrowserModel {
             let existing = Set(((try? core.listBookmarks(query: "")) ?? []).map(\.url))
             for b in SyncRules.bookmarksToAdd(remote: snapshot.bookmarks, existing: existing) where (try? core.addBookmark(url: b.url, title: b.title, folder: b.folder)) != nil { outcome.bookmarksAdded += 1 }
         }
+        receiveSentTabs(snapshot, outcome: &outcome)
         if let device = snapshot.device {
-            let clean = SyncRules.cleanTabs(snapshot.tabs ?? [])
+            let clean = syncs(.openTabs) ? SyncRules.cleanTabs(snapshot.tabs ?? []) : []
             outcome.tabs = clean.count
             var list = remoteTabs.filter { $0.device != device }
             if !clean.isEmpty { list.append(RemoteTabs(device: device, date: snapshot.created, tabs: clean)) }
@@ -114,7 +120,8 @@ extension BrowserModel {
     private func applyMergedState(_ merged: SyncState, from snapshot: BackupPayload, outcome: inout SyncRules.Outcome) {
         var kept = merged
         // Bookmarks.
-        let bookmarkPlan = SyncMerge.plan(merged: merged.bookmarks, current: currentBookmarks())
+        let bookmarkPlan = syncs(.bookmarks) ? SyncMerge.plan(merged: merged.bookmarks, current: currentBookmarks()) : SyncMerge.Plan<SyncBookmark>()
+        if !syncs(.bookmarks) { kept.bookmarks = syncLedger.bookmarks }
         for (url, value) in bookmarkPlan.upsert.sorted(by: { $0.key < $1.key }) {
             let existed = (try? core.isBookmarked(url: url)) ?? false
             if existed { try? core.removeBookmark(url: url) }
@@ -122,7 +129,8 @@ extension BrowserModel {
         }
         for url in bookmarkPlan.delete where (try? core.removeBookmark(url: url)) != nil { outcome.bookmarksRemoved += 1 }
         // Workspaces: the name, icon, colour and layout preset are shared; the window arrangement stays on each device.
-        let workspacePlan = SyncMerge.plan(merged: merged.workspaces, current: currentWorkspaces())
+        let workspacePlan = syncs(.workspaces) ? SyncMerge.plan(merged: merged.workspaces, current: currentWorkspaces()) : SyncMerge.Plan<SyncWorkspace>()
+        if !syncs(.workspaces) { kept.workspaces = syncLedger.workspaces }
         for (name, value) in workspacePlan.upsert.sorted(by: { $0.key < $1.key }) {
             upsertWorkspaceFromSync(name, value)
             outcome.workspacesChanged += 1
@@ -130,7 +138,8 @@ extension BrowserModel {
         for name in workspacePlan.delete { deleteWorkspace(name); outcome.workspacesChanged += 1 }
         if !workspacePlan.isEmpty { saveWorkspaces() }
         // Saved sessions: a session saved or deleted on another device appears or goes here.
-        let sessionPlan = SyncMerge.plan(merged: merged.sessions, current: currentSessions())
+        let sessionPlan = syncs(.sessions) ? SyncMerge.plan(merged: merged.sessions, current: currentSessions()) : SyncMerge.Plan<SavedSession>()
+        if !syncs(.sessions) { kept.sessions = syncLedger.sessions }
         if !sessionPlan.isEmpty {
             var list = savedSessions.filter { !sessionPlan.delete.contains($0.id.uuidString) }
             for (_, value) in sessionPlan.upsert.sorted(by: { $0.key < $1.key }) {
@@ -143,18 +152,24 @@ extension BrowserModel {
             }
             setSavedSessions(Array(list.prefix(50)))
         }
-        // Settings: only if the person turned that on. When asked, every difference waits for their choice and this device keeps its own value for now.
-        if syncSettingsToo {
-            let settingPlan = SyncMerge.plan(merged: merged.settings, current: currentSettings())
-            for (key, value) in settingPlan.upsert.sorted(by: { $0.key < $1.key }) where SyncRules.settingKeys.contains(key) {
-                if syncAskOnConflict {
-                    let mine = ((try? core.getSetting(key: key)) ?? nil) ?? ""
-                    if !syncConflicts.contains(where: { $0.key == key }) { syncConflicts.append(SyncConflict(key: key, mine: mine, theirs: value, device: snapshot.device ?? "another device", theirsStamp: merged.settings[key]?.stamp)) }
-                    kept.settings[key] = syncLedger.settings[key]
-                } else if (try? core.setSetting(key: key, value: value)) != nil { outcome.settingsApplied += 1 }
-            }
-            if outcome.settingsApplied > 0 { loadUISettings() }
-        } else { kept.settings = syncLedger.settings }
+        // Settings and site rules: each only if the person turned that kind on. For plain settings, when asked, every difference waits for their choice and this
+        // device keeps its own value for now.
+        let settingPlan = SyncMerge.plan(merged: merged.settings, current: currentSettings())
+        var settingsKept = merged.settings
+        var settingsChanged = false
+        for (key, value) in settingPlan.upsert.sorted(by: { $0.key < $1.key }) where SyncRules.settingKeys.contains(key) {
+            guard syncSettingAllowedIn(key) else { settingsKept[key] = syncLedger.settings[key]; continue }
+            if syncAskOnConflict, SyncRules.category(forSetting: key) == .settings {
+                let mine = ((try? core.getSetting(key: key)) ?? nil) ?? ""
+                if !syncConflicts.contains(where: { $0.key == key }) { syncConflicts.append(SyncConflict(key: key, mine: mine, theirs: value, device: snapshot.device ?? "another device", theirsStamp: merged.settings[key]?.stamp)) }
+                settingsKept[key] = syncLedger.settings[key]
+            } else if (try? core.setSetting(key: key, value: value)) != nil { outcome.settingsApplied += 1; settingsChanged = true }
+        }
+        for key in merged.settings.keys where !SyncRules.settingKeys.contains(key) { settingsKept[key] = syncLedger.settings[key] }
+        kept.settings = settingsKept
+        if settingsChanged { loadUISettings(); workbench.reloadSyncedRules() }
+        // History: only if the person turned that on.
+        if syncs(.history) { applyHistory(merged, outcome: &outcome) } else { kept.history = [:] }
         // Saved passwords: only if the person turned that on.
         if syncPasswords {
             let loginPlan = SyncMerge.plan(merged: merged.logins, current: currentLogins())
@@ -270,6 +285,8 @@ extension BrowserModel {
     func syncNowCloud() async {
         guard iCloudSync, cloudSync != nil else { return }
         guard let phrase = syncPassphrase, !phrase.isEmpty else { syncStatus = "Set a sync passphrase first. Use the same one on every device."; return }
+        isSyncing = true
+        defer { isSyncing = false }
         await pushCloud(passphrase: phrase)
         await pullCloud()
     }
@@ -278,12 +295,14 @@ extension BrowserModel {
     func pushCloud(passphrase: String) async {
         let snapshot = makeSyncSnapshot()
         let sealed = await Task.detached(priority: .utility) { try? SyncRules.sealedFitting(snapshot, passphrase: passphrase) }.value
-        guard let sealed else { syncStatus = "Could not prepare the data to sync."; return }
+        guard let sealed else { syncStatus = "Could not prepare the data to sync."; recordSyncOutcome(push: true, error: "Could not prepare the data to sync."); return }
         guard cloudSync?.push(sealed, deviceID: syncDeviceID) == true else {
-            syncStatus = "There is too much to sync: iCloud’s sync space (1 MB for everything) would be exceeded. Remove some bookmarks or turn off tab sync."
+            syncStatus = "There is too much to sync: iCloud’s sync space (1 MB for everything) would be exceeded. Turn off history or open-tab sync, or remove some bookmarks."
+            recordSyncOutcome(push: true, error: "Too much to sync for iCloud’s 1 MB space. Turn off history or open tabs, or remove some bookmarks.")
             logSync("Could not upload: too large for iCloud’s sync space")
             return
         }
+        recordSyncOutcome(push: true, error: nil)
     }
 
     func pullCloud() async {
@@ -307,6 +326,8 @@ extension BrowserModel {
         }
         if waiting > 0 { syncStatus = "\(waiting) device\(waiting == 1 ? " is" : "s are") waiting for your approval below." }
         else { syncStatus = wrongPhrase > 0 && taken == 0 ? "Another device uses a different sync passphrase." : (taken == 0 ? "No other device has synced yet." : "Synced.") }
+        if wrongPhrase > 0, taken == 0, waiting == 0 { recordSyncOutcome(push: false, error: "Another device uses a different sync passphrase.") }
+        else { recordSyncOutcome(push: false, error: nil) }
     }
 
     /// Debounced: called when something worth sharing changed.

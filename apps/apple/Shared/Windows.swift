@@ -16,6 +16,8 @@ final class WindowRegistry {
     var movingTabs: [UInt64] = []
     /// Tabs (by id) that belonged to each extra window when the app was last closed; the windows are opened again and take them back.
     var pendingRestores: [[UInt64]] = []
+    /// The next window to open is a guest window.
+    var openingGuest = false
 
     var all: [BrowserModel] { boxes.compactMap(\.model) }
     var count: Int { all.count }
@@ -32,7 +34,7 @@ final class WindowRegistry {
         "appearance", "accent", "theme", "theme_custom", "density", "workspaces", "dark_pages", "dark_sites", "website_appearance", "site_appearance", "site_zoom",
         "site_styles", "site_notes", "bookmark_tags", "group_colors", "favorites_order", "search_template", "search_suggestions", "search_shortcuts", "homepage", "startup",
         "strip_tracking", "app_links", "app_link_sites", "permission_expiry", "show_favorites", "show_continue", "show_frequent", "show_greeting", "show_recently_closed",
-        "start_background", "shortcuts", "organize_downloads", "download_concurrent", "save_logins", "spotlight_bookmarks",
+        "start_background", "shortcuts", "organize_downloads", "download_concurrent", "save_logins", "spotlight_bookmarks", "site_js_off", "never_sleep_sites", "fingerprint_noise", "fingerprint_exceptions", "de_amp", "video_ads", "user_themes", "start_tile",
     ]
 
     /// Tells the other windows that a setting changed, so what they show follows (their own layouts are left alone).
@@ -67,10 +69,10 @@ extension BrowserModel {
     /// Moves a tab to another window. Nothing is reloaded: the same page, with its history and scroll position, simply appears in the other window.
     @discardableResult
     func moveTab(_ id: UInt64, to target: BrowserModel) -> Bool {
-        guard target !== self, windows === target.windows, let index = tabs.firstIndex(where: { $0.id == id }) else { return false }
+        guard target !== self, windows === target.windows, !target.isGuest || tabs.first(where: { $0.id == id })?.isPrivate == true, let index = tabs.firstIndex(where: { $0.id == id }) else { return false }
         let tab = tabs.remove(at: index)
         let wasActive = id == activeID
-        if splitTabID == id { splitTabID = nil }
+        forgetSplitPanel(id)
         let meta = tabMeta.removeValue(forKey: id)
         saveTabMeta()
         if wasActive || active == nil {
@@ -103,14 +105,15 @@ extension BrowserModel {
         hasStarted = true
         if lifecycle == nil { let manager = TabLifecycle(model: self); manager.start(); lifecycle = manager }
         var wanted: [UInt64] = []
-        if !windows.movingTabs.isEmpty { wanted = windows.movingTabs; windows.movingTabs = [] }
+        if windows.openingGuest { windows.openingGuest = false; isGuest = true }
+        else if !windows.movingTabs.isEmpty { wanted = windows.movingTabs; windows.movingTabs = [] }
         else if !windows.pendingRestores.isEmpty { wanted = windows.pendingRestores.removeFirst() }
         var adopted = 0
         for id in wanted {
             guard let source = windows.model(forTab: id), source !== self else { continue }
             if source.moveTab(id, to: self) { adopted += 1 }
         }
-        if adopted == 0 { _ = openTab(url: nil, isPrivate: false) }
+        if adopted == 0 { _ = openTab(url: nil, isPrivate: isGuest) }
         windows.saveWindowLayout(in: self)
     }
 
@@ -129,6 +132,12 @@ extension BrowserModel {
         }
     }
 
+    /// Opens a guest window: private tabs only, nothing kept, gone when it closes.
+    func openGuestWindow() {
+        windows.openingGuest = true
+        windows.onNeedWindow?()
+    }
+
     /// Opens a new window and moves the tab into it.
     func moveTabToNewWindow(_ id: UInt64) {
         guard tabs.contains(where: { $0.id == id }), tabs.count > 1 || !isSecondary else { return }
@@ -141,7 +150,7 @@ extension WindowRegistry {
     /// The first window's tabs that other windows hold, remembered so a restart can give each window its tabs back.
     func saveWindowLayout(in model: BrowserModel) {
         guard let primary else { return }
-        let groups = all.filter { $0 !== primary }.map { $0.tabs.map(\.id) }.filter { !$0.isEmpty }
+        let groups = all.filter { $0 !== primary && !$0.isGuest }.map { $0.tabs.map(\.id) }.filter { !$0.isEmpty }
         model.saveSetting("window_tabs", model.encodedMap(["groups": groups]))
     }
 
