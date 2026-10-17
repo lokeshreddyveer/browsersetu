@@ -183,18 +183,35 @@ enum ExtensionScore {
 /// Writes a zip. Entries are stored, not compressed: extensions are small and this keeps the writer simple enough to check.
 enum ZipWriter {
     static func zip(_ entries: [(path: String, data: Data)]) -> Data {
-        func le16(_ v: Int) -> [UInt8] { [UInt8(v & 255), UInt8(v >> 8 & 255)] }
-        func le32(_ v: Int) -> [UInt8] { [UInt8(v & 255), UInt8(v >> 8 & 255), UInt8(v >> 16 & 255), UInt8(v >> 24 & 255)] }
-        var local: [UInt8] = [], central: [UInt8] = []
+        // Built one piece at a time: older Swift compilers cannot type-check a long chain of array additions.
+        var local = [UInt8](), central = [UInt8]()
+        func le16(_ v: Int, to out: inout [UInt8]) { out.append(UInt8(v & 255)); out.append(UInt8((v >> 8) & 255)) }
+        func le32(_ v: Int, to out: inout [UInt8]) { le16(v & 0xFFFF, to: &out); le16((v >> 16) & 0xFFFF, to: &out) }
         for entry in entries {
-            let name = Array(entry.path.utf8), body = [UInt8](entry.data)
+            let name = Array(entry.path.utf8)
+            let body = [UInt8](entry.data)
             let crc = Int(ExtensionPackage.crc32(entry.data))
             let offset = local.count
-            local += [0x50, 0x4B, 3, 4] + le16(20) + le16(0x800) + le16(0) + le16(0) + le16(0x21) + le32(crc) + le32(body.count) + le32(body.count) + le16(name.count) + le16(0) + name + body
-            central += [0x50, 0x4B, 1, 2] + le16(20) + le16(20) + le16(0x800) + le16(0) + le16(0) + le16(0x21) + le32(crc) + le32(body.count) + le32(body.count)
-            central += le16(name.count) + le16(0) + le16(0) + le16(0) + le16(0) + le32(0) + le32(offset) + name
+            // Local file header, then the name and the stored bytes.
+            local.append(contentsOf: [0x50, 0x4B, 3, 4])
+            le16(20, to: &local); le16(0x800, to: &local); le16(0, to: &local); le16(0, to: &local); le16(0x21, to: &local)
+            le32(crc, to: &local); le32(body.count, to: &local); le32(body.count, to: &local)
+            le16(name.count, to: &local); le16(0, to: &local)
+            local.append(contentsOf: name); local.append(contentsOf: body)
+            // Central directory entry.
+            central.append(contentsOf: [0x50, 0x4B, 1, 2])
+            le16(20, to: &central); le16(20, to: &central); le16(0x800, to: &central); le16(0, to: &central); le16(0, to: &central); le16(0x21, to: &central)
+            le32(crc, to: &central); le32(body.count, to: &central); le32(body.count, to: &central)
+            le16(name.count, to: &central); le16(0, to: &central); le16(0, to: &central); le16(0, to: &central); le16(0, to: &central)
+            le32(0, to: &central); le32(offset, to: &central)
+            central.append(contentsOf: name)
         }
-        return Data(local + central + [0x50, 0x4B, 5, 6] + le16(0) + le16(0) + le16(entries.count) + le16(entries.count) + le32(central.count) + le32(local.count) + le16(0))
+        var out = local
+        out.append(contentsOf: central)
+        out.append(contentsOf: [0x50, 0x4B, 5, 6])
+        le16(0, to: &out); le16(0, to: &out); le16(entries.count, to: &out); le16(entries.count, to: &out)
+        le32(central.count, to: &out); le32(local.count, to: &out); le16(0, to: &out)
+        return Data(out)
     }
 
     /// A folder's files as entries under `prefix`.
