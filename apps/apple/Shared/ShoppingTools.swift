@@ -136,7 +136,7 @@ struct ShoppingView: View {
                         Text(coupon.code).font(.system(.body, design: .monospaced))
                         Spacer()
                         Button("Enter") { Task { await model.applyCoupon(coupon) } }.controlSize(.small)
-                        Button { model.coupons.removeAll { $0.id == coupon.id } } label: { Image(systemName: "trash") }.buttonStyle(.plain).foregroundStyle(.secondary)
+                        Button { model.coupons.removeAll { $0.id == coupon.id } } label: { Image(systemName: "trash").accessibilityLabel("Delete") }.buttonStyle(.plain).foregroundStyle(.secondary)
                     }
                 }
                 Text("Only codes you saved are used. Browser Setu never searches the web for coupons.").font(.caption).foregroundStyle(.secondary)
@@ -168,7 +168,7 @@ struct ShoppingView: View {
                         }
                         Spacer()
                         Text(sub.amount.formatted())
-                        Button { model.subscriptions.removeAll { $0.id == sub.id } } label: { Image(systemName: "trash") }.buttonStyle(.plain).foregroundStyle(.secondary)
+                        Button { model.subscriptions.removeAll { $0.id == sub.id } } label: { Image(systemName: "trash").accessibilityLabel("Delete") }.buttonStyle(.plain).foregroundStyle(.secondary)
                     }
                 }
                 if !model.subscriptions.isEmpty {

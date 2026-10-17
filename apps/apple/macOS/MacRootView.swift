@@ -373,26 +373,29 @@ struct ContentPanels: View {
     @ObservedObject var active: TabController
 
     var body: some View {
-        if let other = model.splitTab, other.id != active.id {
+        let panels = model.splitPanels
+        if panels.count > 1, panels.first?.id == active.id {
             Group {
                 if model.splitOrientation == .sideBySide {
-                    HSplitView { panel(active, focused: true); panel(other, focused: false) }
+                    HSplitView { ForEach(panels) { tab in panel(tab, focused: tab.id == active.id, count: panels.count) } }
                 } else {
-                    VSplitView { panel(active, focused: true); panel(other, focused: false) }
+                    VSplitView { ForEach(panels) { tab in panel(tab, focused: tab.id == active.id, count: panels.count) } }
                 }
             }
             .overlay(alignment: .topTrailing) { SplitControls().padding(8) }
+            .motion(.easeOut(duration: 0.2), value: panels.map(\.id))
         } else {
             PageArea(tab: active).id(active.id).transition(.opacity)
         }
     }
 
-    private func panel(_ tab: TabController, focused: Bool) -> some View {
+    private func panel(_ tab: TabController, focused: Bool, count: Int) -> some View {
         PageArea(tab: tab).id(tab.id)
             .overlay(RoundedRectangle(cornerRadius: 2).stroke(focused ? Theme.accent : Color.clear, lineWidth: 2).allowsHitTesting(false))
             .contentShape(Rectangle())
-            .simultaneousGesture(TapGesture().onEnded { if !focused { model.swapSplit() } })
-            .accessibilityLabel(focused ? "Active panel" : "Side panel")
+            .simultaneousGesture(TapGesture().onEnded { if !focused { model.swapSplit(with: tab.id) } })
+            .accessibilityLabel(focused ? "Active panel" : (count > 2 ? "Side panel \(tab.id == model.thirdSplitTabID ? 3 : 2) of \(count)" : "Side panel"))
+            .transition(.opacity)
     }
 }
 
@@ -403,8 +406,13 @@ struct SplitControls: View {
             Button { model.splitOrientation = model.splitOrientation == .sideBySide ? .stacked : .sideBySide } label: {
                 Image(systemName: model.splitOrientation == .sideBySide ? "rectangle.split.1x2" : "rectangle.split.2x1")
             }.help("Change Split Direction")
-            Button { model.swapSplit() } label: { Image(systemName: "arrow.left.arrow.right") }.help("Swap Panels")
-            Button { model.closeSplit() } label: { Image(systemName: "xmark") }.help("Close Split View")
+            if model.thirdSplitTab == nil {
+                Button { model.addThirdPanelNewTab() } label: { Image(systemName: "rectangle.split.3x1").accessibilityLabel("Add a third panel") }.help("Add a Third Panel")
+            } else {
+                Button { model.removeThirdPanel() } label: { Image(systemName: "rectangle.split.2x1").accessibilityLabel("Remove the third panel") }.help("Remove the Third Panel")
+            }
+            Button { model.swapSplit() } label: { Image(systemName: "arrow.left.arrow.right").accessibilityLabel("Swap panels") }.help("Swap Panels")
+            Button { model.closeSplit() } label: { Image(systemName: "xmark").accessibilityLabel("Close split view") }.help("Close Split View")
         }
         .buttonStyle(.borderless)
         .padding(6)
@@ -426,8 +434,8 @@ struct FindBar: View {
                 .onChange(of: model.findText) { _, _ in model.findNext() }
                 .accessibilityIdentifier("find-field")
             if model.findFailed { Text("Not found").font(.caption).foregroundStyle(.red) }
-            Button { model.findNext(backwards: true) } label: { Image(systemName: "chevron.up") }.help("Previous")
-            Button { model.findNext() } label: { Image(systemName: "chevron.down") }.help("Next")
+            Button { model.findNext(backwards: true) } label: { Image(systemName: "chevron.up").accessibilityLabel("Previous match") }.help("Previous")
+            Button { model.findNext() } label: { Image(systemName: "chevron.down").accessibilityLabel("Next match") }.help("Next")
             Button("Done") { model.hideFind() }.keyboardShortcut(.cancelAction)
         }
         .buttonStyle(.borderless)
@@ -469,6 +477,13 @@ struct PageArea: View {
             if tab.isBlank { StartPageView(isPrivate: tab.isPrivate) }
         }
         .overlay(alignment: .bottomTrailing) { if model.workbench.showSizeHUD { SizeHUD() } }
+        .overlay(alignment: .topLeading) {
+            if model.isGuest {
+                Label("Guest", systemImage: "person.fill.questionmark").font(.system(size: 12, weight: .medium)).foregroundStyle(.white)
+                    .padding(.horizontal, 10).padding(.vertical, 5).background(Capsule().fill(Color.indigo.opacity(0.85))).padding(10).allowsHitTesting(false)
+                    .accessibilityLabel("Guest window. Nothing is remembered.")
+            }
+        }
         .overlay(alignment: .top) {
             if let hint = model.gestureHint {
                 Text(hint).font(.system(size: 13, weight: .medium)).foregroundStyle(.white).padding(.horizontal, 12).padding(.vertical, 6)

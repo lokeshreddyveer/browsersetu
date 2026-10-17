@@ -33,6 +33,8 @@ struct TabCandidate: Equatable {
     var isActive: Bool
     var loaded: Bool
     var discarded: Bool
+    /// The person asked that this site's tabs never go to sleep.
+    var exempt = false
 }
 
 enum TabLifecyclePolicy {
@@ -44,7 +46,7 @@ enum TabLifecyclePolicy {
         let live = tabs.filter { $0.loaded && !$0.discarded }
         let protected = Set(live.sorted { $0.lastActive > $1.lastActive }.prefix(rule.keepRecent).map(\.id))
         return live
-            .filter { !$0.isActive && !$0.isPrivate && !(keepPinned && $0.pinned) && !protected.contains($0.id) }
+            .filter { !$0.isActive && !$0.isPrivate && !$0.exempt && !(keepPinned && $0.pinned) && !protected.contains($0.id) }
             .filter { now.timeIntervalSince($0.lastActive) >= rule.minIdle }
             .sorted { $0.lastActive < $1.lastActive }
             .map(\.id)
@@ -115,8 +117,8 @@ final class TabLifecycle {
         if event != .timer { MemoryTrim.run(model: model, aggressive: event == .critical) }
         let candidates = model.tabs.map { tab in
             TabCandidate(id: tab.id, lastActive: tab.lastActive, pinned: tab.pinned, isPrivate: tab.isPrivate,
-                         isActive: tab.id == model.activeID || tab.id == model.splitTabID,
-                         loaded: tab.hasLoadedPage, discarded: tab.isDiscarded)
+                         isActive: tab.id == model.activeID || tab.id == model.splitTabID || tab.id == model.thirdSplitTabID,
+                         loaded: tab.hasLoadedPage, discarded: tab.isDiscarded, exempt: model.neverSleeps(host: tab.url?.host))
         }
         var released: [UInt64] = []
         for id in TabLifecyclePolicy.victims(candidates, mode: model.effectiveMemoryMode, event: event, now: now, keepPinned: model.keepPinnedTabs) {

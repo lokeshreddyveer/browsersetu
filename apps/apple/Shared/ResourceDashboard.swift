@@ -47,7 +47,7 @@ struct ResourceDashboardView: View {
                 Button { Task { await model.hibernate(tab); memory = currentMemoryFootprint() } } label: { Image(systemName: "moon.zzz") }
                     .buttonStyle(.borderless).help("Put to sleep").accessibilityLabel("Put \(tab.displayTitle) to sleep")
             }
-            Button { model.closeTab(id: tab.id); memory = currentMemoryFootprint() } label: { Image(systemName: "xmark") }
+            Button { model.closeTab(id: tab.id); memory = currentMemoryFootprint() } label: { Image(systemName: "xmark").accessibilityLabel("Close tab") }
                 .buttonStyle(.borderless).help("Close").accessibilityLabel("Close \(tab.displayTitle)")
         }
     }

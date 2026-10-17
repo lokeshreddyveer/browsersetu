@@ -8,9 +8,11 @@ struct SyncSection: View {
     @State private var showTabs = false
     @State private var groupDraft = ""
     @State private var showHistory = false
+    @State private var showCategories = true
 
     var body: some View {
         Section {
+            SyncStatusRow()
             Toggle("Sync with iCloud", isOn: $model.iCloudSync)
                 .disabled(!CloudSync.available && !model.iCloudSync)
                 .accessibilityIdentifier("icloud-sync")
@@ -35,10 +37,11 @@ struct SyncSection: View {
                         Task { await model.syncNowCloud() }
                     }
                 }
-                Toggle("Also sync saved passwords", isOn: $model.syncPasswords)
-                Toggle("Also sync settings", isOn: $model.syncSettingsToo)
-                if model.syncSettingsToo { Toggle("Ask me when a setting differs", isOn: $model.syncAskOnConflict) }
-                Button("Sync Now") { Task { await model.syncNowCloud() } }.disabled(!hasPhrase).accessibilityIdentifier("sync-now")
+                DisclosureGroup("What to sync", isExpanded: $showCategories) {
+                    SyncCategoriesRows()
+                    if model.syncSettingsToo { Toggle("Ask me when a setting differs", isOn: $model.syncAskOnConflict) }
+                }
+                SentTabsRows()
             }
             if model.iCloudSync, !model.syncDevices.isEmpty {
                 ForEach(model.syncDevices) { device in
@@ -73,7 +76,7 @@ struct SyncSection: View {
         } header: {
             Text("Sync")
         } footer: {
-            Text("Bookmarks are added across your devices (never removed), and each device’s open tabs can be reopened on the others. With iCloud, what is stored is scrambled with your passphrase, so Apple cannot read it. Passwords, history, cookies, private tabs and the page index are never synced. Devices only see each other inside one sync group, and a new device waits for your approval. Wi-Fi sync goes straight between your devices with a one-time code, with no server.")
+            Text("Choose what each device shares; anything switched off is neither sent nor taken in, and switching it off deletes nothing elsewhere. With iCloud, what is stored is scrambled with your passphrase, so Apple cannot read it. Cookies, private tabs and the page index are never synced, and history and passwords only if you turn them on. Tabs you send to another device travel the same way. Devices only see each other inside one sync group, and a new device waits for your approval. Wi-Fi sync goes straight between your devices with a one-time code, with no server.")
         }
         .sheet(isPresented: $showTabs) { SyncedTabsView() }
         .onAppear { hasPhrase = model.syncPassphrase?.isEmpty == false; groupDraft = model.syncGroupName }

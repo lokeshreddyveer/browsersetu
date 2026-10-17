@@ -227,9 +227,9 @@ struct PhoneAddressBar: View {
             if address.isEditing {
                 Button("Cancel") { focused = false }.font(.callout).transition(.opacity.combined(with: .move(edge: .trailing)))
             } else if tab.isLoading {
-                Button { tab.stop() } label: { Image(systemName: "xmark") }.foregroundStyle(.secondary).transition(.opacity)
+                Button { tab.stop() } label: { Image(systemName: "xmark").accessibilityLabel("Stop loading") }.foregroundStyle(.secondary).transition(.opacity)
             } else if !tab.isBlank {
-                Button { tab.reload() } label: { Image(systemName: "arrow.clockwise") }.foregroundStyle(.secondary).transition(.opacity)
+                Button { tab.reload() } label: { Image(systemName: "arrow.clockwise").accessibilityLabel("Reload") }.foregroundStyle(.secondary).transition(.opacity)
             }
         }
         .motion(.easeOut(duration: 0.2), value: address.isEditing)
@@ -329,12 +329,13 @@ struct PhoneToolbar: View {
                 Button("Add to Favorites", systemImage: "heart") {
                     if let u = tab.url?.absoluteString { model.toggleFavorite(url: u, title: tab.displayTitle) }
                 }.disabled(tab.isBlank || tab.isPrivate)
+                SendTabMenu(tab: tab)
                 Divider()
                 Button("Bookmarks", systemImage: "book") { model.sheet = .bookmarks }
                 Button("History", systemImage: "clock") { model.sheet = .history }
                 Button("Downloads", systemImage: "arrow.down.circle") { model.sheet = .downloads }
                 Button("Settings", systemImage: "gearshape") { model.sheet = .settings }
-            } label: { Image(systemName: "ellipsis").frame(width: 44, height: 32) }
+            } label: { Image(systemName: "ellipsis").frame(width: 44, height: 32).accessibilityLabel("More") }
         }
     }
 
@@ -504,7 +505,7 @@ struct DockActionButton: View {
         } else if action == .tabs {
             Button { model.showOverview() } label: {
                 Text("\(max(model.tabs.count, 1))")
-                    .font(.system(size: 11, weight: .semibold))
+                    .scaledFont(11, weight: .semibold)
                     .frame(width: 21, height: 21)
                     .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Color.primary, lineWidth: 1.5))
                     .frame(width: PhoneChrome.target, height: PhoneChrome.target)
@@ -592,17 +593,17 @@ struct PhoneAddressPill: View {
 
     @ViewBuilder private var text: some View {
         if tab.isBlank {
-            Text("Search or enter address").lineLimit(1).foregroundStyle(Color.secondary).font(.system(size: 14, weight: .medium))
+            Text("Search or enter address").lineLimit(1).foregroundStyle(Color.secondary).scaledFont(14, weight: .medium)
         } else {
             switch model.addressDisplay {
             case .domain:
-                Text(host.isEmpty ? titleText : host).lineLimit(1).truncationMode(.middle).font(.system(size: 14, weight: .medium))
+                Text(host.isEmpty ? titleText : host).lineLimit(1).truncationMode(.middle).scaledFont(14, weight: .medium)
             case .title:
-                Text(titleText).lineLimit(1).truncationMode(.tail).font(.system(size: 14, weight: .medium))
+                Text(titleText).lineLimit(1).truncationMode(.tail).scaledFont(14, weight: .medium)
             case .titleAndDomain:
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(titleText).lineLimit(1).truncationMode(.tail).font(.system(size: 12.5, weight: .semibold))
-                    Text(host).lineLimit(1).font(.system(size: 10.5)).foregroundStyle(.secondary)
+                    Text(titleText).lineLimit(1).truncationMode(.tail).scaledFont(12.5, weight: .semibold)
+                    Text(host).lineLimit(1).scaledFont(10.5).foregroundStyle(.secondary)
                 }
             }
         }
@@ -752,12 +753,12 @@ struct PhoneSearchField: View {
             }
             .padding(.horizontal, 12).frame(height: 38)
             .background(.regularMaterial, in: Capsule())
-            .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5))
+            .hairline(Capsule(), opacity: 0.08, width: 0.5)
             Button { model.cancelSearch() } label: {
-                Text("Cancel").font(.system(size: 15, weight: .medium)).foregroundStyle(Color.primary.opacity(0.85))
+                Text("Cancel").scaledFont(15, weight: .medium).foregroundStyle(Color.primary.opacity(0.85))
                     .padding(.horizontal, 14).frame(height: 38)
                     .background(.regularMaterial, in: Capsule())
-                    .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5))
+                    .hairline(Capsule(), opacity: 0.08, width: 0.5)
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("search-cancel")
@@ -812,7 +813,7 @@ struct PhoneDockField: View {
                 .onSubmit(submit)
                 .accessibilityIdentifier("omnibox")
             Button { model.cancelSearch() } label: {
-                Text("Cancel").font(.system(size: 14, weight: .medium)).foregroundStyle(Color.primary.opacity(0.85))
+                Text("Cancel").scaledFont(14, weight: .medium).foregroundStyle(Color.primary.opacity(0.85))
                     .frame(minHeight: PhoneChrome.height).contentShape(Rectangle())
             }
             .buttonStyle(.plain)

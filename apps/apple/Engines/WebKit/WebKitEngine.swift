@@ -70,7 +70,7 @@ final class WebKitEngine: BrowserEngine {
         if !isPrivate { UserScriptInstaller.install(userScripts, policy: webPolicy, into: config.userContentController) }
         else {
             UserScriptInstaller.addScrollbarHider(to: config.userContentController)
-            if webPolicy.blockWebRTC { UserScriptInstaller.addWebRTCBlocker(to: config.userContentController, exceptions: webPolicy.exceptions) }
+            UserScriptInstaller.addPolicyScripts(webPolicy, to: config.userContentController)
         }
         // Extensions never run in private tabs.
         if !isPrivate, #available(macOS 15.4, iOS 18.4, *), let manager = extensionManager as? WebKitExtensionManager {
@@ -98,8 +98,7 @@ final class WebKitEngine: BrowserEngine {
         }
     }
 
-    func setWebPolicy(blockWebRTC: Bool, exceptions: Set<String>) {
-        let new = WebPolicy(blockWebRTC: blockWebRTC, exceptions: exceptions)
+    func setWebPolicy(_ new: WebPolicy) {
         guard new != webPolicy else { return }
         webPolicy = new
         // Open pages keep what they already loaded; the next load of each one follows the new policy.
@@ -225,6 +224,7 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
         #endif
         super.init()
         #if os(macOS)
+        reporting.applyRestingColor()
         reporting.onScroll = { [weak self] delta in self?.events?.engineScrolled(deltaY: Double(delta)) }
         reporting.gesturesEnabled = { [weak self] in self?.events?.engineMouseGesturesEnabled() ?? false }
         reporting.onGesture = { [weak self] sequence, finished in self?.events?.engineMouseGesture(sequence, finished: finished) }
@@ -523,6 +523,11 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
     }
 
     func setUserAgent(_ value: String?) { webView.customUserAgent = value }
+
+    func connectionCertificate() async -> Data? {
+        guard webView.url?.scheme == "https", let trust = webView.serverTrust, let chain = SecTrustCopyCertificateChain(trust) as? [SecCertificate], let leaf = chain.first else { return nil }
+        return SecCertificateCopyData(leaf) as Data
+    }
 
     func securityReport() async -> SecurityReport? {
         guard let url = webView.url else { return nil }
@@ -896,7 +901,16 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
 
     // MARK: Navigation delegate
 
-    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
+    /// The choice for each navigation, and with it whether the page may run scripts: switched off per site or per tab, it holds for this load only.
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, preferences: WKWebpagePreferences) async -> (WKNavigationActionPolicy, WKWebpagePreferences) {
+        let policy = await decidePolicy(for: navigationAction, in: webView)
+        if navigationAction.targetFrame?.isMainFrame ?? true, let url = navigationAction.request.url, let events {
+            preferences.allowsContentJavaScript = events.engineScriptsAllowed(for: url)
+        }
+        return (policy, preferences)
+    }
+
+    private func decidePolicy(for navigationAction: WKNavigationAction, in webView: WKWebView) async -> WKNavigationActionPolicy {
         guard let target = navigationAction.request.url, let events else { return .cancel }
         let main = navigationAction.targetFrame?.isMainFrame ?? true
         // A sign-in form is read here, while the page is still showing it, only when the browser asked and only for a submit or a script-made navigation.
@@ -1286,6 +1300,23 @@ final class ScrollReportingWebView: WKWebView {
     var onKey: ((NSEvent) -> Bool)?
     /// A click or a key the page got: focus may have moved.
     var onInteraction: (() -> Void)?
+
+    /// What shows behind a page before it has painted: the window's own colour in the current appearance, so a dark window never flashes white while a page loads.
+    func applyRestingColor() {
+        var resolved = NSColor.windowBackgroundColor
+        effectiveAppearance.performAsCurrentDrawingAppearance { resolved = NSColor.windowBackgroundColor.usingColorSpace(.sRGB) ?? .windowBackgroundColor }
+        underPageBackgroundColor = resolved
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyRestingColor()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        applyRestingColor()
+    }
 
     // Mouse gestures: the middle button, held and dragged. A press that does not move is given to the page unchanged, so a middle click on a link still opens it in a new tab.
     var gesturesEnabled: () -> Bool = { false }

@@ -144,7 +144,7 @@ struct MouseGestureEditor: View {
                     Picker("", selection: Binding(get: { model.mouseGestureMap[path] ?? .back }, set: { var map = model.mouseGestureMap; map[path] = $0; model.setMouseGestureMap(map) })) {
                         ForEach(VimAction.allCases) { Text($0.title).tag($0) }
                     }.labelsHidden()
-                    Button(role: .destructive) { var map = model.mouseGestureMap; map[path] = nil; model.setMouseGestureMap(map) } label: { Image(systemName: "trash") }.buttonStyle(.borderless)
+                    Button(role: .destructive) { var map = model.mouseGestureMap; map[path] = nil; model.setMouseGestureMap(map) } label: { Image(systemName: "trash").accessibilityLabel("Delete") }.buttonStyle(.borderless)
                 }
             }
             HStack {

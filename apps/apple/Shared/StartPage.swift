@@ -39,6 +39,7 @@ struct StartPageView: View {
                             if model.showFavorites { FavoritesGrid(addingFavorite: $addingFavorite) }
                             if model.showContinue, let tab = model.continueTab { ContinueCard(tab: tab) }
                             if model.showFrequent || model.showRecentlyClosed { HistoryChips() }
+                            if !model.inbox.isEmpty { SentToThisDevice() }
                             if !model.remoteTabs.isEmpty { OtherDeviceTabs() }
                         }
                     }
@@ -66,6 +67,7 @@ struct StartPageView: View {
             Button("Add") { model.addFavorite(address: newURL, name: newName); newURL = ""; newName = "" }
             Button("Cancel", role: .cancel) { newURL = ""; newName = "" }
         }
+        .overlay { if model.startDrawerOpen, !isPrivate { StartDrawer() } }
         .accessibilityIdentifier("start-page")
     }
 
@@ -111,7 +113,7 @@ struct StartPageView: View {
             Text("This tab keeps no history, cookies or session data once closed.")
             Text("Private browsing does not hide your activity from websites, your network or your employer.").foregroundStyle(.secondary)
         }
-        .font(.system(size: 14))
+        .scaledFont(14)
         .padding(16).frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(accent.opacity(0.10)))
     }
@@ -141,7 +143,7 @@ struct StartPageView: View {
 private struct SectionHeading: View {
     let title: String
     var body: some View {
-        Text(title).font(.system(size: 11, weight: .semibold)).tracking(0.8).foregroundStyle(.secondary).textCase(.uppercase)
+        Text(title).scaledFont(11, weight: .semibold).tracking(0.8).foregroundStyle(.secondary).textCase(.uppercase)
             .accessibilityAddTraits(.isHeader)
     }
 }
@@ -190,20 +192,20 @@ private struct FavoritesGrid: View {
     @Binding var addingFavorite: Bool
 
     private let columns = [GridItem(.adaptive(minimum: 76, maximum: 96), spacing: 14, alignment: .top)]
-    private let tileSize: CGFloat = 52
+    private var tileSize: CGFloat { model.startTile.points }
 
     var body: some View {
         let items = Array(model.orderedFavorites.prefix(8))
         VStack(spacing: 14) {
             SectionHeading(title: "Favorites")
-            // Up to eight in one centered row; more than fit across wrap into a tidy grid.
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: 16) { tiles(items) }.frame(maxWidth: .infinity)
-                LazyVGrid(columns: columns, spacing: 16) { tiles(items) }
-            }
             if items.isEmpty {
-                Text("Your favorite sites, one tap away. Nothing is added unless you choose it.")
-                    .font(.system(size: 12.5)).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                emptyCard.transition(.opacity)
+            } else {
+                // Up to eight in one centered row; more than fit across wrap into a tidy grid.
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: 16) { tiles(items) }.frame(maxWidth: .infinity)
+                    LazyVGrid(columns: columns, spacing: 16) { tiles(items) }
+                }
             }
         }
     }
@@ -218,11 +220,12 @@ private struct FavoritesGrid: View {
             VStack(spacing: 7) {
                 SiteTile(url: favorite.url, title: favorite.title, size: tileSize)
                 Text(favorite.title.isEmpty ? displayHost(URL(string: favorite.url)) : favorite.title)
-                    .font(.system(size: 12)).lineLimit(1).truncationMode(.tail).foregroundStyle(.primary.opacity(0.85)).frame(width: 76)
+                    .scaledFont(12).lineLimit(1).truncationMode(.tail).foregroundStyle(.primary.opacity(0.85)).frame(width: 76)
             }
             .frame(width: 76)
+            .keyboardFocusRing(radius: 14)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.plain).focusEffectDisabled()
         .draggable(favorite.url) { SiteTile(url: favorite.url, title: favorite.title, size: tileSize) }
         .dropDestination(for: String.self) { dropped, _ in
             guard let url = dropped.first else { return false }
@@ -240,6 +243,38 @@ private struct FavoritesGrid: View {
 
     /// Never filled in for you: suggestions are only offered here, and nothing is added until you choose it.
     private var addTile: some View {
+        addMenu {
+            VStack(spacing: 7) {
+                Image(systemName: "plus").font(.system(size: 18, weight: .regular)).foregroundStyle(.secondary)
+                    .frame(width: tileSize, height: tileSize)
+                    .background(RoundedRectangle(cornerRadius: tileSize * 0.26, style: .continuous).strokeBorder(Color.secondary.opacity(0.45), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+                Text("Add").font(.system(size: 12)).foregroundStyle(.secondary).frame(width: 76)
+            }
+            .frame(width: 76)
+            .keyboardFocusRing(radius: 14)
+        }
+    }
+
+    /// With no favorites yet, one clear dashed box says what this row is for and how to fill it.
+    private var emptyCard: some View {
+        addMenu {
+            HStack(spacing: 12) {
+                Image(systemName: "plus").font(.system(size: 16, weight: .regular)).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Pin your favorite sites here").scaledFont(13, weight: .medium).foregroundStyle(.primary.opacity(0.85))
+                    Text("One tap away from every new tab. Nothing is added unless you choose it.").scaledFont(12).foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 18).padding(.vertical, 14)
+            .frame(maxWidth: 420)
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.secondary.opacity(0.45), style: StrokeStyle(lineWidth: 1, dash: [5, 4])))
+            .contentShape(Rectangle())
+            .keyboardFocusRing(radius: 14)
+        }
+        .accessibilityLabel("Add a favorite site")
+    }
+
+    private func addMenu<Label: View>(@ViewBuilder label: () -> Label) -> some View {
         Menu {
             if let tab = model.continueTab ?? model.active, let url = tab.url?.absoluteString, !tab.isBlank, !model.isFavorite(url) {
                 Button("Add “\(tab.displayTitle)”") { model.toggleFavorite(url: url, title: tab.displayTitle) }
@@ -250,15 +285,9 @@ private struct FavoritesGrid: View {
                 Menu("Suggestions") { ForEach(suggestions, id: \.url) { s in Button(s.title) { model.toggleFavorite(url: s.url, title: s.title) } } }
             }
         } label: {
-            VStack(spacing: 7) {
-                Image(systemName: "plus").font(.system(size: 18, weight: .regular)).foregroundStyle(.secondary)
-                    .frame(width: tileSize, height: tileSize)
-                    .background(RoundedRectangle(cornerRadius: tileSize * 0.26, style: .continuous).strokeBorder(Color.secondary.opacity(0.45), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
-                Text("Add").font(.system(size: 12)).foregroundStyle(.secondary).frame(width: 76)
-            }
-            .frame(width: 76)
+            label()
         }
-        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
+        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).focusEffectDisabled()
         .accessibilityLabel("Add a favorite")
         .accessibilityIdentifier("add-favorite")
     }
@@ -285,9 +314,9 @@ private struct ContinueCard: View {
                 HStack(spacing: 12) {
                     SiteTile(url: tab.url?.absoluteString ?? "", title: tab.displayTitle, size: 36)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(tab.displayTitle).font(.system(size: 14, weight: .medium)).lineLimit(1)
+                        Text(tab.displayTitle).scaledFont(14, weight: .medium).lineLimit(1)
                         Text("\(displayHost(tab.url)) · \(RelativeDateTimeFormatter().localizedString(for: tab.lastActive, relativeTo: Date()))")
-                            .font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                            .scaledFont(12).foregroundStyle(.secondary).lineLimit(1)
                     }
                     Spacer(minLength: 0)
                     Image(systemName: "arrow.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(.tertiary)
@@ -295,8 +324,9 @@ private struct ContinueCard: View {
                 .padding(12)
                 .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.primary.opacity(0.05)))
                 .contentShape(Rectangle())
+                .keyboardFocusRing(radius: 14)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.plain).focusEffectDisabled()
             .accessibilityLabel("Continue browsing: \(tab.displayTitle), \(displayHost(tab.url))")
             .accessibilityIdentifier("continue-card")
         }
@@ -321,8 +351,9 @@ private struct Chip: View {
             .padding(.horizontal, 11).frame(height: 30)
             .background(Capsule().fill(Color.primary.opacity(0.07)))
             .contentShape(Capsule())
+            .keyboardFocusRing(radius: 15)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.plain).focusEffectDisabled()
     }
 }
 
@@ -399,6 +430,23 @@ private struct HistoryChips: View {
     }
 }
 
+private struct SentToThisDevice: View {
+    @EnvironmentObject var model: BrowserModel
+
+    var body: some View {
+        VStack(spacing: 12) {
+            SectionHeading(title: "Sent to this device")
+            WrapLayout {
+                ForEach(model.inbox.prefix(6)) { item in
+                    Chip(title: (item.title.isEmpty ? displayHost(URL(string: item.url)) : item.title) + " · " + item.fromName, url: item.url) { model.openSentTab(item) }
+                        .contextMenu { Button("Dismiss") { model.dismissSentTab(item) } }
+                }
+            }
+        }
+        .transition(.opacity)
+    }
+}
+
 private struct OtherDeviceTabs: View {
     @EnvironmentObject var model: BrowserModel
 
@@ -449,16 +497,11 @@ private struct CustomizeMenu: View {
     @EnvironmentObject var model: BrowserModel
 
     var body: some View {
-        Menu {
-            Toggle("Greeting", isOn: $model.showGreeting)
-            Toggle("Favorites", isOn: $model.showFavorites)
-            Toggle("Continue browsing", isOn: $model.showContinue)
-            Toggle("Often visited", isOn: $model.showFrequent)
-            Toggle("Recently closed", isOn: $model.showRecentlyClosed)
-        } label: {
+        Button { animated(.easeOut(duration: 0.22)) { model.startDrawerOpen = true } } label: {
             Label("Customize", systemImage: "slider.horizontal.3").font(.system(size: 11.5)).foregroundStyle(.secondary)
         }
-        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
+        .buttonStyle(.plain).focusEffectDisabled()
+        .keyboardFocusRing(radius: 6)
         .fixedSize()
         .accessibilityIdentifier("customize-start")
     }

@@ -226,7 +226,7 @@ struct SavedSessionsView: View {
                         }
                         Spacer()
                         Button("Open") { model.openSession(session); model.sheet = nil; dismiss() }
-                        Button(role: .destructive) { model.deleteSession(session) } label: { Image(systemName: "trash") }.buttonStyle(.borderless)
+                        Button(role: .destructive) { model.deleteSession(session) } label: { Image(systemName: "trash").accessibilityLabel("Delete") }.buttonStyle(.borderless)
                     }
                 }
             }

@@ -9,8 +9,22 @@ enum SyncRules {
     static let settingKeys: Set<String> = [
         "search_template", "search_suggestions", "search_shortcuts", "accent", "appearance", "address_display", "dark_pages", "dark_sites", "website_appearance", "site_appearance",
         "site_zoom", "site_styles", "site_notes", "bookmark_tags", "group_colors", "strip_tracking", "app_links", "app_link_sites",
-        "blur_private_switcher", "permission_expiry", "homepage", "favorites_order",
+        "blur_private_switcher", "permission_expiry", "homepage", "favorites_order", "site_js_off", "never_sleep_sites", "de_amp", "user_themes", "start_tile", "theme_custom",
+        // Rules and per-site choices (the "site rules" group in sync settings).
+        "site_open_rules", "site_delete_rules", "site_user_agents", "containers", "split_templates", "workflows", "fingerprint_noise", "fingerprint_exceptions",
+        "block_webrtc", "webrtc_exceptions", "video_ads",
+        // What the start page shows.
+        "show_favorites", "show_continue", "show_frequent", "show_greeting", "show_recently_closed", "start_background",
     ]
+
+    /// The settings that are rules about particular sites, kept apart so they can be switched on and off on their own.
+    static let siteRuleKeys: Set<String> = [
+        "site_zoom", "site_styles", "site_notes", "site_appearance", "permission_expiry", "site_js_off", "never_sleep_sites", "site_open_rules", "site_delete_rules",
+        "site_user_agents", "containers", "split_templates", "workflows", "fingerprint_noise", "fingerprint_exceptions", "block_webrtc", "webrtc_exceptions", "video_ads",
+        "app_link_sites",
+    ]
+
+    static func category(forSetting key: String) -> SyncCategory { siteRuleKeys.contains(key) ? .siteRules : .settings }
     static let maxTabs = 100
     static let maxBookmarks = 3_000
     /// iCloud's key-value store holds 1 MB in all; a snapshot stays well under it.
@@ -18,7 +32,7 @@ enum SyncRules {
 
     /// Combines another device's snapshot into this one. Bookmarks are added, never removed (so nothing is lost by syncing); settings follow
     /// the newer snapshot, and only if the person asked for settings to sync. Returns what changed.
-    struct Outcome: Equatable { var bookmarksAdded = 0; var bookmarksRemoved = 0; var bookmarksChanged = 0; var settingsApplied = 0; var workspacesChanged = 0; var sessionsChanged = 0; var loginsChanged = 0; var tabs = 0 }
+    struct Outcome: Equatable { var bookmarksAdded = 0; var bookmarksRemoved = 0; var bookmarksChanged = 0; var settingsApplied = 0; var workspacesChanged = 0; var sessionsChanged = 0; var loginsChanged = 0; var historyChanged = 0; var tabsReceived = 0; var tabs = 0 }
 
     static func bookmarksToAdd(remote: [BackupPayload.Bookmark], existing: Set<String>) -> [BackupPayload.Bookmark] {
         var seen = existing
@@ -44,12 +58,21 @@ enum SyncRules {
         while sealed.count > maxSealedBytes {
             if let t = working.tabs, !t.isEmpty { working.tabs = Array(t.prefix(t.count / 2)) }
             else if working.extensions != nil { working.extensions = nil }
+            else if var state = working.state, state.history.count > 40 { state.history = SyncRules.newestHistory(state.history, keep: state.history.count / 2); working.state = state }
             else if var state = working.state, SyncRules.dropOldestTombstones(&state) { working.state = state }
             else if working.state == nil, working.bookmarks.count > 50 { working.bookmarks = Array(working.bookmarks.prefix(working.bookmarks.count * 3 / 4)) }
             else { break }
             sealed = try BackupFile.seal(working, passphrase: passphrase, iterations: iterations)
         }
         return sealed
+    }
+
+    /// The most recently visited pages, and any deletions, of a history ledger.
+    static func newestHistory(_ cells: [String: SyncCell<SyncVisit>], keep: Int) -> [String: SyncCell<SyncVisit>] {
+        let live = cells.filter { $0.value.value != nil }.sorted { ($0.value.value?.last ?? 0) > ($1.value.value?.last ?? 0) }.prefix(keep)
+        var out = cells.filter { $0.value.value == nil }
+        for (k, v) in live { out[k] = v }
+        return out
     }
 
     /// Drops the older half of the tombstones; false when there are none left to drop.
@@ -60,6 +83,7 @@ enum SyncRules {
         for c in state.workspaces.values where c.value == nil { stamps.append(c.stamp.time) }
         for c in state.logins.values where c.value == nil { stamps.append(c.stamp.time) }
         for c in state.sessions.values where c.value == nil { stamps.append(c.stamp.time) }
+        for c in state.history.values where c.value == nil { stamps.append(c.stamp.time) }
         guard !stamps.isEmpty else { return false }
         let cut = stamps.sorted()[stamps.count / 2]
         state.bookmarks = state.bookmarks.filter { $0.value.value != nil || $0.value.stamp.time > cut }
@@ -67,6 +91,7 @@ enum SyncRules {
         state.workspaces = state.workspaces.filter { $0.value.value != nil || $0.value.stamp.time > cut }
         state.logins = state.logins.filter { $0.value.value != nil || $0.value.stamp.time > cut }
         state.sessions = state.sessions.filter { $0.value.value != nil || $0.value.stamp.time > cut }
+        state.history = state.history.filter { $0.value.value != nil || $0.value.stamp.time > cut }
         return true
     }
 }

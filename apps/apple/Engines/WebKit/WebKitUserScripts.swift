@@ -2,13 +2,25 @@ import WebKit
 
 /// Puts the user's scripts into a web view, and is the only file that does. Each script is wrapped so it only runs on the websites
 /// the user named (WebKit has no address filter of its own for these), and an error in one script cannot stop the page.
-/// Page-wide switches the user has chosen (see Settings › Privacy).
-struct WebPolicy: Equatable {
-    var blockWebRTC = false
-    var exceptions = Set<String>()
-}
-
 enum UserScriptInstaller {
+    /// A number picked at random each time the app starts; the fingerprint changes are worked out from it.
+    private static let fingerprintSeed = UInt32.random(in: 1...UInt32.max)
+
+    /// Every switch from `WebPolicy` that is a script. Used for normal and private tabs alike.
+    static func addPolicyScripts(_ policy: WebPolicy, to controller: WKUserContentController) {
+        if policy.blockWebRTC { addWebRTCBlocker(to: controller, exceptions: policy.exceptions) }
+        if policy.randomizeFingerprint {
+            controller.addUserScript(WKUserScript(source: PageScripts.fingerprint(seed: fingerprintSeed, exceptions: policy.fingerprintExceptions),
+                                                  injectionTime: .atDocumentStart, forMainFrameOnly: false))
+        }
+        if policy.deAMP {
+            controller.addUserScript(WKUserScript(source: PageScripts.deAMP, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: .defaultClient))
+        }
+        if policy.blockVideoAds {
+            controller.addUserScript(WKUserScript(source: PageScripts.videoAds, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .defaultClient))
+        }
+    }
+
     /// Pages are drawn without scroll bars, on both the Mac and the iPhone. Scrolling works as before; only the bar is not painted.
     static func addScrollbarHider(to controller: WKUserContentController) {
         let source = """
@@ -54,7 +66,7 @@ enum UserScriptInstaller {
     static func install(_ scripts: [UserScript], policy: WebPolicy = WebPolicy(), into controller: WKUserContentController) {
         controller.removeAllUserScripts()
         addScrollbarHider(to: controller)
-        if policy.blockWebRTC { addWebRTCBlocker(to: controller, exceptions: policy.exceptions) }
+        addPolicyScripts(policy, to: controller)
         for script in scripts where script.enabled && !script.sites.isEmpty {
             let world: WKContentWorld = script.inPageWorld ? .page : .world(name: "BrowserSetuUserScripts")
             controller.addUserScript(WKUserScript(source: wrapped(script), injectionTime: script.runAtStart ? .atDocumentStart : .atDocumentEnd,

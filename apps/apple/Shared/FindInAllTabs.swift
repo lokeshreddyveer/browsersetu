@@ -27,7 +27,7 @@ struct FindInAllTabsView: View {
                 ForEach(hits) { hit in
                     Button { open(hit) } label: {
                         VStack(alignment: .leading, spacing: 2) {
-                            HStack { Text(hit.title).lineLimit(1); if hit.asleep { Image(systemName: "moon.zzz").font(.caption).foregroundStyle(.secondary) } }
+                            HStack { Text(hit.title).lineLimit(1); if hit.close { Text("similar").font(.caption2).padding(.horizontal, 5).padding(.vertical, 1).background(Capsule().fill(Color.secondary.opacity(0.18))) }; if hit.asleep { Image(systemName: "moon.zzz").font(.caption).foregroundStyle(.secondary) } }
                             Text(hit.snippet).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                             Text(hit.host).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
                         }
@@ -65,6 +65,6 @@ struct FindInAllTabsView: View {
         model.select(hit.tabID)
         dismiss()
         model.sheet = nil
-        if !hit.asleep { model.showFind(); model.findText = text; model.findNext() }
+        if !hit.asleep { model.showFind(); model.findText = hit.found.isEmpty ? text : hit.found; model.findNext() }
     }
 }

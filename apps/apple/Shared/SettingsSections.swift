@@ -274,7 +274,7 @@ struct SearchShortcutsSection: View {
                 HStack {
                     VStack(alignment: .leading) { Text(key).fontWeight(.medium); Text(template).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
                     Spacer()
-                    Button(role: .destructive) { var map = model.customSearchShortcuts; map[key] = nil; model.setSearchShortcuts(map) } label: { Image(systemName: "trash") }.buttonStyle(.borderless)
+                    Button(role: .destructive) { var map = model.customSearchShortcuts; map[key] = nil; model.setSearchShortcuts(map) } label: { Image(systemName: "trash").accessibilityLabel("Delete") }.buttonStyle(.borderless)
                 }
             }
             HStack {
@@ -324,6 +324,10 @@ struct SavedSignInsSection: View {
     @State private var saving = true
     @State private var editing: WebLogin?
     @State private var adding = false
+    @State private var findings: [String: BreachCheck.Finding] = [:]
+    @State private var checking = false
+    @State private var checkSummary: String?
+    @State private var checkTask: Task<Void, Never>?
 
     var body: some View {
         Section {
@@ -333,16 +337,26 @@ struct SavedSignInsSection: View {
                     VStack(alignment: .leading) {
                         Text(URL(string: login.origin)?.host ?? login.origin).fontWeight(.medium)
                         Text(login.user).font(.caption).foregroundStyle(.secondary)
+                        if let finding = findings[login.id], finding.isProblem {
+                            Label(problemText(finding), systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange)
+                        }
                     }
                     Spacer()
                     Button("Copy") { Task { if await model.requireAuthentication("Copy a saved password") { copyToPasteboard(login.password); model.notice = "Password copied." } } }.buttonStyle(.borderless)
                     Button("Edit") { editing = login }.buttonStyle(.borderless)
                     Button(role: .destructive) {
                         Task { if await model.requireAuthentication("Remove a saved password") { WebLoginVault.forget(login, profile: model.profileName); load() } }
-                    } label: { Image(systemName: "trash") }.buttonStyle(.borderless)
+                    } label: { Image(systemName: "trash").accessibilityLabel("Delete") }.buttonStyle(.borderless)
                 }
             }
             Button("Add a Password…") { adding = true }
+            if !logins.isEmpty {
+                HStack {
+                    Button(checking ? "Checking…" : "Check Passwords for Leaks…") { startCheck() }.disabled(checking)
+                    if checking { ProgressView().controlSize(.small) }
+                }
+                if let checkSummary { Text(checkSummary).font(.caption).foregroundStyle(.secondary).transition(.opacity) }
+            }
             if !model.neverSaveOrigins.isEmpty {
                 ForEach(model.neverSaveOrigins.sorted(), id: \.self) { origin in
                     HStack { Text("Never offered for \(URL(string: origin)?.host ?? origin)").font(.caption); Spacer(); Button("Allow Again") { model.allowSavingLogins(for: origin); load() } }
@@ -358,20 +372,44 @@ struct SavedSignInsSection: View {
                     Spacer()
                     Button(role: .destructive) {
                         Task { if await model.requireAuthentication("Remove a saved sign-in") { SignInVault.forget(account: entry.account, profile: model.profileName); load() } }
-                    } label: { Image(systemName: "trash") }.buttonStyle(.borderless)
+                    } label: { Image(systemName: "trash").accessibilityLabel("Delete") }.buttonStyle(.borderless)
                 }
             }
         } header: {
             Text("Saved Sign-ins")
         } footer: {
-            Text("For the plain name-and-password boxes some websites show. Kept in your Keychain, on this device, for this profile only, and never in private tabs. Passwords for web pages are offered for saving after you sign in, kept in the same Keychain, and filled only after Touch ID or your password. Nothing is saved in private tabs, and nothing is sent to any server.")
+            Text("For the plain name-and-password boxes some websites show. Kept in your Keychain, on this device, for this profile only, and never in private tabs. Passwords for web pages are offered for saving after you sign in, kept in the same Keychain, and filled only after Touch ID or your password. Nothing is saved in private tabs. Nothing is sent to any server, except when you choose Check Passwords for Leaks: then only the first five characters of a one-way code for each password go to haveibeenpwned.com, never a password, a site or a user name.")
         }
         .onAppear(perform: load)
+        .onDisappear { checkTask?.cancel(); findings = [:]; checkSummary = nil; checking = false }
         .sheet(item: $editing, onDismiss: load) { LoginEditor(original: $0) }
         .sheet(isPresented: $adding, onDismiss: load) { LoginEditor(original: nil) }
     }
 
     private func load() { entries = SignInVault.list(profile: model.profileName); logins = WebLoginVault.list(profile: model.profileName); saving = model.saveLoginsEnabled }
+
+    private func problemText(_ finding: BreachCheck.Finding) -> String {
+        var parts: [String] = []
+        if finding.leaks > 0 { parts.append("Found in \(finding.leaks.formatted()) known leaks. Change it.") }
+        if !finding.reusedOn.isEmpty { parts.append("Also used on " + finding.reusedOn.prefix(2).joined(separator: ", ") + (finding.reusedOn.count > 2 ? " and \(finding.reusedOn.count - 2) more" : "") + ".") }
+        return parts.joined(separator: " ")
+    }
+
+    /// Asks for Touch ID first, because the passwords are read to be hashed, then looks them up. The result is shown here and kept nowhere.
+    private func startCheck() {
+        checkTask?.cancel()
+        checkTask = Task {
+            guard await model.requireAuthentication("Check saved passwords for leaks") else { return }
+            animated(.easeOut(duration: 0.2)) { checking = true; checkSummary = nil }
+            let current = WebLoginVault.list(profile: model.profileName)
+            do {
+                let result = try await BreachCheck.scan(current)
+                animated(.easeOut(duration: 0.2)) { findings = result; checkSummary = BreachCheck.summary(result, checked: current.count); checking = false }
+            } catch {
+                animated(.easeOut(duration: 0.2)) { checkSummary = "Could not reach the service. Check your connection and try again."; checking = false }
+            }
+        }
+    }
 }
 
 /// The honest state of passwords and passkeys.

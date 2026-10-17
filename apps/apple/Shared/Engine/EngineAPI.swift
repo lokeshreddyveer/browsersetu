@@ -42,6 +42,8 @@ protocol TabEngineEvents: AnyObject {
     func engineLoadFailed(url: URL?, description: String)
     func engineProcessCrashed()
     func engineMouseGesturesEnabled() -> Bool
+    /// Whether the page being opened may run scripts (the person can switch them off for a site, or for this one tab).
+    func engineScriptsAllowed(for url: URL) -> Bool
     /// The strokes drawn so far while the middle button is held (`finished` false), and the whole gesture when it is let go (`finished` true; empty means it was only a click).
     func engineMouseGesture(_ sequence: String, finished: Bool)
     /// Whether the page has its own bar fixed to the top or bottom edge of the screen (a site header, a row of tabs). Only these pages are kept clear of the status bar and the dock.
@@ -83,6 +85,7 @@ extension TabEngine {
     func pageHasSensitiveForm() async -> Bool { true }
     func pageMetadata() async -> [String: String]? { nil }
     func securityReport() async -> SecurityReport? { nil }
+    func connectionCertificate() async -> Data? { nil }
     func setUserAgent(_ value: String?) {}
     func controlVideo(index: Int, action: String, value: Double) async {}
     func fillCouponField(_ code: String) async -> Bool { false }
@@ -112,6 +115,7 @@ extension TabEngine {
 
 extension TabEngineEvents {
     func engineMouseGesturesEnabled() -> Bool { false }
+    func engineScriptsAllowed(for url: URL) -> Bool { true }
     func engineMouseGesture(_ sequence: String, finished: Bool) {}
     func engineFixedBars(top: Bool, bottom: Bool) {}
     func engineWantsLoginCapture() -> Bool { false }
@@ -186,6 +190,8 @@ protocol TabEngine: AnyObject {
     func selectedText() async -> String?
     /// What the page and its connection look like from a security point of view: certificate chain, parts loaded without encryption, redirects.
     func securityReport() async -> SecurityReport?
+    /// The DER bytes of the site's own certificate for the page that is showing, or nil when it is not an encrypted page.
+    func connectionCertificate() async -> Data?
     /// Asks sites for a different browser identity (nil: the normal one). Takes effect on the next load.
     func setUserAgent(_ value: String?)
     /// What the page says about itself (title, author, date, site) from its own tags; nil when it says nothing.
@@ -241,14 +247,14 @@ protocol BrowserEngine: AnyObject {
     /// The scripts to run on pages in normal tabs (never private ones). Replaces the previous set on every open tab.
     func setUserScripts(_ scripts: [UserScript])
     /// Switches the page's WebRTC off (except on the named sites), for tabs opened afterwards and, by reinstalling, the ones that are open.
-    func setWebPolicy(blockWebRTC: Bool, exceptions: Set<String>)
+    func setWebPolicy(_ policy: WebPolicy)
     /// Sends page loads in every profile (private ones too) through the proxy, or, with nil, directly. Takes effect for pages opened afterwards.
     func setProxy(_ proxy: ProxyConfig?, password: String?)
 }
 
 extension BrowserEngine {
     func setUserScripts(_ scripts: [UserScript]) {}
-    func setWebPolicy(blockWebRTC: Bool, exceptions: Set<String>) {}
+    func setWebPolicy(_ policy: WebPolicy) {}
     func setProxy(_ proxy: ProxyConfig?, password: String?) {}
 }
 

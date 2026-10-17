@@ -346,7 +346,7 @@ final class PrivacyIntegrationTests: XCTestCase {
         // The browser runs script of its own in exactly one place: reading a page's icon links, in its own isolated world.
         let withScript = try sources.filter { try String(contentsOf: $0, encoding: .utf8).contains("callAsyncJavaScript") }.map(\.lastPathComponent)
         XCTAssertEqual(withScript, ["WebKitEngine.swift"], "unexpected script execution: \(withScript)")
-        // Only four files may create a URLSession: the list updater, the opt-in search suggestions, the opt-out site icons and the one-request Chrome Web Store download the user asks for.
+        // Only five files may create a URLSession: the list updater, the opt-in search suggestions, the opt-out site icons, the one-request Chrome Web Store download the user asks for, and the leaked-password check the user starts.
         // Naming the fetcher type is fine; actually creating or using a URLSession is only allowed in those two.
         let withSession = try sources.filter {
             try String(contentsOf: $0, encoding: .utf8).replacingOccurrences(of: "URLSessionListFetcher", with: "")
@@ -354,7 +354,7 @@ final class PrivacyIntegrationTests: XCTestCase {
                 .replacingOccurrences(of: "URLSession.AuthChallengeDisposition", with: "")
                 .contains("URLSession")
         }.map(\.lastPathComponent)
-        XCTAssertEqual(withSession.sorted(), ["ChromeWebStore.swift", "FaviconStore.swift", "FilterListUpdater.swift", "SearchSuggestions.swift"], "unexpected networking code: \(withSession)")
+        XCTAssertEqual(withSession.sorted(), ["BreachCheck.swift", "ChromeWebStore.swift", "FaviconStore.swift", "FilterListUpdater.swift", "SearchSuggestions.swift"], "unexpected networking code: \(withSession)")
     }
 
     func testNoVPNDNSOrNetworkExtensionAnywhereInTheApp() throws {

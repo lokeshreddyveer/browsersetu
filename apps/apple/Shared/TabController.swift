@@ -21,6 +21,8 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
     @Published var canGoBack = false
     @Published var canGoForward = false
     @Published var isSecure = false
+    /// Who the site's certificate says is on the other end; nil until the page has loaded or when it is not encrypted.
+    @Published private(set) var identity: CertificateIdentity?
     /// The colour the page declares for browser chrome, if any.
     @Published var tint: PageTint?
     @Published var group: String
@@ -244,6 +246,7 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
 
     func engineURLChanged(_ url: URL) {
         if isReading, url != readerOrigin { isReading = false; readerOrigin = nil }
+        if identity != nil, identity?.host != url.host { identity = nil }
         self.url = url
         pendingURL = nil
         owner?.tabURLChanged(self)
@@ -262,6 +265,7 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
     func engineProgress(_ progress: Double) { self.progress = progress }
 
     func engineMouseGesturesEnabled() -> Bool { owner?.mouseGestures == true }
+    func engineScriptsAllowed(for url: URL) -> Bool { javaScriptOn && owner?.scriptsAllowed(forHost: url.host) != false }
     func engineMouseGesture(_ sequence: String, finished: Bool) { if owner?.activeID == id { owner?.mouseGestureProgress(sequence, finished: finished) } }
 
     func engineWantsLoginCapture() -> Bool { !isPrivate && owner?.saveLoginsEnabled == true }
@@ -288,8 +292,20 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
         if owner?.activeID == id { owner?.pageFixedBarsChanged(self) }
     }
 
+    /// Reads who the site's certificate says it is. Done after a page has loaded, when the connection's details exist; nothing is fetched.
+    func refreshIdentity() {
+        guard let host = url?.host, url?.scheme == "https" else { identity = nil; return }
+        Task { [weak self] in
+            guard let self else { return }
+            let der = await engine.connectionCertificate()
+            let parsed = der.flatMap { CertificateIdentity.parse(der: $0, host: host) }
+            if parsed != identity { identity = parsed }
+        }
+    }
+
     func engineDidFinishLoading() {
         if !showingError { owner?.didFinishLoading(self) }
+        refreshIdentity()
         engine.setGestures(owner?.gestureOptions ?? GestureOptions())
         applySavedZoom()
         applyBottomInset()
@@ -408,6 +424,11 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
         // The user's own threat list comes first; then link cleaning re-issues the navigation without trackers.
         if let host = target.host, model.shouldWarnAboutThreat(host: host) {
             model.presentThreatWarning(for: target, in: self)
+            return .deny
+        }
+        // A link through an AMP cache goes straight to the site's own page.
+        if let own = model.deAMPedLink(target) {
+            DispatchQueue.main.async { [weak self] in self?.load(own) }
             return .deny
         }
         if let cleaned = model.cleanedLink(target) {

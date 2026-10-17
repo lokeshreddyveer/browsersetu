@@ -54,6 +54,12 @@ class H(http.server.BaseHTTPRequestHandler):
         if path == "/tall":
             rows = "".join(f"<p style='font:18px sans-serif;margin:24px'>Paragraph {i}. A long page, so there is something to scroll.</p>" for i in range(200))
             return self.send(200, f"<title>Tall</title><body style='margin:0'>{rows}</body>")
+        if path == "/amp-page":
+            return self.send(200, f'<html amp><head><title>AMP copy</title><link rel="canonical" href="http://127.0.0.1:{PORT}/full-page"></head><body>amp</body></html>')
+        if path == "/full-page":
+            return self.send(200, "<title>Full page</title>the real one")
+        if path == "/script-page":
+            return self.send(200, "<title>before</title><script>document.title='ran'</script>text")
         if path == "/page":
             return self.send(200, "<title>Page</title>hello")
         if path == "/page2":

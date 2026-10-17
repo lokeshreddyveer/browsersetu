@@ -79,7 +79,7 @@ struct SignatureSheet: View {
                     Text(item.name)
                     Spacer()
                     Button("Use") { Task { if await model.authenticateForSignature() { use(item.signature) } else { problem = "Not used: it could not be confirmed." } } }
-                    Button(role: .destructive) { SignatureStore.forget(item, profile: model.profileName); saved = SignatureStore.list(profile: model.profileName) } label: { Image(systemName: "trash") }.buttonStyle(.borderless)
+                    Button(role: .destructive) { SignatureStore.forget(item, profile: model.profileName); saved = SignatureStore.list(profile: model.profileName) } label: { Image(systemName: "trash").accessibilityLabel("Delete") }.buttonStyle(.borderless)
                 }
             }
         }

@@ -32,7 +32,7 @@ enum ChromeWebStore {
     static func downloadURL(id: String) -> URL? {
         var parts = URLComponents(string: "https://clients2.google.com/service/update2/crx")
         let x = "id=\(id)&installsource=ondemand&uc"
-        parts?.queryItems = [.init(name: "response", value: "redirect"), .init(name: "prodversion", value: "131.0.0.0"),
+        parts?.queryItems = [.init(name: "response", value: "redirect"), .init(name: "prodversion", value: "140.0.0.0"),
                              .init(name: "acceptformat", value: "crx3"), .init(name: "x", value: x)]
         return parts?.url
     }

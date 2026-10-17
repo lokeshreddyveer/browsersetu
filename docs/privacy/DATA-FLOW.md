@@ -15,6 +15,7 @@ BrowserSetu has no analytics, no telemetry, no accounts and no server of its own
 | Chrome Web Store extension | the person adds one by address | one package request | Google's store | HTTPS only, restricted to Google's download host. |
 | Update check (downloadable Mac build only) | daily, can be turned off | the app's version | github.com | Sparkle; not in the App Store or iPhone builds. |
 | iCloud sync | opt-in | bookmarks, and settings and open tabs if chosen | the person's own iCloud | Sealed with the person's own passphrase before upload; BrowserSetu cannot read it. Verify the current questionnaire wording for data transmitted through iCloud. |
+| Leaked-password check | **only when the person presses Check Passwords for Leaks** (after Touch ID) | the first five characters of each saved password's SHA-1 hash, nothing else | haveibeenpwned.com (`api.pwnedpasswords.com`) | k-anonymity range lookup: no password, whole hash, site, user name, cookie or account is sent; padded responses; the match is made on the device and the result is not stored. |
 | Wi-Fi sync / sharing | the person pairs two of their devices | the shared items | their own other device, on the same network | One-time 100-bit code; not through any server. |
 
 ## Identifiers

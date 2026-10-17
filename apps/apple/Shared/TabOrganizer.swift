@@ -193,11 +193,11 @@ extension BrowserModel {
         return moved
     }
 
-    /// Puts every tab to sleep except these, the one in front, pinned and locked ones, and any that are playing or loading.
+    /// Puts every tab to sleep except these, the one in front, pinned and locked ones, sites set to never sleep, and any that are playing or loading.
     @discardableResult
     func suspendAll(except keep: Set<UInt64> = []) async -> Int {
         var slept = 0
-        for tab in tabs where !keep.contains(tab.id) && tab.id != activeID && tab.id != splitTabID && !tab.pinned && !isLocked(tab) && !tab.isPrivate && !tab.isBlank && !tab.isDiscarded {
+        for tab in tabs where !keep.contains(tab.id) && tab.id != activeID && tab.id != splitTabID && tab.id != thirdSplitTabID && !tab.pinned && !isLocked(tab) && !tab.isPrivate && !tab.isBlank && !tab.isDiscarded && !neverSleeps(host: tab.url?.host) {
             if await tab.engine.isBusy() { continue }
             guard tab.id != activeID else { continue }
             tab.discard(reason: "you put all other tabs to sleep")

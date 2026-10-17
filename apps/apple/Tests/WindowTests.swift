@@ -103,4 +103,23 @@ final class WindowTests: XCTestCase {
         XCTAssertTrue(reader.windows.pendingRestores[0].contains(t.id))
         _ = b
     }
+
+    func testAGuestWindowOnlyOpensPrivateTabsAndIsNotRemembered() async throws {
+        let (a, b) = await pair()
+        let guest = BrowserModel(sharing: a)
+        a.windows.openingGuest = true
+        guest.startSecondaryWindow()
+        XCTAssertTrue(guest.isGuest)
+        XCTAssertFalse(a.windows.openingGuest, "the request is used up by the one window it was for")
+        XCTAssertTrue(guest.tabs.allSatisfy(\.isPrivate) && !guest.tabs.isEmpty, "its first tab is private")
+        let normal = guest.openTab(url: nil, isPrivate: false)
+        XCTAssertTrue(normal.isPrivate, "even a tab asked to be normal is private in a guest window")
+        let outsider = b.openTab(url: nil, isPrivate: false)
+        XCTAssertFalse(b.moveTab(outsider.id, to: guest), "a normal tab cannot be moved into a guest window")
+        a.windows.saveWindowLayout(in: a)
+        let reader = BrowserModel(sharing: a)
+        reader.windows.loadPendingRestores(from: a)
+        XCTAssertFalse(reader.windows.pendingRestores.joined().contains(normal.id), "a guest window is not brought back at the next start")
+        XCTAssertFalse(a.isGuest)
+    }
 }

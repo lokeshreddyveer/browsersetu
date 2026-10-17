@@ -290,6 +290,7 @@ struct LayoutHandle: View {
     var body: some View {
         Menu { LayoutEscapeMenuItems() } label: {
             Image(systemName: "ellipsis").font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary)
+                .accessibilityLabel("Layout menu")
                 .frame(width: 34, height: 16)
                 .environment(\.colorScheme, .dark)
                 .background(Obsidian.fill.opacity(0.9), in: Capsule(style: .continuous))

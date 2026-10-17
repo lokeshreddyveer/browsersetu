@@ -180,7 +180,10 @@ extension BrowserModel {
     // A style sheet per website
 
     func siteStyle(forHost host: String?) -> String? {
-        FaviconStore.key(forHost: host).flatMap { siteStyles[$0] }.flatMap { $0.isEmpty ? nil : $0 }
+        let own = FaviconStore.key(forHost: host).flatMap { siteStyles[$0] } ?? ""
+        // The style sheet for every website comes first, so a site's own can override it.
+        let combined = [globalStyle, own].filter { !$0.isEmpty }.joined(separator: "\n")
+        return combined.isEmpty ? nil : combined
     }
 
     /// Saves (or with empty text, removes) the style sheet for the page's website and applies it now.
