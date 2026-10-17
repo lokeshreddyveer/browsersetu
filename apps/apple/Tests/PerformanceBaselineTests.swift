@@ -66,3 +66,50 @@ final class NewTabResponsivenessTests: XCTestCase {
         XCTAssertLessThan(held.max() ?? 0, 150, "pressing + held the window for \(held)")
     }
 }
+
+/// How the browser behaves with many tabs: how long they take to open, how fast switching stays, what they cost in memory, and that sleeping tabs come back.
+/// Tabs 1...`loaded` hold a real page (each starts its own web process); the rest are blank, as most of a large tab set is after a restore.
+@MainActor
+final class TabScalingTests: XCTestCase {
+    private func run(tabs count: Int, loaded: Int) async throws {
+        let model = BrowserModel(engine: WebKitEngine(), root: NSTemporaryDirectory() + "bs-scale-\(UUID().uuidString)", profile: "default")
+        await model.start()
+        let memory0 = currentMemoryFootprint()
+        let start = DispatchTime.now().uptimeNanoseconds
+        for i in 0..<count {
+            let tab = model.openTab(url: nil, isPrivate: false)
+            if i < loaded { tab.engine.showHTML("<html><body><h1>Page \(i)</h1>" + String(repeating: "<p>text</p>", count: 200) + "</body></html>", baseURL: URL(string: "https://scale\(i).example.test/")) }
+        }
+        let openMs = Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000
+        try await Task.sleep(for: .seconds(Double(max(3, loaded / 4))))
+        var switches: [Double] = []
+        for tab in model.tabs.shuffled().prefix(40) {
+            let t = DispatchTime.now().uptimeNanoseconds
+            model.select(tab.id)
+            switches.append(Double(DispatchTime.now().uptimeNanoseconds - t) / 1_000_000)
+        }
+        let grown = Double(Int64(currentMemoryFootprint()) - Int64(memory0)) / 1_048_576
+        // The system runs short of memory: older loaded tabs are put to sleep, the one in front never.
+        for tab in model.tabs { tab.lastActive = Date().addingTimeInterval(-3600) }
+        let front = model.tabs.last!
+        model.select(front.id)
+        let released = await model.lifecycle?.run(.critical).count ?? 0
+        let asleep = model.tabs.filter(\.isDiscarded).count
+        print("PERF tabs=\(count) loaded=\(loaded) open-ms=\(Int(openMs)) switch-avg-ms=\(String(format: "%.2f", switches.reduce(0, +) / Double(switches.count))) switch-max-ms=\(String(format: "%.2f", switches.max() ?? 0)) app-memory-growth-MB=\(String(format: "%.1f", grown)) asleep-after-critical=\(asleep)")
+        XCTAssertLessThan(switches.max() ?? 0, 250, "switching tabs stayed quick")
+        XCTAssertFalse(front.isDiscarded, "the tab in front is never put to sleep")
+        if loaded > 3 { XCTAssertGreaterThan(released, 0, "a critical memory event puts some loaded tabs to sleep") }
+        // A sleeping tab comes back with its address when it is chosen again.
+        if let sleeper = model.tabs.first(where: \.isDiscarded) {
+            let address = sleeper.url
+            model.select(sleeper.id)
+            try await Task.sleep(for: .seconds(2))
+            XCTAssertFalse(sleeper.isDiscarded, "choosing a sleeping tab wakes it")
+            XCTAssertEqual(sleeper.url, address)
+        }
+    }
+
+    func testTenTabs() async throws { try await run(tabs: 10, loaded: 10) }
+    func testFiftyTabs() async throws { try await run(tabs: 50, loaded: 15) }
+    func testAHundredTabs() async throws { try await run(tabs: 100, loaded: 15) }
+}
