@@ -385,6 +385,23 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
               let model else {
             return decision
         }
+        // "When this site opens" rules: a page that belongs somewhere else is opened there, or filed, before it loads here.
+        if let outcome = SiteOpenRules.outcome(forHost: target.host, rules: model.workbench.siteRules, tabIsPrivate: isPrivate,
+                                               tabContainer: model.tabMeta[id]?.container, tabGroup: group, tabWorkspace: workspace) {
+            switch outcome {
+            case .openElsewhere(let toPrivate, let container):
+                DispatchQueue.main.async { [weak self, weak model] in
+                    guard let self, let model else { return }
+                    model.openTab(url: target, isPrivate: toPrivate, container: container)
+                    // A tab that only existed for this address (nothing was ever shown in it) is not left behind empty; one with a page keeps showing that page.
+                    if !self.hasLoadedPage, model.tabs.count > 1 { model.closeTab(id: self.id, force: true) }
+                    else { self.url = self.engine.currentURL; self.pendingURL = nil }
+                }
+                return .deny
+            case .moveToGroup(let name): model.moveTab(self, to: name)
+            case .moveToWorkspace(let name): model.moveTab(self, toWorkspace: name)
+            }
+        }
         // The user's own threat list comes first; then link cleaning re-issues the navigation without trackers.
         if let host = target.host, model.shouldWarnAboutThreat(host: host) {
             model.presentThreatWarning(for: target, in: self)

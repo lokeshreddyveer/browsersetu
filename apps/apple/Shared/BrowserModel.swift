@@ -152,6 +152,8 @@ final class BrowserModel: ObservableObject {
     // Find in page
     @Published var findVisible = false
     @Published var findText = ""
+    /// Text for the "find in every tab" sheet to start with (set by /find).
+    var findAllPrefill: String?
     @Published var findFailed = false
     // Focus mode and split view
     @Published var focusMode = false
@@ -1401,6 +1403,12 @@ final class BrowserModel: ObservableObject {
     }
 
     func accept(_ suggestion: Suggestion) {
+        // A command name that is only being completed: the text is filled in and the bar stays open for the rest.
+        if suggestion.kind == .command, suggestion.target.hasPrefix("slash:") {
+            addressBar.text = String(suggestion.target.dropFirst(6))
+            addressBar.refresh(model: self)
+            return
+        }
         addressBar.isEditing = false
         addressBar.clear()
         if suggestion.kind == .command {
@@ -1937,7 +1945,7 @@ final class BrowserModel: ObservableObject {
         "sidebar_width", "single_toolbar", "split_orientation", "start_background", "startup", "startup_workspace",
         "strip_tracking", "tab_groups", "tab_layout", "tab_previews", "tint_toolbar", "toolbar_autohide", "toolbar_items",
         "workspaces", "double_click", "collapse_on_scroll", "search_template", "search_suggestions", "speed_pill", "pill_collapsed", "site_icons", "shortcuts", "homepage", "saved_sessions", "organize_downloads", "site_notes", "search_shortcuts", "bookmark_tags", "site_styles", "phone_toolbar", "address_display", "address_icon", "search_panel_bottom", "search_panel_bottom2", "swipe_address", "app_links", "app_link_sites", "blur_private_switcher", "permission_expiry", "favorites_order", "overview_style", "overview_grouped", "overview_sort", "dark_pages", "dark_sites", "website_appearance", "site_appearance", "theme", "theme_custom", "low_power_memory", "clear_on_quit", "remember_reading", "keep_form_drafts", "site_zoom", "group_colors",
-        "save_logins", "download_concurrent", "spotlight_bookmarks", "vim_on", "vim_keymap", "workflows", "download_rules", "extension_profiles", "site_delete_rules", "site_user_agents", "containers", "split_templates", "tab_tree", "block_webrtc", "webrtc_exceptions",
+        "save_logins", "site_open_rules", "download_concurrent", "spotlight_bookmarks", "vim_on", "vim_keymap", "workflows", "download_rules", "extension_profiles", "site_delete_rules", "site_user_agents", "containers", "split_templates", "tab_tree", "block_webrtc", "webrtc_exceptions",
     ]
 
     /// The same, with the slow key derivation and encryption on a background thread so the window never stalls.

@@ -54,6 +54,14 @@ final class AddressBarController: ObservableObject {
             selection = nil
             return
         }
+        // "/tabs", "/find", "/save"…: typed commands. Text that is not one of them carries on as an address or a search.
+        if let commands = model.slashSuggestions(for: query) {
+            local = commands
+            suggestions = commands
+            selection = commands.isEmpty ? nil : 0
+            remoteTask?.cancel()
+            return
+        }
         var result: [Suggestion] = []
         if let hit = SearchShortcuts.resolve(query, custom: model.customSearchShortcuts) {
             // "g something", "yt something": the keyword picks the search engine for this one search.

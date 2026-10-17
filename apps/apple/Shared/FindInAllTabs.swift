@@ -1,17 +1,14 @@
 import SwiftUI
 
-/// Type a word or phrase; every open tab that contains it is listed. Choosing one switches to that tab and finds the text there.
+/// Type a word or phrase; every open tab that contains it is listed, tabs that are asleep included. Choosing one switches to that tab and finds the text there.
 struct FindInAllTabsView: View {
     @EnvironmentObject var model: BrowserModel
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
-    @State private var hits: [TabController] = []
-    @State private var searched = 0
+    @State private var hits: [TabTextHit] = []
     @State private var searching = false
     @State private var task: Task<Void, Never>?
     @FocusState private var focused: Bool
-
-    private var candidates: [TabController] { model.tabs.filter { $0.isPrivate == model.activeIsPrivate && $0.hasLoadedPage } }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -27,53 +24,47 @@ struct FindInAllTabsView: View {
                 if !query.isEmpty && !searching && hits.isEmpty {
                     Text("No open tab contains “\(query)”.").foregroundStyle(.secondary)
                 }
-                ForEach(hits) { tab in
-                    Button { open(tab) } label: {
+                ForEach(hits) { hit in
+                    Button { open(hit) } label: {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(tab.displayTitle).lineLimit(1)
-                            Text(displayHost(tab.url)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            HStack { Text(hit.title).lineLimit(1); if hit.asleep { Image(systemName: "moon.zzz").font(.caption).foregroundStyle(.secondary) } }
+                            Text(hit.snippet).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                            Text(hit.host).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
                         }
                     }
                     .buttonStyle(.plain)
                 }
                 if !query.isEmpty && !searching {
-                    Text("Searched \(searched) loaded tab\(searched == 1 ? "" : "s"). Tabs that are asleep are not searched.")
+                    Text(model.indexPages ? "Tabs that are asleep are looked up in the saved copy of pages you read, so they are not woken."
+                                          : "Tabs that are asleep are only searched by title and address. Turn on “Searchable copy of pages” to search their text too.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
         }
         .onChange(of: query) { _, _ in run() }
-        .onAppear { focused = true }
+        .onAppear { focused = true; if let start = model.findAllPrefill { query = start; model.findAllPrefill = nil } }
         .accessibilityIdentifier("find-all-tabs")
     }
 
     private func run() {
         task?.cancel()
         let text = query.trimmingCharacters(in: .whitespaces)
-        guard text.count >= 2 else { hits = []; searched = 0; searching = false; return }
+        guard text.count >= 2 else { hits = []; searching = false; return }
         searching = true
         task = Task {
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled else { return }
-            let tabs = candidates
-            var found: [TabController] = []
-            for tab in tabs {
-                if Task.isCancelled { return }
-                if await tab.engine.find(text, backwards: false) { found.append(tab) }
-                tab.engine.clearFind()
-            }
+            let found = await model.searchTabText(text)
             guard !Task.isCancelled else { return }
-            hits = found; searched = tabs.count; searching = false
+            hits = found; searching = false
         }
     }
 
-    private func open(_ tab: TabController) {
+    private func open(_ hit: TabTextHit) {
         let text = query
-        model.select(tab.id)
+        model.select(hit.tabID)
         dismiss()
         model.sheet = nil
-        model.showFind()
-        model.findText = text
-        model.findNext()
+        if !hit.asleep { model.showFind(); model.findText = text; model.findNext() }
     }
 }

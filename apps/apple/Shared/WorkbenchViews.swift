@@ -131,6 +131,19 @@ private struct WorkbenchAutomate: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
 
+            Section("When a site opens") {
+                ForEach(bench.siteRules) { rule in
+                    HStack {
+                        VStack(alignment: .leading) { Text(rule.host); Text(rule.action.title).font(.caption).foregroundStyle(.secondary) }
+                        Spacer()
+                        Button("Remove", role: .destructive) { bench.setSiteRules(bench.siteRules.filter { $0.id != rule.id }) }
+                    }
+                }
+                SiteRuleAdder(bench: bench)
+                Text("A page whose site has a rule is opened where the rule says before it loads. Private and container rules open a new tab; group and workspace rules file the tab you are in.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             Section("Scheduled page checks") {
                 ForEach(bench.schedule) { item in
                     HStack {
@@ -401,3 +414,33 @@ private struct WorkbenchHealth: View {
 }
 
 extension URL: @retroactive Identifiable { public var id: String { absoluteString } }
+
+
+private struct SiteRuleAdder: View {
+    @EnvironmentObject var model: BrowserModel
+    @ObservedObject var bench: Workbench
+    enum Kind: String, CaseIterable, Identifiable { case privateTab = "Private tab", container = "Container", group = "Group", workspace = "Workspace"; var id: String { rawValue } }
+    @State private var host = ""
+    @State private var kind = Kind.privateTab
+    @State private var name = ""
+
+    private var names: [String] {
+        switch kind { case .privateTab: []; case .container: model.containers; case .group: model.groupNames; case .workspace: model.workspaces.map(\.name) }
+    }
+
+    var body: some View {
+        HStack {
+            TextField("site, such as example.com", text: $host)
+            Picker("Where", selection: $kind) { ForEach(Kind.allCases) { Text($0.rawValue).tag($0) } }.labelsHidden()
+            if kind != .privateTab {
+                Picker("Which", selection: $name) { Text("Choose…").tag(""); ForEach(names, id: \.self) { Text($0).tag($0) } }.labelsHidden()
+            }
+            Button("Add") {
+                let action: SiteOpenRule.Action
+                switch kind { case .privateTab: action = .privateTab; case .container: action = .container(name); case .group: action = .group(name); case .workspace: action = .workspace(name) }
+                if bench.addSiteRule(host: host, action: action) { host = ""; name = "" } else { model.notice = "Check the site name and that the \(kind.rawValue.lowercased()) exists." }
+            }.disabled(host.isEmpty || (kind != .privateTab && name.isEmpty))
+        }
+        .onChange(of: kind) { _, _ in name = "" }
+    }
+}
