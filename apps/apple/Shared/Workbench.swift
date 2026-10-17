@@ -32,6 +32,9 @@ final class Workbench: ObservableObject {
     @Published var snapshot: DevSnapshot?
     @Published var scratchOutput = ""
     @Published var inspectable = false
+    @Published var picked: PickedElement?
+    @Published var picking = false
+    @Published var showSizeHUD = false
 
     // Extensions
     @Published var extensionProfiles: [String: [String]] = [:]
@@ -278,6 +281,18 @@ final class Workbench: ObservableObject {
         scratchOutput = await tab.engine.runScratch(code)
     }
 
+    /// Lets the person click an element on the page, then describes it. Private tabs are not read.
+    func pickElement() async {
+        guard let tab = model?.active, !tab.isPrivate, !tab.isBlank else { model?.notice = "Open a normal page first."; return }
+        picking = true
+        model?.sheet = nil                    // the page has to be in view to click on it
+        picked = PickedElement(await tab.engine.pickElement())
+        picking = false
+        if picked != nil { model?.sheet = .workbench }
+    }
+
+    func cancelPick() { model?.active?.engine.cancelPicking() }
+
     func setInspectable(_ on: Bool) {
         inspectable = on
         for tab in model?.tabs ?? [] { tab.engine.setInspectable(on) }
@@ -436,3 +451,16 @@ extension BrowserModel {
         return URL(string: searchTemplate.replacingOccurrences(of: "{}", with: encoded))
     }
 }
+
+
+#if os(macOS)
+import AppKit
+extension BrowserModel {
+    /// Resizes the window in front so its content area is the size of a common screen (the part that fits on this screen).
+    func resizeWindow(to preset: ViewportPreset) {
+        guard let window = NSApp.keyWindow ?? NSApp.mainWindow, let screen = window.screen?.visibleFrame.size else { return }
+        window.setContentSize(preset.fitted(to: screen))
+        notice = "Window size: \(preset.title), \(preset.summary)."
+    }
+}
+#endif

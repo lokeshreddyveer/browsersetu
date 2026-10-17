@@ -130,3 +130,51 @@ struct PagePerformance: Equatable {
         return out
     }
 }
+
+
+/// Window sizes of common screens, for looking at how a page responds. The Mac window is resized to the page area of that size; a phone cannot resize its window.
+struct ViewportPreset: Identifiable, Equatable {
+    var id: String
+    var title: String
+    var width: Int
+    var height: Int
+    var summary: String { "\(width) × \(height)" }
+
+    static let all: [ViewportPreset] = [
+        .init(id: "phone-small", title: "Small phone", width: 375, height: 667),
+        .init(id: "phone", title: "Phone", width: 393, height: 852),
+        .init(id: "phone-wide", title: "Phone, sideways", width: 852, height: 393),
+        .init(id: "tablet", title: "Tablet", width: 820, height: 1180),
+        .init(id: "tablet-wide", title: "Tablet, sideways", width: 1180, height: 820),
+        .init(id: "laptop", title: "Laptop", width: 1280, height: 800),
+        .init(id: "desktop", title: "Desktop", width: 1920, height: 1080),
+    ]
+
+    /// The size a window can actually be made: never larger than the screen's usable area, and never so small the window stops working.
+    func fitted(to screen: CGSize) -> CGSize {
+        CGSize(width: min(max(CGFloat(width), 320), screen.width), height: min(max(CGFloat(height), 320), screen.height))
+    }
+}
+
+/// What the element picker reports about the thing clicked.
+struct PickedElement: Equatable {
+    var selector: String
+    var tag: String
+    var size: CGSize
+    var text: String
+    var html: String
+    var styles: [(name: String, value: String)]
+
+    init?(_ raw: [String: Any]?) {
+        guard let raw, let selector = raw["selector"] as? String, !selector.isEmpty, let tag = raw["tag"] as? String else { return nil }
+        self.selector = String(selector.prefix(500)); self.tag = String(tag.prefix(40))
+        size = CGSize(width: (raw["width"] as? NSNumber)?.doubleValue ?? 0, height: (raw["height"] as? NSNumber)?.doubleValue ?? 0)
+        text = String((raw["text"] as? String ?? "").prefix(300)); html = String((raw["html"] as? String ?? "").prefix(1200))
+        styles = (raw["styles"] as? [[String]] ?? []).prefix(40).compactMap { $0.count == 2 ? (String($0[0].prefix(60)), String($0[1].prefix(200))) : nil }
+    }
+
+    static func == (a: PickedElement, b: PickedElement) -> Bool { a.selector == b.selector && a.html == b.html && a.size == b.size }
+
+    /// The rule as CSS, ready to paste.
+    var css: String { selector + " {\n" + styles.map { "  \($0.name): \($0.value);" }.joined(separator: "\n") + "\n}" }
+}

@@ -573,6 +573,62 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
         return result.compactMapValues { ($0 as? String).map { String($0.prefix(300)) } }
     }
 
+    func pickElement() async -> [String: Any]? {
+        let script = """
+        return await new Promise(resolve => {
+          const root = document.documentElement, box = document.createElement('div');
+          box.style.cssText = 'position:fixed;z-index:2147483647;pointer-events:none;border:2px solid #0a84ff;background:rgba(10,132,255,.16);border-radius:2px;transition:all .06s;left:0;top:0;width:0;height:0';
+          root.appendChild(box);
+          let current = null;
+          const unique = (sel) => { try { return document.querySelectorAll(sel).length === 1; } catch (e) { return false; } };
+          const selectorFor = (el) => {
+            if (el.id && unique('#' + CSS.escape(el.id))) return '#' + CSS.escape(el.id);
+            const parts = [];
+            for (let e = el; e && e.nodeType === 1 && e !== document.body && parts.length < 6; e = e.parentElement) {
+              let part = e.tagName.toLowerCase();
+              const cls = [...e.classList].filter(c => /^[A-Za-z_-][\\w-]*$/.test(c)).slice(0, 2);
+              if (cls.length) part += '.' + cls.map(c => CSS.escape(c)).join('.');
+              const same = e.parentElement ? [...e.parentElement.children].filter(c => c.tagName === e.tagName) : [];
+              if (same.length > 1) part += ':nth-of-type(' + (same.indexOf(e) + 1) + ')';
+              parts.unshift(part);
+              if (unique(parts.join(' > '))) break;
+            }
+            return parts.join(' > ');
+          };
+          const describe = (el) => {
+            const cs = getComputedStyle(el), r = el.getBoundingClientRect();
+            const names = ['display','position','width','height','margin','padding','border','color','background-color','font-family','font-size','font-weight','line-height','text-align','opacity','z-index','overflow'];
+            return { selector: selectorFor(el), tag: el.tagName.toLowerCase(), width: Math.round(r.width), height: Math.round(r.height),
+                     text: (el.innerText || '').trim().slice(0, 300), html: el.outerHTML.slice(0, 1200), styles: names.map(n => [n, cs.getPropertyValue(n)]) };
+          };
+          const move = (e) => {
+            const el = document.elementFromPoint(e.clientX, e.clientY);
+            if (!el || el === box) return;
+            current = el;
+            const r = el.getBoundingClientRect();
+            box.style.left = r.left + 'px'; box.style.top = r.top + 'px'; box.style.width = r.width + 'px'; box.style.height = r.height + 'px';
+          };
+          const stop = (result) => {
+            document.removeEventListener('mousemove', move, true); document.removeEventListener('pointerdown', down, true);
+            document.removeEventListener('click', swallow, true); document.removeEventListener('keydown', key, true);
+            box.remove(); clearTimeout(timer); window.__bsCancelPick = null; resolve(result);
+          };
+          const swallow = (e) => { e.preventDefault(); e.stopPropagation(); };
+          const down = (e) => { swallow(e); const el = document.elementFromPoint(e.clientX, e.clientY) || current; stop(el && el !== box ? describe(el) : null); };
+          const key = (e) => { if (e.key === 'Escape') { swallow(e); stop(null); } };
+          const timer = setTimeout(() => stop(null), 60000);
+          window.__bsCancelPick = () => stop(null);
+          document.addEventListener('mousemove', move, true); document.addEventListener('pointerdown', down, true);
+          document.addEventListener('click', swallow, true); document.addEventListener('keydown', key, true);
+        });
+        """
+        return try? await webView.callAsyncJavaScript(script, contentWorld: .defaultClient) as? [String: Any]
+    }
+
+    func cancelPicking() {
+        Task { _ = try? await webView.callAsyncJavaScript("if (window.__bsCancelPick) window.__bsCancelPick();", contentWorld: .defaultClient) }
+    }
+
     func loginFormOrigin() async -> String? {
         try? await webView.callAsyncJavaScript(LoginScripts.probe, contentWorld: .defaultClient) as? String
     }

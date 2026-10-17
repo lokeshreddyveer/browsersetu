@@ -1,4 +1,5 @@
 import XCTest
+import WebKit
 @testable import Browser_Setu
 
 final class DevFilesTests: XCTestCase {
@@ -67,5 +68,52 @@ final class DevFilesTests: XCTestCase {
         let groups = DuplicateFiles.find(in: dir)
         XCTAssertEqual(groups.count, 1)
         XCTAssertEqual(groups.first?.urls.map(\.lastPathComponent), ["a.txt", "b.txt"])
+    }
+}
+
+final class ElementPickerTests: XCTestCase {
+    func testViewportPresetsFitTheScreenAndAreNeverTooSmall() {
+        let screen = CGSize(width: 1440, height: 900)
+        XCTAssertEqual(ViewportPreset.all.first { $0.id == "phone" }?.fitted(to: screen), CGSize(width: 393, height: 852))
+        XCTAssertEqual(ViewportPreset.all.first { $0.id == "desktop" }?.fitted(to: screen), CGSize(width: 1440, height: 900), "never larger than the screen")
+        XCTAssertEqual(ViewportPreset(id: "x", title: "x", width: 50, height: 50).fitted(to: screen), CGSize(width: 320, height: 320))
+        XCTAssertEqual(Set(ViewportPreset.all.map(\.id)).count, ViewportPreset.all.count)
+    }
+
+    func testAPickedElementIsReadSafelyAndMakesCSS() throws {
+        let raw: [String: Any] = ["selector": "#main > p.lead", "tag": "p", "width": 300, "height": 24, "text": "Hello", "html": "<p class=\"lead\">Hello</p>", "styles": [["color", "rgb(0, 0, 0)"], ["display", "block"], ["broken"]]]
+        let e = try XCTUnwrap(PickedElement(raw))
+        XCTAssertEqual(e.styles.count, 2, "a malformed pair is dropped")
+        XCTAssertEqual(e.css, "#main > p.lead {\n  color: rgb(0, 0, 0);\n  display: block;\n}")
+        XCTAssertNil(PickedElement(nil)); XCTAssertNil(PickedElement(["selector": "", "tag": "p"])); XCTAssertNil(PickedElement(["tag": "p"]))
+        let huge = PickedElement(["selector": String(repeating: "a", count: 5000), "tag": "div", "html": String(repeating: "x", count: 9000)])
+        XCTAssertEqual(huge?.selector.count, 500); XCTAssertEqual(huge?.html.count, 1200)
+    }
+}
+
+@MainActor
+final class ElementPickerPageTests: XCTestCase {
+    func testClickingAnElementOnARealPageDescribesItWithoutChangingThePage() async throws {
+        let m = BrowserModel(engine: WebKitEngine(), root: NSTemporaryDirectory() + "bs-pick-\(UUID().uuidString)", profile: "default")
+        await m.start()
+        let tab = m.openTab(url: nil, isPrivate: false)
+        // A page in a test has no window; it is given a size so the points on it exist.
+        (tab.hostView as? WKWebView)?.frame = CGRect(x: 0, y: 0, width: 800, height: 600)
+        tab.engine.showHTML("<html><body style='margin:0'><div id='box' class='card wide' style='width:200px;height:100px;color:rgb(10,20,30);margin:20px'>Pick me</div></body></html>", baseURL: URL(string: "https://pick.example.test/"))
+        try await Task.sleep(for: .seconds(1.5))
+        let before = await tab.engine.pageText()
+        async let result = tab.engine.pickElement()
+        try await Task.sleep(for: .milliseconds(400))
+        // The picker waits for a pointer press; the test supplies one at the element's centre.
+        let web = try XCTUnwrap(tab.hostView as? WKWebView)
+        let armed = try? await web.callAsyncJavaScript("return typeof window.__bsCancelPick;", contentWorld: .defaultClient)
+        XCTAssertEqual(armed as? String, "function", "the picker is waiting for a click")
+        _ = try await web.callAsyncJavaScript("const el = document.getElementById('box').getBoundingClientRect(); const t = document.elementFromPoint(el.left + 10, el.top + 10); t.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, clientX: el.left + 10, clientY: el.top + 10 }));", contentWorld: .defaultClient)
+        let picked = PickedElement(await result)
+        XCTAssertEqual(picked?.selector, "#box")
+        XCTAssertEqual(picked?.size, CGSize(width: 200, height: 100))
+        XCTAssertEqual(picked?.styles.first { $0.name == "color" }?.value, "rgb(10, 20, 30)")
+        let after = await tab.engine.pageText()
+        XCTAssertEqual(before, after, "the page's content is untouched")
     }
 }

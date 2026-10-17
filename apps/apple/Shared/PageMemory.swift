@@ -75,6 +75,11 @@ extension BrowserModel {
 
     /// A page just finished loading: go back to where you stopped, and say if typed text can be restored.
     func pageMemoryDidLoad(_ tab: TabController) {
+        showPassage(in: tab)
+        // A page opened from a saved session goes back to where it was saved, whether or not remembering reading places is on.
+        if let fraction = sessionScroll.removeValue(forKey: tab.id) {
+            Task { try? await Task.sleep(for: .seconds(0.8)); await tab.engine.scrollTo(fraction: fraction) }
+        }
         guard !tab.isPrivate, let url = tab.url, url.fragment == nil, let key = PageMemoryKey.key(for: url) else { return }
         if rememberReadingPosition, let saved = readingPositions[key], PageMemoryRules.worthRemembering(saved.fraction) {
             Task {

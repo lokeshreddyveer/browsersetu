@@ -69,6 +69,8 @@ protocol TabEngineEvents: AnyObject {
 extension TabEngine {
     func readableContent() async -> ReadableArticle? { nil }
     func pageDiagnostics() async -> [String: Any]? { nil }
+    func pickElement() async -> [String: Any]? { nil }
+    func cancelPicking() {}
     func loginFormOrigin() async -> String? { nil }
     func fillLogin(origin: String, user: String, password: String) async -> Bool { false }
     func runScratch(_ code: String) async -> String { "Not available in this engine." }
@@ -126,6 +128,9 @@ protocol TabEngine: AnyObject {
     func readableContent() async -> ReadableArticle?
     /// Resource timing, storage keys, page errors and load numbers, for the developer tools.
     func pageDiagnostics() async -> [String: Any]?
+    /// Waits for the person to click an element on the page and describes it (nil if they cancel or nothing is picked within a minute).
+    func pickElement() async -> [String: Any]?
+    func cancelPicking()
     /// The origin of the page if it shows a sign-in form (a visible password field), else nil.
     func loginFormOrigin() async -> String?
     /// Types the name and password into the page's sign-in form, only if the page is still on `origin`.

@@ -461,12 +461,28 @@ struct FocusChrome: View {
 
 struct PageArea: View {
     @ObservedObject var tab: TabController
+    @EnvironmentObject var model: BrowserModel
 
     var body: some View {
         ZStack {
             EngineViewHost(view: tab.hostView)
             if tab.isBlank { StartPageView(isPrivate: tab.isPrivate) }
         }
+        .overlay(alignment: .bottomTrailing) { if model.workbench.showSizeHUD { SizeHUD() } }
+    }
+}
+
+/// The size of the page area, live, for looking at how a page responds as the window changes.
+struct SizeHUD: View {
+    var body: some View {
+        GeometryReader { geo in
+            Text("\(Int(geo.size.width)) × \(Int(geo.size.height))")
+                .font(.system(size: 11, weight: .medium, design: .monospaced)).foregroundStyle(.white)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(Capsule().fill(Color.black.opacity(0.7)))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing).padding(10)
+        }
+        .allowsHitTesting(false)
     }
 }
 

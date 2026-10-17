@@ -3,7 +3,11 @@ import UniformTypeIdentifiers
 
 /// A named set of tabs, saved to open again later.
 struct SavedSession: Codable, Identifiable, Equatable {
-    struct Tab: Codable, Equatable { var url: String; var title: String; var pinned: Bool }
+    struct Tab: Codable, Equatable {
+        var url: String; var title: String; var pinned: Bool
+        /// How far down the page the person was (0...1), so it opens where they were.
+        var scroll: Double? = nil
+    }
     var id = UUID()
     var name: String
     var date = Date()
@@ -11,6 +15,8 @@ struct SavedSession: Codable, Identifiable, Equatable {
     /// How the window was arranged, and the two pages that were side by side (if any); both come back when the session is opened.
     var layout: LayoutSnapshot? = nil
     var split: [String]? = nil
+    /// The workspace the tabs were in; opening the session goes back to it when it still exists.
+    var workspace: String? = nil
 }
 
 extension BrowserModel {
@@ -91,17 +97,32 @@ extension BrowserModel {
             tab.url.map { SavedSession.Tab(url: $0.absoluteString, title: tab.displayTitle, pinned: tab.pinned) }
         })
         session.layout = layoutSnapshot()
+        session.workspace = activeWorkspace
         if let left = active?.url?.absoluteString, let right = splitTab?.url?.absoluteString { session.split = [left, right] }
         setSavedSessions(Array(([session] + savedSessions).prefix(50)))
         notice = "Saved “\(clean)” with \(session.tabs.count) tab\(session.tabs.count == 1 ? "" : "s")."
+        // How far down each loaded page was is read afterwards, so saving is never held up by a page.
+        let sessionID = session.id
+        let readable = list
+        Task { @MainActor [weak self] in
+            var positions: [String: Double] = [:]
+            for tab in readable where tab.hasLoadedPage && !tab.isDiscarded {
+                if let url = tab.url?.absoluteString, let fraction = await tab.engine.scrollFraction(), PageMemoryRules.worthRemembering(fraction) { positions[url] = fraction }
+            }
+            guard let self, !positions.isEmpty, var saved = self.savedSessions.first(where: { $0.id == sessionID }) else { return }
+            saved.tabs = saved.tabs.map { var t = $0; t.scroll = positions[t.url]; return t }
+            self.setSavedSessions(self.savedSessions.map { $0.id == sessionID ? saved : $0 })
+        }
     }
 
     /// Opens a saved session's tabs here, in the current workspace, and switches to the first.
     func openSession(_ session: SavedSession) {
+        if let name = session.workspace, name != activeWorkspace, name.isEmpty || workspaces.contains(where: { $0.name == name }) { switchWorkspace(name) }
         var first: TabController?
         for item in session.tabs {
             guard let url = URL(string: item.url), ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { continue }
             let tab = openTab(url: url, isPrivate: false, select: false)
+            if let scroll = item.scroll, PageMemoryRules.worthRemembering(scroll) { sessionScroll[tab.id] = scroll }
             if item.pinned { togglePin(tab) }
             if first == nil { first = tab }
         }

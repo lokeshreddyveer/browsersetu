@@ -54,3 +54,22 @@ Last updated 16 October 2026 (macOS 27.0 build 26A5425a, Xcode toolchain on this
 | New tab responsiveness | Checked (blank-extension case) | `NewTabResponsivenessTests`: 8–13 ms of main-thread hold with a 4,000-row page open; not measured with extensions installed |
 | Sparkle updater in the downloadable Mac build | Built | separate `BrowserSetuMacDirect` target; no update has been offered or installed end to end yet; iCloud sync is not in this build |
 | Notarized DMG, GitHub release, TestFlight upload | See the release notes of each release | scripts: `release.sh`, `publish-release.sh`, `testflight.sh` |
+
+## Added after 0.2.0 (not yet in a release)
+
+| Area | Status | Evidence / limit |
+|---|---|---|
+| Passwords and history import from Chrome, Firefox, Apple's Passwords, Safari | Checked (parsing) | `ImportToolsTests`; real exported files from those browsers were not tried |
+| Handoff and Spotlight for bookmarks | Checked (rules) / Built (system behaviour) | `ContinuityTests`; not seen on a second device |
+| Sync: deterministic merge, deletions, stale copies, workspaces, saved sessions, opt-in passwords | Checked (logic and two in-process models) | `SyncMergeTests` (including random three-device runs), `SyncModelTests`, `SessionSyncTests`; **never run between two real devices** |
+| Download queue: priorities, hold until a time, pause and resume all, retry with back-off, restore after quitting | Checked (logic) | `DownloadQueueTests`, `DownloadPersistenceTests`; no speed limit (WebKit offers none); iPhone background time not measured on a device |
+| iPhone extensions: install, More-menu entries, popup sheet | Checked on a simulator (popup runs its script) | one sample extension only; no real store extension tried on iPhone |
+| Per-site extension allow and block rules | Checked | `ExtensionTests` (a block rule stops a real content script and removing it brings it back) |
+| Several windows (independent models, tab moves, restored at start) | Checked in real runs | driven through System Events (⌘N, ⌘W, File menu, quit and reopen); the XCUITest runner could not drive the app in this session; external-display layouts not built |
+| Site rules ("when a site opens": private tab, container, group, workspace) | Checked | `SiteOpenRulesTests` and two real WebKit navigations |
+| Slash commands in the address bar; search across all tabs including sleeping ones | Checked (logic and real tabs) | `SlashCommandTests`, `SlashModelTests`; sleeping tabs are found by title or, with the page index on, by saved text |
+| Saved sessions keep each page's place and the workspace | Checked | `SessionSyncTests`; the scroll restore itself was not watched on a real page |
+| Offline PDF copies and notes on selected passages in Research; go to passage | Checked (store and a real selection) | `ResearchOfflineTests`; "go to passage" uses the page's find and was not watched |
+| Search the selected words with any engine | Checked (addresses) | `SelectionSearchTests`; no right-click menu entry (WebKit's menu is not customised) |
+| Element picker and window-size presets with a live size readout | Checked (picker on a real page); Built (resize and readout) | `ElementPickerPageTests`; resizing was not watched |
+| Network throttling | **Not possible** | WebKit gives no way to slow a page's loads; macOS's Network Link Conditioner can be used from outside |

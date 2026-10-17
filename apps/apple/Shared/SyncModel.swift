@@ -31,6 +31,8 @@ extension BrowserModel {
         Dictionary(workspaces.map { ($0.name, SyncWorkspace(icon: $0.icon, preset: $0.preset, accent: $0.accent)) }, uniquingKeysWith: { first, _ in first })
     }
 
+    private func currentSessions() -> [String: SavedSession] { Dictionary(savedSessions.map { ($0.id.uuidString, $0) }, uniquingKeysWith: { first, _ in first }) }
+
     private func currentLogins() -> [String: SyncLogin] {
         Dictionary(WebLoginVault.list(profile: profileName).map { ($0.id, SyncLogin(origin: $0.origin, user: $0.user, password: $0.password)) }, uniquingKeysWith: { first, _ in first })
     }
@@ -40,6 +42,7 @@ extension BrowserModel {
         let device = syncDeviceID
         SyncMerge.observe(ledger: &syncLedger.bookmarks, current: currentBookmarks(), clock: &syncClock, device: device, now: now)
         SyncMerge.observe(ledger: &syncLedger.workspaces, current: currentWorkspaces(), clock: &syncClock, device: device, now: now)
+        SyncMerge.observe(ledger: &syncLedger.sessions, current: currentSessions(), clock: &syncClock, device: device, now: now)
         // Settings are always published; whether another device takes them in is that device's own choice.
         SyncMerge.observe(ledger: &syncLedger.settings, current: currentSettings(), clock: &syncClock, device: device, now: now)
         if syncPasswords { SyncMerge.observe(ledger: &syncLedger.logins, current: currentLogins(), clock: &syncClock, device: device, now: now) }
@@ -126,6 +129,20 @@ extension BrowserModel {
         }
         for name in workspacePlan.delete { deleteWorkspace(name); outcome.workspacesChanged += 1 }
         if !workspacePlan.isEmpty { saveWorkspaces() }
+        // Saved sessions: a session saved or deleted on another device appears or goes here.
+        let sessionPlan = SyncMerge.plan(merged: merged.sessions, current: currentSessions())
+        if !sessionPlan.isEmpty {
+            var list = savedSessions.filter { !sessionPlan.delete.contains($0.id.uuidString) }
+            for (_, value) in sessionPlan.upsert.sorted(by: { $0.key < $1.key }) {
+                var clean = value
+                clean.tabs = clean.tabs.filter { URL(string: $0.url).map { ["http", "https"].contains($0.scheme?.lowercased() ?? "") && $0.host != nil } ?? false }
+                clean.name = String(clean.name.prefix(60))
+                guard !clean.tabs.isEmpty, !clean.name.isEmpty else { continue }
+                if let i = list.firstIndex(where: { $0.id == clean.id }) { list[i] = clean } else { list.append(clean) }
+                outcome.sessionsChanged += 1
+            }
+            setSavedSessions(Array(list.prefix(50)))
+        }
         // Settings: only if the person turned that on. When asked, every difference waits for their choice and this device keeps its own value for now.
         if syncSettingsToo {
             let settingPlan = SyncMerge.plan(merged: merged.settings, current: currentSettings())

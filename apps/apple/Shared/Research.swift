@@ -56,6 +56,12 @@ struct ResearchItem: Codable, Identifiable, Equatable {
     var text: String?
     var citation: Citation?
     var added = Date()
+    /// A saved copy of the page as a PDF, kept in this profile's research folder (a file name, never a path).
+    var file: String? = nil
+    /// Your own words about the passage in `text`.
+    var comment: String? = nil
+    /// How far down the page the passage was (0...1).
+    var place: Double? = nil
 }
 
 struct ResearchCollection: Codable, Identifiable, Equatable {
@@ -76,8 +82,11 @@ final class ResearchStore: ObservableObject {
     /// Where the quick "add to research" buttons put things.
     @Published var currentID: UUID?
     private let fileURL: URL
+    let filesFolder: URL
+    static let maxFileBytes = 60 * 1024 * 1024
 
     init(folder: URL) {
+        filesFolder = folder.appendingPathComponent("files", isDirectory: true)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         fileURL = folder.appendingPathComponent("collections.json")
         if let data = try? Data(contentsOf: fileURL), let list = try? JSONDecoder().decode([ResearchCollection].self, from: data) { collections = list }
@@ -85,6 +94,25 @@ final class ResearchStore: ObservableObject {
     }
 
     var current: ResearchCollection? { collections.first { $0.id == currentID } ?? collections.first }
+
+    /// The saved copy of an item, if it has one and the file is still there. The name is checked so a damaged or hostile list cannot point outside the folder.
+    func savedFile(for item: ResearchItem) -> URL? {
+        guard let name = item.file, name == (name as NSString).lastPathComponent, !name.hasPrefix("."), name.hasSuffix(".pdf") else { return nil }
+        let url = filesFolder.appendingPathComponent(name)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    /// Writes a page's PDF and returns the file name to put in the item, or nil when it is too big or cannot be written.
+    func saveFile(_ data: Data) -> String? {
+        guard !data.isEmpty, data.count <= Self.maxFileBytes else { return nil }
+        try? FileManager.default.createDirectory(at: filesFolder, withIntermediateDirectories: true)
+        let name = UUID().uuidString + ".pdf"
+        do { try data.write(to: filesFolder.appendingPathComponent(name), options: .atomic); return name } catch { return nil }
+    }
+
+    private func removeFiles(of items: [ResearchItem]) {
+        for item in items { if let url = savedFile(for: item) { try? FileManager.default.removeItem(at: url) } }
+    }
 
     private func save() {
         if let data = try? JSONEncoder().encode(collections) { try? data.write(to: fileURL, options: .atomic) }
@@ -122,6 +150,7 @@ final class ResearchStore: ObservableObject {
     }
 
     func delete(_ id: UUID) {
+        removeFiles(of: collections.first { $0.id == id }?.items ?? [])
         collections.removeAll { $0.id == id }
         if currentID == id { currentID = collections.first?.id }
         save()
@@ -147,6 +176,7 @@ final class ResearchStore: ObservableObject {
 
     func remove(_ itemID: UUID, from id: UUID) {
         guard let index = collections.firstIndex(where: { $0.id == id }) else { return }
+        removeFiles(of: collections[index].items.filter { $0.id == itemID })
         collections[index].items.removeAll { $0.id == itemID }
         save()
     }
@@ -290,6 +320,43 @@ extension BrowserModel {
         notice = "Highlight added to “\(collection.name)”."
     }
 
+    /// Saves the page in front as a PDF kept in the research folder, so it can be read with no connection and no matter what happens to the page. Private tabs are never saved.
+    func saveOfflineCopyToResearch() async {
+        guard let tab = active, !tab.isPrivate, !tab.isBlank else { notice = "Open a page first. Private tabs are never saved."; return }
+        guard let citation = await citationForActivePage(), let collection = targetCollection() else { notice = "There is no page to save."; return }
+        guard let pdf = await tab.engine.pagePDF(), let name = research.saveFile(pdf) else { notice = "This page could not be saved as a PDF (it may be too large)."; return }
+        research.add(ResearchItem(kind: .pdf, title: citation.title, url: citation.url, text: nil, citation: citation, file: name), to: collection.id)
+        notice = "Saved a copy to “\(collection.name)”: it opens without a connection."
+    }
+
+    /// A passage you selected, with your own note about it, and how far down the page it was. Later "Go to passage" finds it again on the page.
+    func addAnchoredNote(_ comment: String) async {
+        guard let tab = active, !tab.isPrivate, !tab.isBlank else { notice = "Open a page first. Private tabs are never saved."; return }
+        let body = comment.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty else { return }
+        guard let passage = await tab.engine.selectedText()?.trimmingCharacters(in: .whitespacesAndNewlines), !passage.isEmpty else { notice = "Select the words the note is about first."; return }
+        guard let citation = await citationForActivePage(), let collection = targetCollection() else { return }
+        let place = await tab.engine.scrollFraction()
+        research.add(ResearchItem(kind: .highlight, title: citation.title, url: citation.url, text: passage, citation: citation, comment: String(body.prefix(2000)), place: place), to: collection.id)
+        notice = "Note added to “\(collection.name)”."
+    }
+
+    /// Opens the page a saved passage came from (the tab that already shows it, or a new one) and finds the passage on it.
+    func goToPassage(_ item: ResearchItem) {
+        guard let raw = item.url, let url = URL(string: raw), ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return }
+        let key = PageMemoryKey.key(for: url)
+        let tab: TabController
+        if let open = tabs.first(where: { !$0.isPrivate && $0.url.flatMap(PageMemoryKey.key(for:)) == key }) { tab = open; select(open.id) }
+        else { tab = openTab(url: url, isPrivate: false) }
+        if let passage = item.text, !passage.isEmpty { pendingPassage[tab.id] = String(passage.prefix(120)) }
+        if tab.hasLoadedPage, !tab.isLoading { showPassage(in: tab) }
+    }
+
+    func showPassage(in tab: TabController) {
+        guard let passage = pendingPassage.removeValue(forKey: tab.id) else { return }
+        Task { try? await Task.sleep(for: .seconds(0.8)); guard activeID == tab.id else { return }; showFind(); findText = passage; findNext() }
+    }
+
     func addNoteToResearch(title: String, text: String) {
         let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty, let collection = targetCollection() else { return }
@@ -353,10 +420,23 @@ struct ResearchView: View {
     @State private var compare: [UUID] = []
     @State private var noteTitle = ""
     @State private var noteText = ""
+    @State private var reading: URL?
+    @State private var askingNote = false
+    @State private var anchoredText = ""
 
     init(store: ResearchStore) { self.store = store }
 
     var body: some View {
+        researchList
+            .sheet(item: $reading) { PDFAnnotatorView(source: $0).environmentObject(model) }
+            .alert("Note on the selected words", isPresented: $askingNote) {
+                TextField("Your note", text: $anchoredText)
+                Button("Add") { let text = anchoredText; anchoredText = ""; Task { await model.addAnchoredNote(text) } }
+                Button("Cancel", role: .cancel) { anchoredText = "" }
+            } message: { Text("Select the words on the page first. The note is saved with them and can take you back to the spot.") }
+    }
+
+    private var researchList: some View {
         List {
             Section {
                 if store.collections.isEmpty {
@@ -369,6 +449,8 @@ struct ResearchView: View {
                 HStack {
                     Button("Add This Page") { Task { await model.addPageToResearch() } }
                     Button("Add Selection") { Task { await model.addSelectionToResearch() } }
+                    Button("Save Offline Copy") { Task { await model.saveOfflineCopyToResearch() } }
+                    Button("Note on Selection…") { askingNote = true }
                     Button("Copy Citation") { Task { await model.copyCitationForActivePage() } }
                 }
                 Button("New Collection…") {
@@ -415,10 +497,14 @@ struct ResearchView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Label(item.title, systemImage: symbol(item.kind)).lineLimit(2)
                 if let text = item.text, !text.isEmpty { Text(text).font(.callout).foregroundStyle(.secondary).lineLimit(4) }
+                if let comment = item.comment, !comment.isEmpty { Text(comment).font(.callout).lineLimit(4) }
+                if store.savedFile(for: item) != nil { Label("Saved copy, opens offline", systemImage: "arrow.down.circle").font(.caption2).foregroundStyle(.tertiary) }
                 if let citation = item.citation { Text(citation.plain).font(.caption2).foregroundStyle(.tertiary).lineLimit(2) }
             }
             Spacer(minLength: 4)
-            if let url = item.url.flatMap(URL.init(string:)) { Button("Open") { model.openTab(url: url, isPrivate: false) }.controlSize(.small) }
+            if let file = store.savedFile(for: item) { Button("Open Copy") { reading = file }.controlSize(.small) }
+            if item.kind == .highlight, item.url != nil { Button("Go to Passage") { model.goToPassage(item) }.controlSize(.small) }
+            else if let url = item.url.flatMap(URL.init(string:)) { Button("Open") { model.openTab(url: url, isPrivate: false) }.controlSize(.small) }
             Button(role: .destructive) { store.remove(item.id, from: collection.id) } label: { Image(systemName: "trash") }.buttonStyle(.borderless)
         }
     }

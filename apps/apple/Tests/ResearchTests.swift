@@ -85,3 +85,59 @@ final class ResearchStoreTests: XCTestCase {
         XCTAssertFalse(html.contains("<script"))
     }
 }
+
+@MainActor
+final class ResearchOfflineTests: XCTestCase {
+    private func store() -> ResearchStore { ResearchStore(folder: FileManager.default.temporaryDirectory.appendingPathComponent("rs-\(UUID().uuidString)")) }
+
+    func testASavedCopyIsKeptFoundAndRemovedWithItsItem() throws {
+        let s = store()
+        let c = try XCTUnwrap(s.create(name: "Trip"))
+        let name = try XCTUnwrap(s.saveFile(Data("%PDF-1.4 test".utf8)))
+        let item = ResearchItem(kind: .pdf, title: "Page", url: "https://a.test/", text: nil, citation: nil, file: name)
+        XCTAssertTrue(s.add(item, to: c.id))
+        let url = try XCTUnwrap(s.savedFile(for: item))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+        s.remove(item.id, from: c.id)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path), "the file goes with the item")
+    }
+
+    func testDeletingACollectionDeletesItsFiles() throws {
+        let s = store()
+        let c = try XCTUnwrap(s.create(name: "Trip"))
+        let name = try XCTUnwrap(s.saveFile(Data("%PDF-1.4 test".utf8)))
+        let item = ResearchItem(kind: .pdf, title: "P", url: "https://a.test/", text: nil, citation: nil, file: name)
+        s.add(item, to: c.id)
+        let url = try XCTUnwrap(s.savedFile(for: item))
+        s.delete(c.id)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+    }
+
+    func testAFileNameCannotPointOutsideTheFolderAndHugeFilesAreRefused() throws {
+        let s = store()
+        for bad in ["../../etc/passwd", "/etc/passwd", ".hidden.pdf", "a/b.pdf", "x.txt", ""] {
+            XCTAssertNil(s.savedFile(for: ResearchItem(kind: .pdf, title: "x", url: nil, text: nil, citation: nil, file: bad)), bad)
+        }
+        XCTAssertNil(s.saveFile(Data()))
+        XCTAssertNil(s.saveFile(Data(count: ResearchStore.maxFileBytes + 1)))
+    }
+
+    func testOlderCollectionFilesStillOpen() throws {
+        let old = #"{"id":"9F7B6C1E-0000-4000-8000-000000000001","kind":"page","title":"T","added":0}"#
+        let item = try JSONDecoder().decode(ResearchItem.self, from: Data(old.utf8))
+        XCTAssertNil(item.file); XCTAssertNil(item.comment)
+    }
+
+    func testANoteOnASelectionKeepsThePassageAndTheComment() async throws {
+        let m = BrowserModel(engine: WebKitEngine(), root: NSTemporaryDirectory() + "bs-an-\(UUID().uuidString)", profile: "default")
+        await m.start()
+        let tab = m.openTab(url: nil, isPrivate: false)
+        tab.engine.showHTML("<html><head><title>Doc</title></head><body><p id='p'>The quick brown fox jumps.</p><script>var r=document.createRange();r.selectNodeContents(document.getElementById('p'));var s=getSelection();s.removeAllRanges();s.addRange(r);</script></body></html>", baseURL: URL(string: "https://doc.example.test/"))
+        try await Task.sleep(for: .seconds(1.5))
+        await m.addAnchoredNote("check this claim")
+        let item = m.research.collections.first?.items.first
+        XCTAssertEqual(item?.comment, "check this claim")
+        XCTAssertTrue(item?.text?.contains("quick brown fox") == true, "the selected words are kept (\(item?.text ?? "nothing"))")
+        XCTAssertEqual(item?.kind, .highlight)
+    }
+}
