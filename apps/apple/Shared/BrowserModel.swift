@@ -194,6 +194,9 @@ final class BrowserModel: ObservableObject {
     @Published var fingerprintExceptions = Set<String>()
     @Published var randomizeFingerprint = false { didSet { saveSetting("fingerprint_noise", randomizeFingerprint ? "1" : "0"); pushWebPolicy() } }
     @Published var deAMP = true { didSet { saveSetting("de_amp", deAMP ? "1" : "0"); pushWebPolicy() } }
+    /// Videos and sound start only after a tap or a key press (on by default); sites that need to play by themselves can be let off.
+    @Published var blockAutoplay = true { didSet { saveSetting("block_autoplay", blockAutoplay ? "1" : "0"); pushWebPolicy() } }
+    @Published var autoplayExceptions = Set<String>()
     @Published var blockVideoAds = false { didSet { saveSetting("video_ads", blockVideoAds ? "1" : "0"); pushWebPolicy() } }
     @Published var tabTree = false { didSet { saveSetting("tab_tree", tabTree ? "1" : "0"); if tabTree { arrangeAsTree() } } }
     @Published var splitTabID: UInt64? { didSet { if splitTabID == nil { thirdSplitTabID = nil } } }
@@ -2060,7 +2063,7 @@ final class BrowserModel: ObservableObject {
         "strip_tracking", "tab_groups", "tab_layout", "tab_previews", "tint_toolbar", "toolbar_autohide", "toolbar_items",
         "workspaces", "double_click", "collapse_on_scroll", "search_template", "search_suggestions", "speed_pill", "pill_collapsed", "site_icons", "shortcuts", "homepage", "saved_sessions", "organize_downloads", "site_notes", "search_shortcuts", "bookmark_tags", "site_styles", "phone_toolbar", "address_display", "address_icon", "search_panel_bottom", "search_panel_bottom2", "swipe_address", "app_links", "app_link_sites", "blur_private_switcher", "permission_expiry", "favorites_order", "overview_style", "overview_grouped", "overview_sort", "dark_pages", "dark_sites", "website_appearance", "site_appearance", "theme", "theme_custom", "low_power_memory", "clear_on_quit", "remember_reading", "keep_form_drafts", "site_zoom", "group_colors",
         "save_logins", "mouse_gestures", "mouse_gesture_map", "site_open_rules", "download_concurrent", "spotlight_bookmarks", "vim_on", "vim_keymap", "workflows", "download_rules", "extension_profiles", "site_delete_rules", "site_user_agents", "containers", "split_templates", "tab_tree", "block_webrtc", "webrtc_exceptions",
-        "site_js_off", "never_sleep_sites", "fingerprint_noise", "fingerprint_exceptions", "de_amp", "video_ads", "user_themes", "start_tile",
+        "site_js_off", "never_sleep_sites", "fingerprint_noise", "fingerprint_exceptions", "de_amp", "video_ads", "user_themes", "start_tile", "block_autoplay", "autoplay_exceptions",
     ]
 
     /// The same, with the slow key derivation and encryption on a background thread so the window never stalls.

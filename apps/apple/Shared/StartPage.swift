@@ -33,6 +33,8 @@ struct StartPageView: View {
                             greeting
                             heroSearch
                         }
+                        // Above everything below it: the suggestions open over the favorites and the cards, and they were being drawn under them.
+                        .zIndex(10)
                         if isPrivate {
                             privateNote
                         } else {

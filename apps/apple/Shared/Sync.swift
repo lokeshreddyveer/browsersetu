@@ -9,10 +9,10 @@ enum SyncRules {
     static let settingKeys: Set<String> = [
         "search_template", "search_suggestions", "search_shortcuts", "accent", "appearance", "address_display", "dark_pages", "dark_sites", "website_appearance", "site_appearance",
         "site_zoom", "site_styles", "site_notes", "bookmark_tags", "group_colors", "strip_tracking", "app_links", "app_link_sites",
-        "blur_private_switcher", "permission_expiry", "homepage", "favorites_order", "site_js_off", "never_sleep_sites", "de_amp", "user_themes", "start_tile", "theme_custom",
+        "blur_private_switcher", "permission_expiry", "homepage", "favorites_order", "site_js_off", "never_sleep_sites", "de_amp", "user_themes", "start_tile", "theme_custom", "block_autoplay", "autoplay_exceptions",
         // Rules and per-site choices (the "site rules" group in sync settings).
         "site_open_rules", "site_delete_rules", "site_user_agents", "containers", "split_templates", "workflows", "fingerprint_noise", "fingerprint_exceptions",
-        "block_webrtc", "webrtc_exceptions", "video_ads",
+        "block_webrtc", "webrtc_exceptions", "video_ads", "autoplay_exceptions",
         // What the start page shows.
         "show_favorites", "show_continue", "show_frequent", "show_greeting", "show_recently_closed", "start_background",
     ]
