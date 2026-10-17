@@ -469,6 +469,13 @@ struct PageArea: View {
             if tab.isBlank { StartPageView(isPrivate: tab.isPrivate) }
         }
         .overlay(alignment: .bottomTrailing) { if model.workbench.showSizeHUD { SizeHUD() } }
+        .overlay(alignment: .top) {
+            if let hint = model.gestureHint {
+                Text(hint).font(.system(size: 13, weight: .medium)).foregroundStyle(.white).padding(.horizontal, 12).padding(.vertical, 6)
+                    .background(Capsule().fill(Color.black.opacity(0.75))).padding(.top, 16).transition(.opacity).allowsHitTesting(false)
+            }
+        }
+        .motion(.easeOut(duration: 0.12), value: model.gestureHint)
     }
 }
 

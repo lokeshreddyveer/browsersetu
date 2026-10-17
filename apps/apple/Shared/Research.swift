@@ -428,7 +428,7 @@ struct ResearchView: View {
 
     var body: some View {
         researchList
-            .sheet(item: $reading) { PDFAnnotatorView(source: $0).environmentObject(model) }
+            .sheet(item: $reading) { PDFEditorView(source: $0).environmentObject(model) }
             .alert("Note on the selected words", isPresented: $askingNote) {
                 TextField("Your note", text: $anchoredText)
                 Button("Add") { let text = anchoredText; anchoredText = ""; Task { await model.addAnchoredNote(text) } }

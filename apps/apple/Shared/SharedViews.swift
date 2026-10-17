@@ -44,6 +44,7 @@ struct SheetContainer: View {
                 case .research: ResearchView(store: model.research)
                 case .sitePrivacy: SitePrivacyView()
                 case .workbench: WorkbenchView()
+                case .pdfEditor: if let url = model.pdfEditorURL { PDFEditorView(source: url) } else { Text("No PDF is open.").foregroundStyle(.secondary) }
                 }
             }
             #if os(iOS)
@@ -94,6 +95,7 @@ struct SheetContainer: View {
         case .research: "Research"
         case .sitePrivacy: "Site Privacy"
         case .workbench: "Workbench"
+        case .pdfEditor: "PDF"
         }
     }
 }

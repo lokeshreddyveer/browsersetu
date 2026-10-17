@@ -86,6 +86,8 @@ private struct TabInteractions: ViewModifier {
             .accessibilityAction { model.select(tab.id) }
             .accessibilityAction(named: Text("Close tab")) { model.closeTab(id: tab.id) }
             .contextMenu { TabMenuItems(tab: tab) }
+            // A middle click closes the tab, as in the sidebar.
+            .overlay(MiddleClickCatcher { if !tab.isLocked { model.closeTab(id: tab.id) } })
             .draggable(String(tab.id))
             .dropDestination(for: String.self) { items, _ in
                 guard let raw = items.first, let dragged = UInt64(raw), dragged != tab.id else { return false }

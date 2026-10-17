@@ -261,6 +261,9 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
 
     func engineProgress(_ progress: Double) { self.progress = progress }
 
+    func engineMouseGesturesEnabled() -> Bool { owner?.mouseGestures == true }
+    func engineMouseGesture(_ sequence: String, finished: Bool) { if owner?.activeID == id { owner?.mouseGestureProgress(sequence, finished: finished) } }
+
     func engineWantsLoginCapture() -> Bool { !isPrivate && owner?.saveLoginsEnabled == true }
     func engineLoginSubmitted(origin: String, user: String, password: String) { owner?.loginSubmitted(origin: origin, user: user, password: password, in: self) }
 
