@@ -71,6 +71,7 @@ final class WebKitEngine: BrowserEngine {
         else {
             UserScriptInstaller.addScrollbarHider(to: config.userContentController)
             UserScriptInstaller.addPolicyScripts(webPolicy, to: config.userContentController)
+            UserScriptInstaller.addBrowserScripts(to: config.userContentController, signInWatcher: false)
         }
         // Extensions never run in private tabs.
         if !isPrivate, #available(macOS 15.4, iOS 18.4, *), let manager = extensionManager as? WebKitExtensionManager {
@@ -79,10 +80,30 @@ final class WebKitEngine: BrowserEngine {
         return config
     }
 
+    func makePopupTab(configuration: AnyObject, events: TabEngineEvents) -> TabEngine? {
+        guard let configuration = configuration as? WKWebViewConfiguration else { return nil }
+        let tab = WebKitTab(configuration: configuration, events: events, downloads: downloadDelegate)
+        tabs.add(tab)
+        wireMediaGuard(tab)
+        return tab
+    }
+
+    /// iPhone only: tells the tab when its media must wait for a tap (the switch is on and the site is not an exception).
+    private func wireMediaGuard(_ tab: WebKitTab) {
+        #if os(iOS)
+        tab.mediaGuardActive = { [weak self, weak tab] in
+            guard let self, let tab, self.webPolicy.blockAutoplay else { return false }
+            let key = FaviconStore.key(forHost: tab.webView.url?.host)
+            return key.map { !self.webPolicy.autoplayExceptions.contains($0) } ?? true
+        }
+        #endif
+    }
+
     func makeTab(isPrivate: Bool, profile: String, container: String?, events: TabEngineEvents) -> TabEngine {
         let tab = WebKitTab(configuration: makeConfiguration(isPrivate: isPrivate, profile: profile, container: container),
                             events: events, downloads: downloadDelegate)
         tabs.add(tab)
+        wireMediaGuard(tab)
         return tab
     }
 
@@ -206,6 +227,12 @@ final class WebKitEngine: BrowserEngine {
 final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
     let webView: WKWebView
     private weak var events: TabEngineEvents?
+    var eventsForLogin: TabEngineEvents? { events }
+    /// The link under the pointer, as last reported by the page.
+    var hoveredLink: URL?
+    /// When the person last clicked, touched or typed in this page, as the page reported it.
+    var lastGesture = Date.distantPast
+    func performLinkAction(_ action: LinkAction) { if let url = hoveredLink { events?.engineLinkAction(url, action) } }
     private let downloads: WebKitDownloads
     private var observers: [NSKeyValueObservation] = []
     #if os(iOS)
@@ -223,8 +250,20 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
         webView = WKWebView(frame: .zero, configuration: configuration)
         #endif
         super.init()
+        // Sign-ins the page script reports (see LoginScripts.watcher). The handler holds the tab weakly, so the tab can still go away.
+        TabRegistry.tabs.setObject(self, forKey: webView)
+        let controller = webView.configuration.userContentController
+        // One set of handlers per content controller: a window a page opens shares its opener's controller, and adding a name twice is an error.
+        if !TabRegistry.wired.contains(controller) {
+            TabRegistry.wired.add(controller)
+            controller.add(LoginMessageHandler(), contentWorld: .defaultClient, name: "bsLogin")
+            controller.add(LinkHoverHandler(), contentWorld: .defaultClient, name: "bsLink")
+            controller.add(GestureHandler(), contentWorld: .defaultClient, name: "bsGesture")
+        }
         #if os(macOS)
         reporting.applyRestingColor()
+        reporting.hoveredLink = { [weak self] in self?.hoveredLink }
+        reporting.onLinkAction = { [weak self] action, url in self?.events?.engineLinkAction(url, action) }
         reporting.onScroll = { [weak self] delta in self?.events?.engineScrolled(deltaY: Double(delta)) }
         reporting.gesturesEnabled = { [weak self] in self?.events?.engineMouseGesturesEnabled() ?? false }
         reporting.onGesture = { [weak self] sequence, finished in self?.events?.engineMouseGesture(sequence, finished: finished) }
@@ -243,7 +282,49 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
         webView.allowsMagnification = true
         #endif
         observe()
+        #if os(iOS)
+        installMediaGuard()
+        #endif
     }
+
+    #if os(iOS)
+    // MARK: A second guard against media that starts by itself (iPhone)
+
+    /// Whether this page's media is held to "a tap first" (set by the engine: the switch is on and the site is not one the person allowed).
+    var mediaGuardActive: () -> Bool = { false }
+    private var lastTap = Date.distantPast
+    private var mediaStartedByPerson = false
+    private var mediaTimer: Timer?
+
+    /// The page's own script already refuses play() without a tap, but a site can start media in ways a script cannot see. So, as well, the tab asks WebKit what is playing
+    /// a little under twice a second: playing media that follows a tap (a video you chose) is left alone for as long as it plays; media that starts with no tap behind it is paused.
+    private func installMediaGuard() {
+        let tap = UITapGestureRecognizer(target: self, action: #selector(noteTap))
+        tap.cancelsTouchesInView = false
+        tap.delaysTouchesBegan = false
+        tap.delaysTouchesEnded = false
+        tap.delegate = self
+        webView.addGestureRecognizer(tap)
+        mediaTimer = Timer.scheduledTimer(withTimeInterval: 0.6, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.checkMedia() }
+        }
+    }
+
+    @objc private func noteTap() { lastTap = Date() }
+
+    private func checkMedia() {
+        guard webView.window != nil, mediaGuardActive() else { mediaStartedByPerson = false; return }
+        webView.requestMediaPlaybackState { [weak self] state in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                guard state == .playing else { self.mediaStartedByPerson = false; return }
+                if self.mediaStartedByPerson { return }
+                if Date().timeIntervalSince(self.lastTap) < 6 { self.mediaStartedByPerson = true }
+                else { self.webView.pauseAllMediaPlayback { } }
+            }
+        }
+    }
+    #endif
 
     var hostView: PlatformView { webView }
     /// A text field on the page has the keyboard.
@@ -343,6 +424,10 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
         // The style text is passed as data, never joined into the script, so it cannot become code.
         let script = "const old = document.getElementById('bs-site-style'); if (old) old.remove(); if (css) { const s = document.createElement('style'); s.id = 'bs-site-style'; s.textContent = css; document.documentElement.appendChild(s); } return true;"
         Task { _ = try? await webView.callAsyncJavaScript(script, arguments: ["css": css ?? NSNull()], contentWorld: .defaultClient) }
+    }
+
+    func runPageScript(_ script: String, arguments: [String: Any]) {
+        Task { _ = try? await webView.callAsyncJavaScript(script, arguments: arguments, contentWorld: .defaultClient) }
     }
 
     func scrollToEdge(bottom: Bool) {
@@ -640,8 +725,13 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
         try? await webView.callAsyncJavaScript(LoginScripts.probe, contentWorld: .defaultClient) as? String
     }
 
+    /// The frame whose password field the person last put the cursor in: a sign-in box can be a page from another site inside this one (Apple's, Google's).
+    var loginFrame: WKFrameInfo?
+
     func fillLogin(origin: String, user: String, password: String) async -> Bool {
-        let r = try? await webView.callAsyncJavaScript(LoginScripts.fill, arguments: ["origin": origin, "user": user, "password": password], contentWorld: .defaultClient)
+        // A sign-in inside a frame is filled in that frame; otherwise in the page itself.
+        let frame = loginFrame.flatMap { info in WebLoginOrigin.normalized(info.request.url) == origin ? info : nil }
+        let r = try? await webView.callAsyncJavaScript(LoginScripts.fill, arguments: ["origin": origin, "user": user, "password": password], in: frame, contentWorld: .defaultClient)
         return (r as? Bool) ?? false
     }
 
@@ -817,7 +907,13 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
     func stop() { webView.stopLoading() }
     func goBack() { webView.goBack() }
     func goForward() { webView.goForward() }
-    func close() { observers.removeAll() }
+    func close() {
+        observers.removeAll()
+        #if os(iOS)
+        mediaTimer?.invalidate()
+        mediaTimer = nil
+        #endif
+    }
 
     func find(_ text: String, backwards: Bool) async -> Bool {
         guard !text.isEmpty else { clearFind(); return false }
@@ -983,6 +1079,13 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
         if let http = navigationResponse.response as? HTTPURLResponse,
            let disposition = http.value(forHTTPHeaderField: "Content-Disposition"),
            disposition.lowercased().hasPrefix("attachment") {
+            // A web page asked for as a page (the address has no file name, like youtube.com) is shown, whatever the header says: saving the
+            // home page of a site as "www.example.com.html" is never what someone typing the address wanted.
+            let mime = (http.mimeType ?? "").lowercased()
+            let isPage = mime == "text/html" || mime == "application/xhtml+xml"
+            let lastPart = http.url?.lastPathComponent ?? ""
+            let looksLikeFile = lastPart.contains(".") && lastPart != "/"
+            if navigationResponse.isForMainFrame, isPage, !looksLikeFile { return .allow }
             return .download
         }
         return navigationResponse.canShowMIMEType ? .allow : .download
@@ -1191,10 +1294,17 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
 
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                  for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-        if let target = navigationAction.request.url {
-            events?.engineOpenInNewTab(url: target, userInitiated: navigationAction.navigationType != .other)
+        let target = navigationAction.request.url
+        let clicked = navigationAction.navigationType == .linkActivated || navigationAction.navigationType == .formSubmitted
+        // A link that opens elsewhere (target=_blank) is a click by definition: it opens as an ordinary tab.
+        if clicked, let target { events?.engineOpenInNewTab(url: target, userInitiated: true); return nil }
+        // A script's window.open: allowed right after a real click or key press (or on a site the person allowed), and then given a page joined to its opener.
+        let gesture = Date().timeIntervalSince(lastGesture) < 5
+        guard gesture || events?.enginePopupsAllowedWithoutGesture() == true else {
+            events?.engineBlockedPopup(url: target)
+            return nil
         }
-        return nil
+        return (events?.engineOpenPopup(configuration: configuration) as? WebKitTab)?.webView
     }
 
     func webViewDidClose(_ webView: WKWebView) {
@@ -1354,6 +1464,50 @@ final class ScrollReportingWebView: WKWebView {
         applyRestingColor()
     }
 
+    // The page's right-click menu on a link: WebKit's own choices, with the ones a tabbed browser is expected to have added after "Open Link".
+    var hoveredLink: () -> URL? = { nil }
+    var onLinkAction: ((LinkAction, URL) -> Void)?
+    private var menuPoint: CGPoint = .zero
+
+    override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
+        super.willOpenMenu(menu, with: event)
+        func raw(_ item: NSMenuItem) -> String { item.identifier?.rawValue ?? "" }
+        let at = menu.items.firstIndex { raw($0).contains("OpenLink") && !raw($0).contains("Window") && !raw($0).contains("InNew") }
+            ?? menu.items.firstIndex { $0.title == "Open Link" }
+        guard let at else { return }
+        menuPoint = gesturePoint(event)
+        let choices: [(String, String, LinkAction)] = [
+            ("Open Link in New Tab", "plus.square.on.square", .newTab),
+            ("Open Link in Background Tab", "square.stack", .backgroundTab),
+            ("Open Link in Split View", "rectangle.split.2x1", .split),
+            ("Open Link in Private Tab", "eye.slash", .privateTab),
+        ]
+        for (offset, choice) in choices.enumerated() {
+            let item = NSMenuItem(title: choice.0, action: #selector(runLinkChoice(_:)), keyEquivalent: "")
+            item.target = self
+            item.image = NSImage(systemSymbolName: choice.1, accessibilityDescription: nil)
+            item.representedObject = choice.2
+            menu.insertItem(item, at: at + 1 + offset)
+        }
+    }
+
+    /// The link under the point that was right-clicked, asked of the page when a choice is made.
+    private func linkURL(at point: CGPoint) async -> URL? {
+        let script = "const e = document.elementFromPoint(x, y); const a = e && e.closest ? e.closest('a[href]') : null; return a ? a.href : null;"
+        let found = try? await callAsyncJavaScript(script, arguments: ["x": point.x, "y": point.y], contentWorld: .defaultClient) as? String
+        let url = found.flatMap { URL(string: $0) } ?? hoveredLink()
+        guard let url, url.scheme == "http" || url.scheme == "https" else { return nil }
+        return url
+    }
+
+    @objc private func runLinkChoice(_ sender: NSMenuItem) {
+        guard let action = sender.representedObject as? LinkAction else { return }
+        let point = menuPoint
+        Task { @MainActor in
+            if let url = await linkURL(at: point) { onLinkAction?(action, url) }
+        }
+    }
+
     // Mouse gestures: the middle button, held and dragged. A press that does not move is given to the page unchanged, so a middle click on a link still opens it in a new tab.
     var gesturesEnabled: () -> Bool = { false }
     var onGesture: ((String, Bool) -> Void)?
@@ -1402,5 +1556,83 @@ final class ScrollReportingWebView: WKWebView {
         // Momentum after the fingers lift would keep folding the toolbar; only deliberate movement counts.
         if event.momentumPhase == [] { onScroll?(event.scrollingDeltaY) }
     }
+}
+#endif
+
+/// Receives what the sign-in watcher script reports. Nothing is trusted: the browser re-checks every value before it asks about keeping it.
+final class LoginMessageHandler: NSObject, WKScriptMessageHandler {
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard let body = message.body as? [String: Any], let kind = body["kind"] as? String else { return }
+        let tab = MainActor.assumeIsolated { message.webView.flatMap { TabRegistry.tabs.object(forKey: $0) } }
+        let frame = message.frameInfo
+        Task { @MainActor in
+            guard let tab, let events = tab.eventsForLogin, events.engineWantsLoginCapture() else { return }
+            switch kind {
+            case "focus":
+                tab.loginFrame = frame
+                events.engineLoginFieldFocused(origin: (body["origin"] as? String).flatMap(WebLoginOrigin.normalized))
+            case "typed":
+                if let found = LoginRules.capture(body) { events.engineLoginTyped(origin: found.origin, user: found.user, password: found.password) }
+            case "submit":
+                if let found = LoginRules.capture(body) { events.engineLoginSubmitted(origin: found.origin, user: found.user, password: found.password) }
+            default: break
+            }
+        }
+    }
+}
+
+/// Page-side half of the link menu: reports the address of the link the pointer is over, only when it changes.
+enum LinkHover {
+    static let script = """
+    (function () {
+      if (window.__bsLinkHover) return; window.__bsLinkHover = true;
+      let last = '';
+      document.addEventListener('mouseover', (e) => {
+        const a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+        const href = a ? a.href : '';
+        if (href === last) return; last = href;
+        try { window.webkit.messageHandlers.bsLink.postMessage(href); } catch (x) {}
+      }, true);
+    })();
+    """
+}
+
+final class LinkHoverHandler: NSObject, WKScriptMessageHandler {
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        // Only the main frame is believed, and only web addresses are kept.
+        guard message.frameInfo.isMainFrame, let text = message.body as? String else { return }
+        let tab = MainActor.assumeIsolated { message.webView.flatMap { TabRegistry.tabs.object(forKey: $0) } }
+        tab?.hoveredLink = URL(string: text).flatMap { $0.scheme == "http" || $0.scheme == "https" ? $0 : nil }
+    }
+}
+
+/// Which tab each web view belongs to, and which content controllers already have the browser's handlers.
+@MainActor
+enum TabRegistry {
+    static let tabs = NSMapTable<WKWebView, WebKitTab>(keyOptions: .weakMemory, valueOptions: .weakMemory)
+    static let wired = NSHashTable<WKUserContentController>.weakObjects()
+}
+
+/// Page-side half of the pop-up rule: tells the browser when the person really clicked, touched or typed (never a script pretending to).
+enum GestureScript {
+    static let script = """
+    (function () {
+      if (window.__bsGesture) return; window.__bsGesture = true;
+      const ping = (e) => { if (e.isTrusted) { try { window.webkit.messageHandlers.bsGesture.postMessage(1); } catch (x) {} } };
+      ['pointerdown', 'keydown', 'touchstart'].forEach((t) => document.addEventListener(t, ping, true));
+    })();
+    """
+}
+
+final class GestureHandler: NSObject, WKScriptMessageHandler {
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        MainActor.assumeIsolated { message.webView.flatMap { TabRegistry.tabs.object(forKey: $0) }?.lastGesture = Date() }
+    }
+}
+
+#if os(iOS)
+extension WebKitTab: UIGestureRecognizerDelegate {
+    /// The tap recorder watches; it never takes a touch away from the page.
+    nonisolated func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
 }
 #endif

@@ -20,7 +20,7 @@ enum UserScriptInstaller {
             controller.addUserScript(WKUserScript(source: PageScripts.deAMP, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: .defaultClient))
         }
         if policy.blockVideoAds {
-            controller.addUserScript(WKUserScript(source: PageScripts.videoAds, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .defaultClient))
+            controller.addUserScript(WKUserScript(source: policy.youtubeRules.script, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page))
         }
     }
 
@@ -66,10 +66,21 @@ enum UserScriptInstaller {
         controller.addUserScript(WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .defaultClient))
     }
 
+    /// The browser's own page scripts (they are not the user's, and not switches): when the person really clicked or typed, which link the pointer is over, and, in normal
+    /// tabs, the sign-in watcher. They must be added after the old scripts are cleared, or they never reach a page.
+    static func addBrowserScripts(to controller: WKUserContentController, signInWatcher: Bool) {
+        controller.addUserScript(WKUserScript(source: GestureScript.script, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .defaultClient))
+        controller.addUserScript(WKUserScript(source: LinkHover.script, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .defaultClient))
+        if signInWatcher {
+            controller.addUserScript(WKUserScript(source: LoginScripts.watcher, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .defaultClient))
+        }
+    }
+
     static func install(_ scripts: [UserScript], policy: WebPolicy = WebPolicy(), into controller: WKUserContentController) {
         controller.removeAllUserScripts()
         addScrollbarHider(to: controller)
         addPolicyScripts(policy, to: controller)
+        addBrowserScripts(to: controller, signInWatcher: true)
         for script in scripts where script.enabled && !script.sites.isEmpty {
             let world: WKContentWorld = script.inPageWorld ? .page : .world(name: "BrowserSetuUserScripts")
             controller.addUserScript(WKUserScript(source: wrapped(script), injectionTime: script.runAtStart ? .atDocumentStart : .atDocumentEnd,

@@ -154,6 +154,14 @@ struct MacRootView: View {
                             .zIndex(4)
                     }
                 }
+                VStack(spacing: 8) { PendingLoginPill(); PopupBlockedPill() }
+                    .padding(.top, 56)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .zIndex(5)
+                NoticeToast()
+                    .padding(.bottom, 22)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .zIndex(6)
                 DownloadToast(coordinator: model.downloads)
                     .padding(.trailing, 14).padding(.bottom, model.showSpeedPill ? 40 : 16)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
@@ -191,7 +199,14 @@ struct MacRootView: View {
         .motion(.spring(response: 0.42, dampingFraction: 0.9), value: foldedAway)
         .motion(.spring(response: 0.4, dampingFraction: 0.9), value: pillScrolledAway)
         .motion(.spring(response: 0.38, dampingFraction: 0.86), value: model.pillCollapsed)
-        .onAppear { SettingsRouter.opener = { openSettings() } }
+        .onAppear {
+            SettingsRouter.opener = { openSettings() }
+            SettingsRouter.inlineOpener = { [weak model] in
+                guard let model, model.settingsInTab else { return false }
+                model.showSettingsTab()
+                return true
+            }
+        }
         .modifier(SystemTranslation())
         // Downloads show their progress on the Dock icon.
         .onReceive(model.downloads.$active) { active in
@@ -209,9 +224,6 @@ struct MacRootView: View {
         .sheet(item: $model.sheet) { SheetContainer(sheet: $0) }
         .sheet(item: $model.storeOffer) { StoreOfferSheet(info: $0) }
         .sheet(item: $model.privacySheet) { PrivacySheetView(kind: $0, privacy: model.privacy) }
-        .alert("Browser Setu", isPresented: Binding(get: { model.notice != nil }, set: { if !$0 { model.notice = nil } })) {
-            Button("OK") { model.notice = nil }
-        } message: { Text(model.notice ?? "") }
         .preferredColorScheme(model.appearance.colorScheme ?? (model.themeIsActive ? model.activeTheme.scheme?.colorScheme : nil))
         .tint(Theme.accent)
         .motion(.easeOut(duration: 0.22), value: peek.revealed)
@@ -237,13 +249,14 @@ struct MacRootView: View {
 
     private func sidebar(_ windowWidth: CGFloat) -> some View {
         SidebarContainer(topInset: topInset, availableWidth: min(model.sidebarWidth, windowWidth * 0.42))
+            .contextMenu { SidebarContextMenu() }
             .accessibilityHidden(peek.revealed)
     }
 
     @ViewBuilder private var tabRow: some View {
         switch model.effectiveTabLayout {
-        case .separate: HorizontalTabStrip()
-        case .compact: CompactTabStrip()
+        case .separate: HorizontalTabStrip().contextMenu { ToolbarContextMenu() }
+        case .compact: CompactTabStrip().contextMenu { ToolbarContextMenu() }
         case .sidebar: EmptyView()
         }
     }
@@ -277,7 +290,11 @@ struct MainColumn: View {
                 .modifier(PageCard(enabled: !model.focusMode, leading: cardLeading, trailing: cardTrailing,
                                    top: barInset == nil ? WindowInset.gap : 0))
             }
+            if let id = model.openPanelID, let panel = model.webPanels.first(where: { $0.id == id }), let tab = model.tabs.first(where: { $0.id == model.panelTabID }) {
+                WebPanelView(panel: panel, tab: tab).transition(.move(edge: .trailing).combined(with: .opacity)).zIndex(2)
+            }
             if model.overviewVisible { TabOverview().transition(.opacity.combined(with: .scale(scale: 0.98))).zIndex(3) }
+            if model.showSetup { SetupAssistantView().transition(.opacity).zIndex(10) }
             if model.paletteVisible { CommandPalette().transition(.opacity).zIndex(4) }
         }
         .motion(.easeOut(duration: 0.16), value: model.overviewVisible)
@@ -290,8 +307,8 @@ struct MainColumn: View {
     /// Horizontal presentation only. Vertical tabs live in the sidebar, so nothing is drawn twice.
     @ViewBuilder private var tabRow: some View {
         switch model.effectiveTabLayout {
-        case .separate: HorizontalTabStrip()
-        case .compact: CompactTabStrip()
+        case .separate: HorizontalTabStrip().contextMenu { ToolbarContextMenu() }
+        case .compact: CompactTabStrip().contextMenu { ToolbarContextMenu() }
         case .sidebar: EmptyView()
         }
     }
@@ -535,7 +552,7 @@ struct FindBar: View {
         }
         .buttonStyle(.borderless)
         .padding(.horizontal, 12).padding(.vertical, 7)
-        .background(.bar)
+        .themedBar(fallback: .bar)
         .onAppear { DispatchQueue.main.async { focused = true } }
     }
 }
@@ -569,7 +586,8 @@ struct PageArea: View {
     var body: some View {
         ZStack {
             EngineViewHost(view: tab.hostView)
-            if tab.isBlank { StartPageView(isPrivate: tab.isPrivate) }
+            if tab.isSettingsPage { MacSettingsView(inline: true).background(Color.platformBackground).transition(.opacity) }
+            else if tab.isBlank { StartPageView(isPrivate: tab.isPrivate).contextMenu { if !tab.isPrivate { StartPageContextMenu() } } }
         }
         .overlay(alignment: .bottomTrailing) { if model.workbench.showSizeHUD { SizeHUD() } }
         .overlay(alignment: .topLeading) {
@@ -706,5 +724,35 @@ struct FloatingExtensions: View {
                 .overlay(shape.strokeBorder(Obsidian.edge, lineWidth: 0.6).allowsHitTesting(false))
                 .shadow(color: .black.opacity(0.3), radius: 7, x: onRight ? -2 : 2, y: 2)
         }
+    }
+}
+
+/// A web panel: a small site beside the page, over its right edge.
+struct WebPanelView: View {
+    @EnvironmentObject var model: BrowserModel
+    let panel: WebPanel
+    @ObservedObject var tab: TabController
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                SiteTile(url: panel.url, title: panel.name, size: 18)
+                Text(panel.name).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                Spacer()
+                Button { tab.reload() } label: { Image(systemName: "arrow.clockwise") }.buttonStyle(.borderless).help("Reload").accessibilityLabel("Reload panel")
+                Button { model.moveWebPanelToTab() } label: { Image(systemName: "arrow.up.forward.square") }.buttonStyle(.borderless).help("Open as a tab").accessibilityLabel("Open panel as a tab")
+                Button { model.toggleWebPanel(panel.id) } label: { Image(systemName: "xmark") }.buttonStyle(.borderless).help("Close panel").accessibilityLabel("Close panel")
+            }
+            .padding(.horizontal, 12).frame(height: 38)
+            Divider()
+            EngineViewHost(view: tab.hostView)
+        }
+        .frame(width: 380)
+        .themedBar(fallback: .regularMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.28), radius: 16, x: -4, y: 4)
+        .padding(10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
     }
 }

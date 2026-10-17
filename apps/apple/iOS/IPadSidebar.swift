@@ -28,7 +28,7 @@ struct IPadSidebar: View {
             .padding(12)
         }
         .frame(width: 280)
-        .background(.bar)
+        .themedBar(fallback: .bar)
         .accessibilityIdentifier("sidebar")
     }
 }

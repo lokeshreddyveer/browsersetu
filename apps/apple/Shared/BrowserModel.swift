@@ -125,6 +125,9 @@ final class BrowserModel: ObservableObject {
     @Published var floatingFocusTick = 0
     @Published var sidebarSection: SidebarSection = .tabs
     @Published var overviewVisible = false
+    /// Settings as a page inside this window (true) or in their own window; and whether that page is showing now.
+    @Published var settingsInTab = false { didSet { saveSetting("settings_in_tab", settingsInTab ? "1" : "0") } }
+    @Published var settingsPageVisible = false
     /// iOS shows normal and private tabs as separate sets; macOS mixes them in one strip.
     @Published var privateMode = false
     @Published var activeGroup = ""
@@ -200,7 +203,39 @@ final class BrowserModel: ObservableObject {
     /// Videos and sound start only after a tap or a key press (on by default); sites that need to play by themselves can be let off.
     @Published var blockAutoplay = true { didSet { saveSetting("block_autoplay", blockAutoplay ? "1" : "0"); pushWebPolicy() } }
     @Published var autoplayExceptions = Set<String>()
-    @Published var blockVideoAds = false { didSet { saveSetting("video_ads", blockVideoAds ? "1" : "0"); pushWebPolicy() } }
+    @Published var youtubeRules = YouTubeAdRules.builtIn { didSet { saveJSON("youtube_rules", youtubeRules); pushWebPolicy() } }
+    @Published var keepYouTubeRulesFresh = true { didSet { saveSetting("youtube_rules_auto", keepYouTubeRulesFresh ? "1" : "0") } }
+    @Published var youtubeRulesChecked: Date?
+    @Published var blockVideoAds = true { didSet { saveSetting("video_ads", blockVideoAds ? "1" : "0"); pushWebPolicy() } }
+    // Break mode, address bar sources, hover previews, theme schedule, chains, panels, menus (BrowserExtras.swift)
+    @Published var addressSources: [AddressSource] = AddressSource.defaults { didSet { saveSetting("address_sources", addressSources.map(\.rawValue).joined(separator: ",")) } }
+    @Published var breakActive = false
+    @Published var hoverPreviews = true { didSet { saveSetting("hover_previews", hoverPreviews ? "1" : "0") } }
+    @Published var hoverDelay = 0.6 { didSet { saveSetting("hover_delay", String(hoverDelay)) } }
+    @Published var themeSchedule = ThemeSchedule() { didSet { saveJSON("theme_schedule", themeSchedule); startThemeSchedule() } }
+    var themeTimer: Timer?
+    @Published var chains: [CommandChain] = [] { didSet { saveJSON("command_chains", chains) } }
+    @Published var webPanels: [WebPanel] = [] { didSet { saveJSON("web_panels", webPanels) } }
+    @Published var openPanelID: String?
+    /// The buttons inside the address bar, in order (Settings › Search › Address Bar Buttons, or right-click the bar).
+    @Published var addressBarItems: [AddressBarItem] = AddressBarItem.defaults { didSet { saveSetting("address_bar_items", addressBarItems.map(\.rawValue).joined(separator: ",")) } }
+    /// The buttons along the foot of the sidebar, in order (Settings › Tabs › Sidebar Buttons, or right-click the row).
+    @Published var sidebarFooter: [SidebarFooterItem] = SidebarFooterItem.defaults { didSet { saveSetting("sidebar_footer", sidebarFooter.map(\.rawValue).joined(separator: ",")) } }
+    /// Whether saved passwords are kept in iCloud Keychain (end to end encrypted by Apple) so they appear on the person's other Apple devices.
+    @Published var passwordsInICloudKeychain = false { didSet { saveSetting("passwords_icloud_keychain", passwordsInICloudKeychain ? "1" : "0") } }
+    /// How many passwords the last restored backup brought back.
+    @Published var lastRestoredPasswords = 0
+    /// The first-run questions (SetupAssistant.swift) are on screen.
+    @Published var showSetup = false
+    /// Pop-ups: whether pages are stopped from opening windows without a click, and the sites that may.
+    @Published var blockPopups = true { didSet { saveSetting("block_popups", blockPopups ? "1" : "0") } }
+    @Published var popupAllowedHosts: Set<String> = [] { didSet { saveSetting("popup_allowed_hosts", popupAllowedHosts.sorted().joined(separator: ",")) } }
+    var panelTabID: UInt64?
+    @Published var collapsedStacks: Set<String> = []
+    @Published var hiddenMenuItems: Set<String> = [] { didSet { saveSetting("hidden_menu_items", hiddenMenuItems.sorted().joined(separator: ",")) } }
+    @Published var tabStacks = false { didSet { saveSetting("tab_stacks", tabStacks ? "1" : "0") } }
+    /// Tabs whose branch is folded in the sidebar when the tab tree is on.
+    @Published var collapsedTreeTabs: Set<UInt64> = []
     @Published var tabTree = false { didSet { saveSetting("tab_tree", tabTree ? "1" : "0"); if tabTree { arrangeAsTree() } } }
     @Published var splitTabID: UInt64? { didSet { if splitTabID == nil { thirdSplitTabID = nil } } }
     /// A third and a fourth panel; each is only ever set while the one before it is.
@@ -260,9 +295,17 @@ final class BrowserModel: ObservableObject {
         } else {
             // Profile data unreadable: run from memory rather than touching a damaged database.
             // The original files are never modified; only an explicit reset moves them aside.
-            core = try! BrowserCore.inMemory()
-            recovery = RecoveryState(profile: wanted,
-                                     detail: "Your saved data for “\(wanted)” could not be opened. This is a temporary session; nothing is saved and your original data is untouched.")
+            let detail = "Your saved data for “\(wanted)” could not be opened. This is a temporary session; nothing is saved and your original data is untouched."
+            if let memory = try? BrowserCore.inMemory() {
+                core = memory
+            } else if let scratch = try? BrowserCore.open(root: NSTemporaryDirectory() + "browsersetu-recovery-\(UUID().uuidString)", profile: "recovery") {
+                // Even a memory database would not open: use a throwaway folder that is never the person's own data.
+                core = scratch
+            } else {
+                // The storage engine itself cannot start, so there is nothing to run on. Stop with a message that says why, instead of an unexplained trap.
+                fatalError("Browser Setu could not start its storage engine: the profile “\(wanted)”, a memory database and a scratch folder all failed to open.")
+            }
+            recovery = RecoveryState(profile: wanted, detail: detail)
         }
         privacy = PrivacyController(engine: engine, cacheDirectory: URL(fileURLWithPath: base).appendingPathComponent("privacy/lists", isDirectory: true),
                                    fetcher: listFetcher)
@@ -525,7 +568,7 @@ final class BrowserModel: ObservableObject {
 
     /// Tabs shown in the strip, sidebar and overview: current group (and privacy set on iOS), pinned first.
     var visibleTabs: [TabController] {
-        let filtered = tabs.filter { $0.workspace == activeWorkspace && $0.group == activeGroup && (!separatesPrivate || $0.isPrivate == privateMode) }
+        let filtered = tabs.filter { $0.id != panelTabID && $0.workspace == activeWorkspace && $0.group == activeGroup && (!separatesPrivate || $0.isPrivate == privateMode) }
         return filtered.filter(\.pinned) + filtered.filter { !$0.pinned }
     }
 
@@ -909,6 +952,12 @@ final class BrowserModel: ObservableObject {
     // MARK: Tabs
 
     @discardableResult
+    /// Opens Settings as a tab, or brings the one already open to the front.
+    func showSettingsTab() {
+        if let existing = tabs.first(where: \.isSettingsPage) { select(existing.id); return }
+        openTab(url: TabController.settingsURL, isPrivate: false)
+    }
+
     func openTab(url: URL?, isPrivate requestedPrivate: Bool, select makeActive: Bool = true, opener: TabController? = nil, container: String? = nil, scratch: Bool = false) -> TabController {
         let isPrivate = requestedPrivate || isGuest
         let info = core.createTab(url: "about:blank", private: isPrivate)
@@ -1000,6 +1049,7 @@ final class BrowserModel: ObservableObject {
         guard force || !lockedTabIDs.contains(id) else { notice = "That tab is locked. Unlock it to close it."; return }
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
         let wasActive = id == activeID
+        adoptChildren(ofClosing: id)
         let closing = tabs.remove(at: index)
         if !closing.isPrivate { extensionCenter.tabClosed(closing) }
         // Private and scratch tabs are never remembered; blank tabs have nothing to reopen.
@@ -1844,6 +1894,8 @@ final class BrowserModel: ObservableObject {
         ExternalApps.sites = appLinkSites
         ExternalApps.remember = { [weak self] host, answer in self?.setAppLinkSite(host, to: answer) }
         overviewStyle = OverviewStyle(rawValue: get("overview_style") ?? "") ?? .grid
+        settingsInTab = get("settings_in_tab") == "1"
+        loadExtraSettings(get)
         overviewGrouped = get("overview_grouped") == "1"
         overviewSort = OverviewSort(rawValue: get("overview_sort") ?? "") ?? .manual
         darkPages = DarkPages(rawValue: get("dark_pages") ?? "") ?? .off
@@ -2061,18 +2113,19 @@ final class BrowserModel: ObservableObject {
 
     /// Settings a backup carries. Anything else in a backup file is ignored on restore.
     static let backupSettingKeys: Set<String> = [
-        "accent", "address_bar", "appearance", "density", "keep_pinned", "layout_preset", "memory_mode", "show_favorites", "show_continue",
+        "accent", "address_bar", "address_bar_items", "appearance", "density", "keep_pinned", "layout_preset", "memory_mode", "show_favorites", "show_continue",
         "show_frequent", "show_greeting", "show_recently_closed", "sidebar_autohide", "sidebar_position", "sidebar_rail",
         "sidebar_width", "single_toolbar", "split_orientation", "start_background", "startup", "startup_workspace",
         "strip_tracking", "tab_groups", "tab_layout", "tab_previews", "tint_toolbar", "toolbar_autohide", "toolbar_items",
         "workspaces", "double_click", "collapse_on_scroll", "search_template", "search_suggestions", "speed_pill", "pill_collapsed", "site_icons", "shortcuts", "homepage", "saved_sessions", "organize_downloads", "site_notes", "search_shortcuts", "bookmark_tags", "site_styles", "phone_toolbar", "address_display", "address_icon", "search_panel_bottom", "search_panel_bottom2", "swipe_address", "app_links", "app_link_sites", "blur_private_switcher", "permission_expiry", "favorites_order", "overview_style", "overview_grouped", "overview_sort", "dark_pages", "dark_sites", "website_appearance", "site_appearance", "theme", "theme_custom", "low_power_memory", "clear_on_quit", "remember_reading", "keep_form_drafts", "site_zoom", "group_colors",
         "save_logins", "mouse_gestures", "mouse_gesture_map", "site_open_rules", "download_concurrent", "spotlight_bookmarks", "vim_on", "vim_keymap", "workflows", "download_rules", "extension_profiles", "site_delete_rules", "site_user_agents", "containers", "split_templates", "tab_tree", "block_webrtc", "webrtc_exceptions",
         "site_js_off", "never_sleep_sites", "fingerprint_noise", "fingerprint_exceptions", "de_amp", "video_ads", "user_themes", "start_tile", "block_autoplay", "autoplay_exceptions",
+        "block_popups", "popup_allowed_hosts", "youtube_rules_auto", "command_chains", "web_panels", "theme_schedule", "hidden_menu_items", "hover_previews", "hover_delay", "tab_stacks", "address_sources", "tab_tree", "sidebar_footer",
     ]
 
     /// The same, with the slow key derivation and encryption on a background thread so the window never stalls.
-    func makeBackupAsync(passphrase: String) async throws -> Data {
-        let payload = backupPayload()
+    func makeBackupAsync(passphrase: String, includePasswords: Bool = false) async throws -> Data {
+        let payload = backupPayload(includePasswords: includePasswords)
         return try await Task.detached(priority: .userInitiated) { try BackupFile.seal(payload, passphrase: passphrase) }.value
     }
 
@@ -2087,7 +2140,7 @@ final class BrowserModel: ObservableObject {
         try BackupFile.seal(backupPayload(), passphrase: passphrase, iterations: iterations)
     }
 
-    private func backupPayload() -> BackupPayload {
+    private func backupPayload(includePasswords: Bool = false) -> BackupPayload {
         let bookmarks = ((try? core.listBookmarks(query: "")) ?? []).map { BackupPayload.Bookmark(url: $0.url, title: $0.title, folder: $0.folder) }
         var settings: [String: String] = [:]
         for key in Self.backupSettingKeys.sorted() {
@@ -2095,6 +2148,7 @@ final class BrowserModel: ObservableObject {
         }
         var payload = BackupPayload(created: Date(), bookmarks: bookmarks, settings: settings)
         payload.research = research.collections.isEmpty ? nil : research.collections
+        if includePasswords { payload.passwords = WebLoginVault.list(profile: profileName) }
         return payload
     }
 
@@ -2114,6 +2168,7 @@ final class BrowserModel: ObservableObject {
             if (try? core.setSetting(key: key, value: value)) != nil { applied += 1 }
         }
         if let collections = payload.research { research.merge(collections) }
+        lastRestoredPasswords = payload.passwords.map { restorePasswords($0) } ?? 0
         loadUISettings()
         refreshBookmarkState()
         return (added, applied)
@@ -2342,6 +2397,7 @@ extension BrowserModel {
             all.append(.init(id: "search-selection-\(engine.id)", title: "Search Selected Words with \(engine.name)", subtitle: "In a new tab", symbol: "text.magnifyingglass", shortcut: "") { [self] in searchSelection(with: engine) })
         }
         #if os(macOS)
+        all.append(contentsOf: extraPaletteItems)
         for panel in SettingsPanel.allCases {
             all.append(.init(id: "settings-\(panel.rawValue)", title: "Settings: \(panel.title)", subtitle: "", symbol: panel.symbol, shortcut: "") { SettingsRouter.open(panel) })
         }

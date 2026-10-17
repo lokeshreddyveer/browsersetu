@@ -50,6 +50,13 @@ struct PhoneRootView: View {
                 TabOverview().transition(.opacity)
             }
             // A download is never silent: progress while it runs, a card when it is done.
+            if model.showSetup { SetupAssistantView().transition(.opacity).zIndex(10) }
+            VStack(spacing: 8) { PendingLoginPill(); PopupBlockedPill() }
+                .padding(.top, 58)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            NoticeToast()
+                .padding(.bottom, 150)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             DownloadToast(coordinator: model.downloads)
                 .padding(.horizontal, 12).padding(.bottom, 92)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
@@ -63,9 +70,6 @@ struct PhoneRootView: View {
         .sheet(item: $model.sheet) { SheetContainer(sheet: $0) }
         .sheet(item: $model.storeOffer) { StoreOfferSheet(info: $0) }
         .sheet(item: $model.privacySheet) { PrivacySheetView(kind: $0, privacy: model.privacy) }
-        .alert("Browser Setu", isPresented: Binding(get: { model.notice != nil }, set: { if !$0 { model.notice = nil } })) {
-            Button("OK") { model.notice = nil }
-        } message: { Text(model.notice ?? "") }
         .preferredColorScheme(model.appearance.colorScheme ?? (model.themeIsActive ? model.activeTheme.scheme?.colorScheme : nil))
         .tint(Theme.accent)
         .onChange(of: sizeClass) { _, c in if c == .regular, !isPhone { model.sidebarVisible = true } }
@@ -162,14 +166,18 @@ struct PhoneRootView: View {
         .overlay {
             if model.floatingAddressVisible, showsDock {
                 // The dock's own address pill is the field; only the dimming and what the search finds are drawn here, just above it.
-                ZStack(alignment: .bottom) {
-                    Color.black.opacity(0.28).ignoresSafeArea().contentShape(Rectangle())
-                        .onTapGesture { model.cancelSearch() }
-                        .transition(.opacity)
-                    PhoneSuggestionsCard(address: model.addressBar, anchoredTop: false)
-                        .padding(.horizontal, PhoneChrome.margin)
-                        .padding(.bottom, keyboard.height + PhoneChrome.height + 16)
-                        .frame(maxHeight: .infinity, alignment: .bottom)
+                GeometryReader { geo in
+                    let below = keyboard.height + PhoneChrome.height + 16
+                    ZStack(alignment: .bottom) {
+                        Color.black.opacity(0.28).ignoresSafeArea().contentShape(Rectangle())
+                            .onTapGesture { model.cancelSearch() }
+                            .transition(.opacity)
+                        PhoneSuggestionsCard(address: model.addressBar, anchoredTop: false, maxHeight: max(80, geo.size.height - below - geo.safeAreaInsets.top - 8))
+                            .padding(.horizontal, PhoneChrome.margin)
+                            .padding(.bottom, below)
+                            .frame(maxHeight: .infinity, alignment: .bottom)
+                    }
+                    .frame(width: geo.size.width, height: geo.size.height)
                 }
             } else if model.floatingAddressVisible, let tab = model.active {
                 ZStack(alignment: model.searchPanelAtBottom ? .bottom : .top) {
@@ -197,7 +205,7 @@ struct PhoneAddressArea: View {
             if !model.addressBar.isEditing { PhoneToolbar(tab: tab).transition(.opacity.combined(with: .move(edge: .bottom))) }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
-        .background(.bar)
+        .themedBar(fallback: .bar)
         .motion(.spring(response: 0.34, dampingFraction: 0.88), value: model.addressBar.isEditing)
     }
 }
@@ -726,12 +734,15 @@ struct PhoneSearchPanel: View {
 struct PhoneSuggestionsCard: View {
     @ObservedObject var address: AddressBarController
     var anchoredTop = false
+    /// The room there is, so a short landscape screen scrolls the list instead of pushing it off the top.
+    var maxHeight: CGFloat = .infinity
 
     var body: some View {
         if address.isEditing && !address.suggestions.isEmpty {
             ScrollView { SuggestionsList(address: address, embedded: true) }
                 .scrollIndicators(.hidden)
                 .modifier(GlassBackground(shape: RoundedRectangle(cornerRadius: 22, style: .continuous)))
+                .frame(maxHeight: maxHeight)
                 .fixedSize(horizontal: false, vertical: true)
                 .layoutPriority(-1)
                 .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: anchoredTop ? .top : .bottom)))
@@ -756,12 +767,12 @@ struct PhoneSearchField: View {
                     .accessibilityIdentifier("omnibox")
             }
             .padding(.horizontal, 12).frame(height: 38)
-            .background(.regularMaterial, in: Capsule())
+            .themedFill(in: Capsule(), fallback: .regularMaterial)
             .hairline(Capsule(), opacity: 0.08, width: 0.5)
             Button { model.cancelSearch() } label: {
                 Text("Cancel").scaledFont(15, weight: .medium).foregroundStyle(Color.primary.opacity(0.85))
                     .padding(.horizontal, 14).frame(height: 38)
-                    .background(.regularMaterial, in: Capsule())
+                    .themedFill(in: Capsule(), fallback: .regularMaterial)
                     .hairline(Capsule(), opacity: 0.08, width: 0.5)
             }
             .buttonStyle(.plain)

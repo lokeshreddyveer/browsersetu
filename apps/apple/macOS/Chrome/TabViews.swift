@@ -10,7 +10,9 @@ struct TabFavicon: View {
 
     var body: some View {
         ZStack {
-            if tab.isLoading {
+            if tab.isSettingsPage {
+                Image(systemName: "gearshape.fill").font(.system(size: size * 0.8)).foregroundStyle(Theme.accent)
+            } else if tab.isLoading {
                 ProgressView().controlSize(.mini).scaleEffect(0.8)
             } else if tab.isPrivate {
                 Image(systemName: "eye.slash.fill").font(.system(size: size * 0.7)).foregroundStyle(Theme.privateAccent)
@@ -22,6 +24,22 @@ struct TabFavicon: View {
         }
         .frame(width: size, height: size)
         .accessibilityHidden(true)
+    }
+}
+
+/// The picture that follows the pointer while a tab is dragged: the site mark and name on a glass card with an accent edge.
+struct TabDragCard: View {
+    @ObservedObject var tab: TabController
+    var body: some View {
+        HStack(spacing: 8) {
+            SiteTile(url: tab.url?.absoluteString ?? "", title: tab.title, size: 20)
+            Text(tab.displayTitle).font(.system(size: 13, weight: .medium)).lineLimit(1).frame(maxWidth: 180, alignment: .leading)
+        }
+        .padding(.horizontal, 12).frame(height: 36)
+        .themedFill(in: Capsule(), fallback: .regularMaterial)
+        .overlay(Capsule().strokeBorder(Theme.accent.opacity(0.9), lineWidth: 1.5))
+        .shadow(color: Theme.accent.opacity(0.35), radius: 10, y: 4)
+        .padding(10)
     }
 }
 
@@ -75,10 +93,25 @@ private extension View {
 private struct TabInteractions: ViewModifier {
     @EnvironmentObject var model: BrowserModel
     @ObservedObject var tab: TabController
+    @State private var dropTargeted = false
+    @State private var hoverTask: Task<Void, Never>?
+    @State private var showPreview = false
     func body(content: Content) -> some View {
         content
             .contentShape(Rectangle())
-            .onTapGesture { model.select(tab.id) }
+            // Resting the pointer on a tab shows a preview card after a short delay; moving away or pressing hides it.
+            .onHover { inside in
+                hoverTask?.cancel()
+                guard inside, model.hoverPreviews, !tab.isSettingsPage else { showPreview = false; return }
+                hoverTask = Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(Int(model.hoverDelay * 1000)))
+                    if !Task.isCancelled { showPreview = true }
+                }
+            }
+            .popover(isPresented: $showPreview, arrowEdge: model.effectiveTabLayout == .sidebar ? (model.sidebarPosition == .left ? .trailing : .leading) : .bottom) {
+                TabPreviewCard(tab: tab).allowsHitTesting(false)
+            }
+            .onTapGesture { showPreview = false; model.select(tab.id) }
             .focusable()
             .focusEffectDisabled()
             .onKeyPress(.return) { model.select(tab.id); return .handled }
@@ -88,10 +121,26 @@ private struct TabInteractions: ViewModifier {
             .contextMenu { TabMenuItems(tab: tab) }
             // A middle click closes the tab, as in the sidebar.
             .overlay(MiddleClickCatcher { if !tab.isLocked { model.closeTab(id: tab.id) } })
-            .draggable(String(tab.id))
+            // What you carry is a small card of its own: the site's mark, its name and a glow in the accent colour.
+            .draggable(String(tab.id)) { TabDragCard(tab: tab) }
+            // The tab it will land in front of lifts and lights up in the accent colour.
+            .overlay {
+                RoundedRectangle(cornerRadius: Radius.tab, style: .continuous)
+                    .strokeBorder(Theme.accent, lineWidth: 1.5)
+                    .background(RoundedRectangle(cornerRadius: Radius.tab, style: .continuous).fill(Theme.accent.opacity(0.14)))
+                    .opacity(dropTargeted ? 1 : 0).allowsHitTesting(false)
+            }
+            .scaleEffect(dropTargeted ? 1.03 : 1)
+            .motion(.spring(response: 0.25, dampingFraction: 0.75), value: dropTargeted)
             .dropDestination(for: String.self) { items, _ in
                 guard let raw = items.first, let dragged = UInt64(raw), dragged != tab.id else { return false }
                 return model.acceptDroppedTab(dragged, before: tab.id)
+            } isTargeted: { dropTargeted = $0 }
+            // A link or address dropped on a tab opens in a new tab beside it.
+            .dropDestination(for: URL.self) { urls, _ in
+                guard let url = urls.first, url.scheme == "http" || url.scheme == "https" else { return false }
+                model.openTab(url: url, isPrivate: tab.isPrivate)
+                return true
             }
             .accessibilityElement(children: .combine)
             .accessibilityLabel(tab.displayTitle)
@@ -264,6 +313,59 @@ struct CompactTabStrip: View {
 
 // MARK: - Vertical rows (sidebar)
 
+/// The small arrow on a tab that has tabs opened from it: it folds and unfolds that branch of the tree.
+struct TreeFoldButton: View {
+    @EnvironmentObject var model: BrowserModel
+    @ObservedObject var tab: TabController
+    var body: some View {
+        if model.hasTreeChildren(tab) {
+            let folded = model.collapsedTreeTabs.contains(tab.id)
+            Button { animated(.easeOut(duration: 0.18)) { model.toggleTreeBranch(tab) } } label: {
+                Image(systemName: "chevron.right").font(.system(size: 9, weight: .bold)).foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(folded ? 0 : 90)).frame(width: 12, height: 18).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).accessibilityLabel(folded ? "Show tabs opened from this one" : "Hide tabs opened from this one")
+        }
+    }
+}
+
+/// The count on the first tab of a stack of one website's tabs; it folds and unfolds the stack.
+struct StackBadge: View {
+    @EnvironmentObject var model: BrowserModel
+    @ObservedObject var tab: TabController
+    var body: some View {
+        if let head = model.stackHead(tab) {
+            Button { animated(.easeOut(duration: 0.18)) { model.toggleStack(head.key) } } label: {
+                HStack(spacing: 3) {
+                    Text("\(head.count)").font(.system(size: 10, weight: .semibold)).monospacedDigit()
+                    Image(systemName: "chevron.right").font(.system(size: 7, weight: .bold)).rotationEffect(.degrees(head.folded ? 0 : 90))
+                }
+                .padding(.horizontal, 6).frame(height: 16)
+                .background(Capsule().fill(Theme.accent.opacity(0.2))).foregroundStyle(Theme.accent)
+            }
+            .buttonStyle(.plain).help(head.folded ? "Show the \(head.count) tabs from this site" : "Fold the \(head.count) tabs from this site")
+            .accessibilityLabel(head.folded ? "Show stacked tabs" : "Fold stacked tabs")
+        }
+    }
+}
+
+/// The card that appears when the pointer rests on a tab.
+struct TabPreviewCard: View {
+    @ObservedObject var tab: TabController
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let data = tab.snapshot, let image = Image(platformData: data) {
+                Color.clear.frame(width: 240, height: 140)
+                    .overlay(alignment: .top) { image.resizable().scaledToFill() }
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+            Text(tab.displayTitle).font(.system(size: 12, weight: .semibold)).lineLimit(2).frame(width: 240, alignment: .leading)
+            Text(tab.url?.host ?? "").font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+        }
+        .padding(10)
+    }
+}
+
 struct VerticalTabRow: View {
     @EnvironmentObject var model: BrowserModel
     @ObservedObject var tab: TabController
@@ -272,11 +374,15 @@ struct VerticalTabRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
+            // A tab opened from another sits one step in from it when the tab tree is on, with a fold arrow where it has tabs under it.
+            if model.tabTree { Color.clear.frame(width: CGFloat(model.treeDepth(of: tab)) * 14, height: 1) }
+            TreeFoldButton(tab: tab)
             TabFavicon(tab: tab)
             Text(tab.displayTitle)
                 .font(.system(size: 13, weight: selected ? .medium : .regular))
                 .foregroundStyle(selected ? Color.primary : Color.primary.opacity(0.68))
                 .lineLimit(1).truncationMode(.tail)
+            StackBadge(tab: tab)
             Spacer(minLength: 0)
             if tab.isLocked { Image(systemName: "lock.fill").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary).help("Locked") }
             else if hovering || selected { TabCloseButton { model.closeTab(id: tab.id) } }

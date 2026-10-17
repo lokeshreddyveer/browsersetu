@@ -492,7 +492,7 @@ struct VerticalTabsList: View {
                     .padding(.bottom, 2)
                 }
                 if !model.groupNames.isEmpty { groups }
-                ForEach(regular) { VerticalTabRow(tab: $0, selected: $0.id == model.activeID) }
+                ForEach(model.stackedVisible(model.treeVisible(regular))) { VerticalTabRow(tab: $0, selected: $0.id == model.activeID) }
                 Button { model.newTab() } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "plus").font(.system(size: 11, weight: .medium)).frame(width: 16)
@@ -672,6 +672,7 @@ private struct SidebarDownloadsList: View {
 /// above, never down here.
 struct SidebarFooter: View {
     @EnvironmentObject var model: BrowserModel
+    @State private var arranging = false
 
     var body: some View {
         VStack(spacing: 4) {
@@ -680,31 +681,158 @@ struct SidebarFooter: View {
                 SidebarExtensionList(center: model.extensionCenter)
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
-            utilities
+            if !model.webPanels.isEmpty {
+                HStack(spacing: 6) {
+                    ForEach(model.webPanels) { panel in
+                        Button { model.toggleWebPanel(panel.id) } label: {
+                            SiteTile(url: panel.url, title: panel.name, size: 22)
+                                .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Theme.accent, lineWidth: model.openPanelID == panel.id ? 2 : 0).padding(-2))
+                        }
+                        .buttonStyle(.plain).help("Web panel: \(panel.name)").accessibilityLabel("Web panel \(panel.name)")
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 10).padding(.top, 2)
+            }
+            if arranging { editor } else { utilities }
+        }
+        .motion(.easeOut(duration: 0.22), value: arranging)
+    }
+
+    /// Which of the chosen buttons apply right now (the star needs a page, the extensions button needs an extension).
+    private var applicable: [SidebarFooterItem] {
+        model.sidebarFooter.filter { item in
+            switch item {
+            case .bookmarkThis: model.singleToolbar
+            case .extensions: model.extensionCenter.hasExtensions
+            default: true
+            }
         }
     }
 
+    /// Up to seven buttons sit in the row; any more are under a "…" button at its end, so the row never gets too cramped.
     private var utilities: some View {
-        HStack(spacing: 0) {
-            FooterItem(symbol: "clock", label: "History", identifier: "history-button") { model.sheet = .history }
-            FooterItem(symbol: "arrow.down.circle", label: "Downloads", identifier: "downloads-button",
-                       tint: model.sidebarShowsDownloads ? Theme.accent : nil) {
-                model.tabSearchVisible = false
-                model.sidebarShowsDownloads.toggle()
+        let items = applicable
+        let shown = items.count > 7 ? Array(items.prefix(6)) : items
+        let rest = items.count > 7 ? Array(items.dropFirst(6)) : []
+        return HStack(spacing: 0) {
+            ForEach(shown) { item in
+                button(for: item)
+                    // Drag a button onto another to put it before that one, right here.
+                    .draggable("footer:\(item.rawValue)")
+                    .dropDestination(for: String.self) { payload, _ in
+                        guard let raw = payload.first, raw.hasPrefix("footer:"), let dragged = SidebarFooterItem(rawValue: String(raw.dropFirst(7))), dragged != item,
+                              var list = Optional(model.sidebarFooter), let target = list.firstIndex(of: item) else { return false }
+                        animated(.easeOut(duration: 0.2)) {
+                            list.removeAll { $0 == dragged }
+                            list.insert(dragged, at: min(target, list.count))
+                            model.sidebarFooter = list
+                        }
+                        return true
+                    }
             }
-            FooterItem(symbol: "bookmark", label: "Bookmarks", identifier: "bookmarks-button") { model.sheet = .bookmarks }
-            if model.singleToolbar {
-                FooterItem(symbol: model.activeBookmarked ? "star.fill" : "star", label: "Save", identifier: "bookmark-button",
-                           tint: model.activeBookmarked ? .yellow : nil) { model.toggleBookmark() }
-                    .disabled(model.active?.isBlank ?? true)
+            if !rest.isEmpty {
+                Menu {
+                    ForEach(rest) { item in Button { perform(item) } label: { Label(item.title, systemImage: item.symbol) } }
+                } label: { FooterItemLabel(symbol: "ellipsis.circle", label: "More", tint: nil) }
+                    .menuStyle(.button).menuIndicator(.hidden).buttonStyle(.plain).frame(maxWidth: .infinity)
+                    .accessibilityLabel("More buttons")
             }
-            if model.extensionCenter.hasExtensions {
-                FooterItem(symbol: "puzzlepiece.extension", label: "Extensions", identifier: "extensions-menu",
-                           tint: model.sidebarShowsExtensions ? Theme.accent : nil) {
-                    withAnimation(.easeOut(duration: 0.2)) { model.sidebarShowsExtensions.toggle() }
-                }
+        }
+        .contentShape(Rectangle())
+        .contextMenu { footerMenu }
+        .padding(.horizontal, 6).padding(.vertical, 4)
+    }
+
+    // MARK: Customize mode: the row itself becomes editable, with the other buttons in a tray above it, as in Zen and Firefox.
+
+    private var available: [SidebarFooterItem] { SidebarFooterItem.allCases.filter { !model.sidebarFooter.contains($0) } }
+
+    private func editTile(_ item: SidebarFooterItem, inRow: Bool) -> some View {
+        ZStack(alignment: .topTrailing) {
+            Image(systemName: item.symbol).font(.system(size: 14, weight: .regular)).foregroundStyle(inRow ? Theme.accent : Color.secondary)
+                .frame(width: 34, height: 32)
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(inRow ? 0.10 : 0.06)))
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(inRow ? Theme.accent.opacity(0.5) : Color.primary.opacity(0.1), style: StrokeStyle(lineWidth: 1, dash: inRow ? [3, 3] : [])))
+            Button {
+                animated(.easeOut(duration: 0.2)) { if inRow { model.sidebarFooter.removeAll { $0 == item } } else { model.sidebarFooter.append(item) } }
+            } label: {
+                Image(systemName: inRow ? "xmark" : "plus").font(.system(size: 7, weight: .bold)).foregroundStyle(.white)
+                    .frame(width: 14, height: 14).background(Circle().fill(inRow ? Color.red.opacity(0.85) : Theme.accent))
             }
-            FooterItem(symbol: "gearshape", label: "Settings", identifier: "settings-button") { SettingsRouter.open() }
+            .buttonStyle(.plain).offset(x: 4, y: -4)
+            .accessibilityLabel(inRow ? "Remove \(item.title)" : "Add \(item.title)")
+        }
+        .help(item.title)
+        .draggable("footer:\(item.rawValue)") {
+            Image(systemName: item.symbol).font(.system(size: 14)).frame(width: 36, height: 34)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Theme.accent, lineWidth: 1.5))
+        }
+        .dropDestination(for: String.self) { payload, _ in
+            guard inRow, let dragged = footerItem(from: payload.first) else { return false }
+            place(dragged, before: item)
+            return true
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(item.title)
+    }
+
+    private func footerItem(from payload: String?) -> SidebarFooterItem? {
+        guard let payload, payload.hasPrefix("footer:") else { return nil }
+        return SidebarFooterItem(rawValue: String(payload.dropFirst(7)))
+    }
+
+    private func place(_ dragged: SidebarFooterItem, before target: SidebarFooterItem?) {
+        animated(.easeOut(duration: 0.2)) {
+            var list = model.sidebarFooter
+            list.removeAll { $0 == dragged }
+            if let target, let index = list.firstIndex(of: target) { list.insert(dragged, at: index) } else { list.append(dragged) }
+            model.sidebarFooter = list
+        }
+    }
+
+    private var editor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Customize buttons").font(.system(size: 12, weight: .semibold))
+                Spacer()
+                Button("Reset") { animated(.easeOut(duration: 0.2)) { model.sidebarFooter = SidebarFooterItem.defaults } }
+                    .buttonStyle(.plain).font(.system(size: 11.5)).foregroundStyle(.secondary).disabled(model.sidebarFooter == SidebarFooterItem.defaults)
+                Button("Done") { animated(.easeOut(duration: 0.22)) { arranging = false } }
+                    .buttonStyle(.plain).font(.system(size: 11.5, weight: .semibold)).foregroundStyle(Theme.accent).keyboardShortcut(.defaultAction)
+            }
+            Text("Drag a button into the row, along it to reorder, or out to take it away.").font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            // What can be added; dropping a button here takes it out of the row.
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 38), spacing: 6)], alignment: .leading, spacing: 8) {
+                ForEach(available) { item in editTile(item, inRow: false) }
+            }
+            .padding(8).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.primary.opacity(0.04)))
+            .dropDestination(for: String.self) { payload, _ in
+                guard let dragged = footerItem(from: payload.first) else { return false }
+                animated(.easeOut(duration: 0.2)) { model.sidebarFooter.removeAll { $0 == dragged } }
+                return true
+            }
+            // The row itself: what is in the sidebar now.
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 38), spacing: 6)], alignment: .leading, spacing: 8) {
+                ForEach(model.sidebarFooter) { item in editTile(item, inRow: true) }
+            }
+            .padding(8).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Theme.accent.opacity(0.08)))
+            .dropDestination(for: String.self) { payload, _ in
+                guard let dragged = footerItem(from: payload.first) else { return false }
+                place(dragged, before: nil)
+                return true
+            }
+        }
+        .padding(.horizontal, 10).padding(.vertical, 8)
+        .transition(.opacity.combined(with: .move(edge: .bottom)))
+    }
+
+    @ViewBuilder private func button(for item: SidebarFooterItem) -> some View {
+        switch item {
+        case .profile:
             Menu {
                 Picker("Profile", selection: Binding(get: { model.profileName }, set: { model.switchProfile($0) })) {
                     ForEach(model.profiles, id: \.self) { Text($0).tag($0) }
@@ -716,8 +844,62 @@ struct SidebarFooter: View {
                 .help("Profile: \(model.profileName)")
                 .accessibilityLabel("Profile \(model.profileName)")
                 .accessibilityIdentifier("profile-button")
+        case .bookmarkThis:
+            FooterItem(symbol: model.activeBookmarked ? "star.fill" : "star", label: "Save", identifier: "bookmark-button",
+                       tint: model.activeBookmarked ? .yellow : nil) { perform(item) }
+                .disabled(model.active?.isBlank ?? true)
+        case .downloads:
+            FooterItem(symbol: item.symbol, label: item.title, identifier: "downloads-button", tint: model.sidebarShowsDownloads ? Theme.accent : nil) { perform(item) }
+        case .extensions:
+            FooterItem(symbol: item.symbol, label: item.title, identifier: "extensions-menu", tint: model.sidebarShowsExtensions ? Theme.accent : nil) { perform(item) }
+        case .breakMode:
+            FooterItem(symbol: model.breakActive ? "pause.circle.fill" : item.symbol, label: model.breakActive ? "End Break" : item.title, identifier: "break-button",
+                       tint: model.breakActive ? Theme.accent : nil) { perform(item) }
+        default:
+            FooterItem(symbol: item.symbol, label: item.title, identifier: "footer-\(item.rawValue)") { perform(item) }
         }
-        .padding(.horizontal, 6).padding(.vertical, 4)
+    }
+
+    private func perform(_ item: SidebarFooterItem) {
+        switch item {
+        case .history: model.sheet = .history
+        case .downloads:
+            model.tabSearchVisible = false
+            model.sidebarShowsDownloads.toggle()
+        case .bookmarks: model.sheet = .bookmarks
+        case .bookmarkThis: model.toggleBookmark()
+        case .readingList: model.sheet = .readingList
+        case .extensions: withAnimation(.easeOut(duration: 0.2)) { model.sidebarShowsExtensions.toggle() }
+        case .newTab: model.newTab()
+        case .privateTab: model.openTab(url: nil, isPrivate: true)
+        case .tabOverview: model.showOverview()
+        case .find: model.showFind()
+        case .palette: model.paletteVisible = true
+        case .breakMode: model.toggleBreakMode()
+        case .splitView: if model.splitTabID == nil { model.openSplitNewTab() } else { model.closeSplit() }
+        case .timeline: model.sheet = .timeline
+        case .sessions: model.sheet = .sessions
+        case .dashboard: model.sheet = .dashboard
+        case .settings: SettingsRouter.open()
+        case .profile: break
+        }
+    }
+
+    /// Right-click the row: tick the buttons to show.
+    @ViewBuilder private var footerMenu: some View {
+        ForEach(SidebarFooterItem.allCases) { item in
+            Button {
+                animated(.easeOut(duration: 0.2)) {
+                    if model.sidebarFooter.contains(item) { model.sidebarFooter.removeAll { $0 == item } }
+                    else { model.sidebarFooter.append(item) }
+                }
+            } label: {
+                if model.sidebarFooter.contains(item) { Label(item.title, systemImage: "checkmark") } else { Label(item.title, systemImage: item.symbol) }
+            }
+        }
+        Divider()
+        Button("Reset to Default") { animated(.easeOut(duration: 0.2)) { model.sidebarFooter = SidebarFooterItem.defaults } }
+        Button("Customize Buttons…") { animated(.easeOut(duration: 0.22)) { arranging = true } }
     }
 }
 
@@ -976,6 +1158,11 @@ struct PeekSidebar: View {
         // Floats over the page as a rounded card.
         SidebarContent(topInset: topInset)
         .frame(width: width)
+        // Right-click works here as in the pinned sidebar, and the sidebar stays out while its menu is open.
+        .contentShape(Rectangle())
+        .contextMenu { SidebarContextMenu() }
+        .onReceive(NotificationCenter.default.publisher(for: NSMenu.didBeginTrackingNotification)) { _ in peek.menu(true) }
+        .onReceive(NotificationCenter.default.publisher(for: NSMenu.didEndTrackingNotification)) { _ in peek.menu(false) }
         // The same surface as the Sidebar layout's pinned sidebar, so the two look exactly alike.
         .background(WindowBackdrop())
         .clipShape(RoundedRectangle(cornerRadius: Radius.floating, style: .continuous))

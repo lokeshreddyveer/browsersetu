@@ -64,7 +64,7 @@ struct SurfaceBackground: ViewModifier {
         if reduceTransparency {
             content.background(Color.platformBackground, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
         } else {
-            content.background(.regularMaterial, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+            content.themedFill(in: RoundedRectangle(cornerRadius: radius, style: .continuous), fallback: .regularMaterial)
         }
     }
 }
