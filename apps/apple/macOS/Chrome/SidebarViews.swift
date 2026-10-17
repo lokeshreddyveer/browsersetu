@@ -606,6 +606,7 @@ private struct SidebarDownloadsList: View {
             .padding(.horizontal, 8).padding(.vertical, 4)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
+                    SidebarDownloadQueue(coordinator: coordinator)
                     ForEach(Array(coordinator.active.values)) { d in
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
@@ -987,5 +988,51 @@ struct PeekSidebar: View {
         .padding(model.sidebarPosition == .left ? .leading : .trailing, 2)
         // The sidebar slides in and out; it does not fade.
         .transition(.move(edge: model.sidebarPosition == .left ? .leading : .trailing))
+    }
+}
+
+
+/// The queue controls, in the sidebar's compact style.
+struct SidebarDownloadQueue: View {
+    @ObservedObject var coordinator: DownloadCoordinator
+    private var held: Bool { DownloadSchedule.isHeld(until: coordinator.heldUntil) }
+    private var hasWork: Bool { !coordinator.active.isEmpty || !coordinator.waiting.isEmpty || !coordinator.interrupted.isEmpty || !coordinator.scheduled.isEmpty }
+
+    var body: some View {
+        if hasWork || held {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 10) {
+                    if held { Button("Resume All") { coordinator.resumeAll() } } else { Button("Pause All") { coordinator.pauseAll() } }
+                    Menu("Hold Until") {
+                        Button("In an hour") { coordinator.holdQueue(until: Date().addingTimeInterval(3600)) }
+                        Button("2:00 at night") { if let t = DownloadSchedule.nextOccurrence(hour: 2, minute: 0) { coordinator.holdQueue(until: t) } }
+                        Button("7:00 in the morning") { if let t = DownloadSchedule.nextOccurrence(hour: 7, minute: 0) { coordinator.holdQueue(until: t) } }
+                        Divider()
+                        Button("Until I resume") { coordinator.holdQueue(until: .distantFuture) }
+                    }.menuStyle(.borderlessButton).fixedSize()
+                    Spacer(minLength: 0)
+                }
+                .buttonStyle(.borderless).font(.system(size: 12))
+                if held { Text(coordinator.heldUntil == .distantFuture ? "Held until you resume" : "Held until \(coordinator.heldUntil.map { $0.formatted(date: .omitted, time: .shortened) } ?? "")").font(.system(size: 11)).foregroundStyle(.secondary) }
+                ForEach(coordinator.waiting) { item in
+                    HStack(spacing: 6) {
+                        Image(systemName: "hourglass").font(.system(size: 12)).foregroundStyle(.secondary).frame(width: 18)
+                        Text(item.filename).font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
+                        Spacer(minLength: 0)
+                        Menu(item.priority.title) { ForEach(DownloadPriority.allCases.reversed()) { p in Button(p.title) { coordinator.setPriority(item.id, p) } } }.menuStyle(.borderlessButton).fixedSize()
+                        Button { coordinator.cancelWaiting(item.id) } label: { Image(systemName: "xmark") }.buttonStyle(.borderless)
+                    }
+                }
+                ForEach(coordinator.scheduled) { item in
+                    HStack(spacing: 6) {
+                        Image(systemName: "clock").font(.system(size: 12)).foregroundStyle(.secondary).frame(width: 18)
+                        Text(item.filename).font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
+                        Spacer(minLength: 0)
+                        Button { coordinator.removeScheduled(item.id) } label: { Image(systemName: "xmark") }.buttonStyle(.borderless)
+                    }
+                }
+            }
+            .padding(.horizontal, 12).padding(.vertical, 6)
+        }
     }
 }

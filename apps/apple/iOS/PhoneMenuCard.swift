@@ -15,6 +15,21 @@ struct PhoneMenuContent: View {
     private var blockerOn: Bool { !model.privacy.configuration.isException(host: host) }
     private var extras: [PhoneAction] { model.phoneLayout.more.filter { !Self.fixed.contains($0) } }
 
+    /// The extensions that have a toolbar button, each runs when chosen; Manage opens their settings. Nothing is shown when none is installed.
+    @ViewBuilder private var extensionsMenu: some View {
+        let center = model.extensionCenter
+        if center.isSupported, !center.extensions.isEmpty {
+            Menu {
+                ForEach(center.actions) { item in
+                    Button { center.perform(actionFor: item.id) } label: { Label(item.label.isEmpty ? (center.extensions.first { $0.id == item.id }?.name ?? "Extension") : item.label, systemImage: "puzzlepiece.extension") }
+                        .disabled(!item.enabled || tab.isBlank)
+                }
+                Divider()
+                Button { model.sheet = .settings } label: { Label("Manage Extensions…", systemImage: "gearshape") }
+            } label: { Label("Extensions", systemImage: "puzzlepiece.extension") }
+        }
+    }
+
     var body: some View {
         ControlGroup {
             Button { model.sheet = .history } label: { Label("History", systemImage: "clock") }
@@ -34,6 +49,7 @@ struct PhoneMenuContent: View {
                 textSizeMenu
             }
             moreMenu
+            extensionsMenu
             Button { model.sheet = .settings } label: { Label("Settings", systemImage: "gearshape") }
         }
         Section {

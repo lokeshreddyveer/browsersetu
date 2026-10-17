@@ -29,6 +29,11 @@ final class WebKitEngine: BrowserEngine {
             guard let self, let view = self.tabs.allObjects.first?.hostView as? WKWebView else { return }
             self.downloadDelegate.resume(data, in: view)
         }
+        // Starts a download again from its address (a scheduled one, or a retry with nothing to resume), using any open page's web view and its cookies.
+        downloads.starter = { [weak self] url in
+            guard let self, let view = self.tabs.allObjects.first?.hostView as? WKWebView else { return }
+            self.downloadDelegate.start(url, in: view)
+        }
     }
 
     func prepare() async {}
@@ -1144,7 +1149,10 @@ final class WebKitDownloads: NSObject, WKDownloadDelegate {
 
     nonisolated func download(_ download: WKDownload, decideDestinationUsing response: URLResponse,
                               suggestedFilename: String) async -> URL? {
-        await MainActor.run {
+        // Waits for a free place (or is put off until later, or cancelled while waiting); WebKit fetches nothing until a destination is chosen.
+        let source = download.originalRequest?.url
+        guard await coordinator.admit(filename: suggestedFilename, source: source) else { download.cancel { _ in }; return nil }
+        return await MainActor.run {
             let started = coordinator.begin(suggestedName: suggestedFilename, sourceHost: download.originalRequest?.url?.host, cancel: { download.cancel { _ in } }, suspend: { done in download.cancel { data in done(data) } })
             let key = ObjectIdentifier(download)
             ids[key] = started.id
@@ -1159,7 +1167,7 @@ final class WebKitDownloads: NSObject, WKDownloadDelegate {
     nonisolated func downloadDidFinish(_ download: WKDownload) {
         Task { @MainActor in
             let key = ObjectIdentifier(download)
-            if let id = ids[key] { coordinator.finish(id, source: download.originalRequest?.url) }
+            if let id = ids[key] { coordinator.finish(id, source: download.originalRequest?.url); coordinator.downloadSucceeded(source: download.originalRequest?.url) }
             forget(key)
         }
     }
@@ -1169,11 +1177,18 @@ final class WebKitDownloads: NSObject, WKDownloadDelegate {
             let key = ObjectIdentifier(download)
             if let id = ids[key] {
                 // With resume data (and a server that allows it) the download can carry on; otherwise it is dropped as before.
-                if let resumeData, !resumeData.isEmpty { coordinator.interrupt(id, resumeData: resumeData, source: download.originalRequest?.url) }
+                let source = download.originalRequest?.url
+                if let resumeData, !resumeData.isEmpty { coordinator.interrupt(id, resumeData: resumeData, source: source) }
                 else { coordinator.discard(id) }
+                // A failure that a retry can fix (the connection dropped, say) is tried again a little later, a few times.
+                coordinator.planRetry(for: source, error: error, resumeData: resumeData, id: id)
             }
             forget(key)
         }
+    }
+
+    func start(_ url: URL, in webView: WKWebView) {
+        webView.startDownload(using: URLRequest(url: url)) { [weak self] download in download.delegate = self }
     }
 
     /// Carries on a stopped download from its resume data, using any open page's web view.

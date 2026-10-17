@@ -17,7 +17,13 @@ struct ActiveDownload: Identifiable {
 /// Engine-neutral download bookkeeping. Engines report events; this decides where files go.
 @MainActor
 final class DownloadCoordinator: ObservableObject {
-    @Published private(set) var active: [UUID: ActiveDownload] = [:]
+    @Published private(set) var active: [UUID: ActiveDownload] = [:] {
+        didSet {
+            #if os(iOS)
+            if oldValue.isEmpty != active.isEmpty { DownloadBackgroundTask.shared.coordinator = self; DownloadBackgroundTask.shared.update(hasActive: !active.isEmpty) }
+            #endif
+        }
+    }
     @Published private(set) var completed: [URL] = []
     @Published private(set) var interrupted: [UUID: InterruptedDownload] = [:]
     /// Set by the engine: starts a download again from its resume data.
@@ -28,13 +34,131 @@ final class DownloadCoordinator: ObservableObject {
     var rules: [DownloadRule] = []
     var onFinished: ((_ source: URL?, _ filename: String) -> Void)?
 
+    // MARK: The queue
+
+    @Published private(set) var waiting: [QueuedDownload] = []
+    @Published private(set) var scheduled: [ScheduledDownload] = []
+    /// While set and in the future, new downloads are not started: they are remembered by address and started at that time.
+    @Published private(set) var heldUntil: Date?
+    /// How many may run at the same time; the rest wait their turn.
+    var maxConcurrent = DownloadQueueRules.defaultConcurrent { didSet { pump() } }
+    /// Starts a download again from its address (the engine sets this). Used for scheduled downloads and for retries that have no resume data.
+    var starter: ((URL) -> Void)?
+    private var tickets: [UUID: CheckedContinuation<Bool, Never>] = [:]
+    private var reserved = 0
+    private var attempts: [String: Int] = [:]
+    private var scheduleTimer: Timer?
+
+    /// Called before a download's destination is chosen. Returns when it may start (true), or false when it has been put off (held for later) or cancelled while waiting.
+    func admit(filename: String, source: URL?) async -> Bool {
+        if DownloadSchedule.isHeld(until: heldUntil), DownloadSchedule.canSchedule(source), let source {
+            scheduled.append(ScheduledDownload(url: source.absoluteString, filename: Self.safeName(filename), priority: .normal))
+            persistScheduled()
+            return false
+        }
+        let freeNow = DownloadQueueRules.freeSlots(limit: maxConcurrent, running: active.count, reserved: reserved)
+        if freeNow > 0, waiting.isEmpty { reserved += 1; return true }
+        let item = QueuedDownload(id: UUID(), filename: Self.safeName(filename), priority: .normal, enqueued: Date(), source: source)
+        waiting.append(item)
+        return await withCheckedContinuation { tickets[item.id] = $0 }
+    }
+
+    /// The destination was chosen (or the download ended before that): the place held for it is no longer "reserved".
+    private func settleReservation() { reserved = max(0, reserved - 1) }
+
+    private func pump() {
+        while let next = DownloadQueueRules.next(from: waiting),
+              DownloadQueueRules.freeSlots(limit: maxConcurrent, running: active.count, reserved: reserved) > 0 {
+            waiting.removeAll { $0.id == next.id }
+            reserved += 1
+            tickets.removeValue(forKey: next.id)?.resume(returning: true)
+        }
+    }
+
+    func setPriority(_ id: UUID, _ priority: DownloadPriority) {
+        guard let i = waiting.firstIndex(where: { $0.id == id }) else { return }
+        waiting[i].priority = priority
+        pump()
+    }
+
+    /// Gives up on a download that has not started.
+    func cancelWaiting(_ id: UUID) {
+        waiting.removeAll { $0.id == id }
+        tickets.removeValue(forKey: id)?.resume(returning: false)
+    }
+
+    // MARK: Pause, resume, schedule
+
+    /// Stops every running download where it is (each keeps its place on disk) and holds the ones that are waiting.
+    func pauseAll(then done: @escaping () -> Void = {}) {
+        suspendAll { [weak self] in self?.holdQueue(until: .distantFuture); done() }
+    }
+
+    func resumeAll() {
+        holdQueue(until: nil)
+        for id in Array(interrupted.keys) { resume(id) }
+        startScheduledNow()
+    }
+
+    /// Nothing new starts until this time; what arrives meanwhile is started then. nil lifts the hold.
+    func holdQueue(until date: Date?) {
+        heldUntil = date
+        scheduleTimer?.invalidate(); scheduleTimer = nil
+        guard let date else { pump(); return }
+        if date != .distantFuture {
+            scheduleTimer = Timer.scheduledTimer(withTimeInterval: max(1, date.timeIntervalSinceNow), repeats: false) { [weak self] _ in Task { @MainActor in self?.resumeAll() } }
+        }
+    }
+
+    /// Starts everything that was put off, in priority order.
+    func startScheduledNow() {
+        let list = scheduled.sorted { $0.priority > $1.priority }
+        scheduled = []
+        persistScheduled()
+        for item in list { if let url = URL(string: item.url), DownloadSchedule.canSchedule(url) { starter?(url) } }
+    }
+
+    func removeScheduled(_ id: UUID) { scheduled.removeAll { $0.id == id }; persistScheduled() }
+
+    private var scheduledURL: URL? { store?.appendingPathComponent("scheduled.json") }
+    private func persistScheduled() {
+        guard let store, let scheduledURL else { return }
+        try? FileManager.default.createDirectory(at: store, withIntermediateDirectories: true)
+        if let data = try? JSONEncoder().encode(scheduled) { try? data.write(to: scheduledURL, options: .atomic) }
+    }
+    func restoreScheduled() {
+        guard let scheduledURL, let data = try? Data(contentsOf: scheduledURL), let list = try? JSONDecoder().decode([ScheduledDownload].self, from: data) else { return }
+        scheduled = Array(list.filter { DownloadSchedule.canSchedule(URL(string: $0.url)) }.prefix(200))
+    }
+
+    // MARK: Retry
+
+    /// A download failed. If a retry can help and it has not been tried too often, it is started again after a short wait; returns whether one was planned.
+    @discardableResult
+    func planRetry(for source: URL?, error: Error, resumeData: Data?, id: UUID) -> Bool {
+        guard DownloadRetry.isRetryable(error), let source, DownloadSchedule.canSchedule(source) else { return false }
+        let key = source.absoluteString
+        let attempt = (attempts[key] ?? 0) + 1
+        guard attempt <= DownloadRetry.maxAttempts else { attempts[key] = nil; return false }
+        attempts[key] = attempt
+        let delay = DownloadRetry.delay(afterAttempt: attempt)
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard let self else { return }
+            if let resumeData, !resumeData.isEmpty, self.interrupted[id] != nil { self.resume(id) } else { self.starter?(source) }
+        }
+        return true
+    }
+
+    func downloadSucceeded(source: URL?) { if let source { attempts[source.absoluteString] = nil } }
+
     private var destinations: [UUID: URL] = [:]
     private var cancellers: [UUID: () -> Void] = [:]
     /// Stops a download in a way that hands back its resume data, so quitting the app does not lose what was already fetched.
     private var suspenders: [UUID: (@escaping (Data?) -> Void) -> Void] = [:]
 
     /// A folder (inside the profile) where interrupted downloads are kept, so they can be resumed after the app was closed or quit.
-    var store: URL? { didSet { restoreInterrupted() } }
+    var store: URL? { didSet { restoreInterrupted(); restoreScheduled() } }
 
     private struct StoredItem: Codable { var id: UUID; var filename: String; var source: String? }
     private var indexURL: URL? { store?.appendingPathComponent("interrupted.json") }
@@ -156,6 +280,7 @@ final class DownloadCoordinator: ObservableObject {
         let dest = Self.uniqueURL(in: folder, name: name)
         let id = UUID()
         destinations[id] = dest
+        settleReservation()
         cancellers[id] = cancel
         if let suspend { suspenders[id] = suspend }
         active[id] = ActiveDownload(id: id, filename: dest.lastPathComponent, fraction: 0)
@@ -203,6 +328,7 @@ final class DownloadCoordinator: ObservableObject {
         destinations[id] = nil
         cancellers[id] = nil
         suspenders[id] = nil
+        pump()
     }
 
     /// Cancels one download; the partial file is removed.

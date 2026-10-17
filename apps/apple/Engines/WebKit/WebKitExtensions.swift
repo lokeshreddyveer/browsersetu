@@ -21,6 +21,8 @@ final class WebKitExtensionManager: NSObject, ExtensionBackend, WKWebExtensionCo
         var chromeIDVerified: Bool?
         /// Permissions the user turned off after installing: "api:<name>" or "site:<pattern>".
         var revoked: [String]?
+        /// Website patterns the person added themselves, allowed or blocked ("site:" entries in `revoked` mean blocked).
+        var customSites: [String]?
         /// The last changes the user made to its permissions, newest last, in words.
         var history: [String]?
     }
@@ -259,7 +261,8 @@ final class WebKitExtensionManager: NSObject, ExtensionBackend, WKWebExtensionCo
         let apis = Set(record.permissions).union(live?.grantedPermissions.keys.map(\.rawValue) ?? [])
         let sites = Set(record.hosts).union(live?.grantedPermissionMatchPatterns.keys.map(\.string) ?? [])
         let apiRows = apis.sorted().map { ExtensionPermissionRow(key: $0, title: Self.words(for: $0), isSite: false, granted: !revoked.contains("api:" + $0)) }
-        let siteRows = sites.sorted().map { ExtensionPermissionRow(key: $0, title: $0 == "<all_urls>" ? "All websites" : $0, isSite: true, granted: !revoked.contains("site:" + $0)) }
+        let custom = Set(record.customSites ?? [])
+        let siteRows = sites.sorted().map { ExtensionPermissionRow(key: $0, title: $0 == "<all_urls>" ? "All websites" : (custom.contains($0) ? ExtensionSitePattern.host(of: $0) : $0), isSite: true, granted: !revoked.contains("site:" + $0), custom: custom.contains($0)) }
         return apiRows + siteRows
     }
 
@@ -277,6 +280,27 @@ final class WebKitExtensionManager: NSObject, ExtensionBackend, WKWebExtensionCo
         if isSite { if let match = try? WKWebExtension.MatchPattern(string: key) { contexts[id]?.setPermissionStatus(status, for: match) } }
         else { contexts[id]?.setPermissionStatus(status, for: WKWebExtension.Permission(rawValue: key)) }
         note("\(granted ? "Allowed" : "Turned off"): \(isSite ? (key == "<all_urls>" ? "all websites" : key) : Self.words(for: key))", at: index)
+        saveRecords()
+    }
+
+    /// A rule for one website: allowed (it may read and change that site even when its own request was narrower) or blocked (it may not, even if it asked for every site).
+    func addSiteRule(id: String, host: String, allow: Bool) -> Bool {
+        guard let index = records.firstIndex(where: { $0.id == id }), let pattern = ExtensionSitePattern.pattern(forHost: host),
+              (records[index].customSites ?? []).count < 100 else { return false }
+        var list = records[index].customSites ?? []
+        if !list.contains(pattern) { list.append(pattern) }
+        records[index].customSites = list
+        setPermission(id: id, key: pattern, isSite: true, granted: allow)
+        return true
+    }
+
+    func removeSiteRule(id: String, key: String) {
+        guard let index = records.firstIndex(where: { $0.id == id }), (records[index].customSites ?? []).contains(key) else { return }
+        records[index].customSites = records[index].customSites?.filter { $0 != key }
+        records[index].hosts.removeAll { $0 == key }
+        records[index].revoked = records[index].revoked?.filter { $0 != "site:" + key }
+        if let match = try? WKWebExtension.MatchPattern(string: key) { contexts[id]?.setPermissionStatus(.unknown, for: match) }
+        note("Removed the rule for \(ExtensionSitePattern.host(of: key))", at: index)
         saveRecords()
     }
 
@@ -550,7 +574,17 @@ final class WebKitExtensionManager: NSObject, ExtensionBackend, WKWebExtensionCo
         center.clickPoint = nil
         popover = shown
         #else
-        throw ExtensionError.unsupported
+        // On the iPhone WebKit gives a view controller for the popup; it is shown as a sheet that the extension itself can close.
+        guard let popup = action.popupViewController else { throw ExtensionError.unsupported }
+        guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first(where: { $0.activationState == .foregroundActive }) ?? UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first,
+              var top = scene.keyWindow?.rootViewController else { throw ExtensionError.unsupported }
+        while let next = top.presentedViewController { top = next }
+        popup.title = context.webExtension.displayName
+        let holder = UINavigationController(rootViewController: popup)
+        popup.navigationItem.rightBarButtonItem = UIBarButtonItem(systemItem: .done, primaryAction: UIAction { [weak holder] _ in holder?.dismiss(animated: true) })
+        holder.modalPresentationStyle = .pageSheet
+        if let sheet = holder.sheetPresentationController { sheet.detents = [.medium(), .large()]; sheet.prefersGrabberVisible = true }
+        top.present(holder, animated: true)
         #endif
     }
 }

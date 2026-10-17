@@ -246,6 +246,25 @@ final class ExtensionTests: XCTestCase {
         XCTAssertFalse(manager.permissionHistory(id: id).isEmpty, "the changes are written down")
     }
 
+    func testABlockRuleStopsTheExtensionOnThatSiteAndRemovingItBringsItBack() async throws {
+        let (manager, center) = manager(directory: tempDirectory("store"))
+        await manager.start()
+        _ = try await manager.inspect(folder: try makeExtension(hosts: "https://example.test/*"))
+        try await manager.installPending()
+        let id = try XCTUnwrap(center.extensions.first?.id)
+        let before = try await marked(by: manager, page: "https://example.test/", wait: 2)
+        XCTAssertTrue(before, "it runs there to begin with")
+        XCTAssertTrue(manager.addSiteRule(id: id, host: "example.test", allow: false))
+        let rule = try XCTUnwrap(manager.permissionRows(id: id).first { $0.custom })
+        XCTAssertFalse(rule.granted)
+        XCTAssertEqual(rule.title, "example.test")
+        let blocked = try await marked(by: manager, page: "https://example.test/", wait: 1.5)
+        XCTAssertFalse(blocked, "a block rule keeps it off that site")
+        manager.removeSiteRule(id: id, key: rule.key)
+        XCTAssertNil(manager.permissionRows(id: id).first { $0.custom })
+        XCTAssertFalse(manager.addSiteRule(id: id, host: "not a site", allow: true), "nonsense is refused")
+    }
+
     func testInstallingIsRefusedWhereItIsNotOffered() async throws {
         #if os(macOS)
         throw XCTSkip("Installing is offered on the Mac; the refusal applies to iPhone.")
