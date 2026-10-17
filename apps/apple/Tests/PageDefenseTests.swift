@@ -44,7 +44,7 @@ final class PageDefenseTests: XCTestCase {
         XCTAssertTrue(again.neverSleeps(host: "mail.test"))
         XCTAssertTrue(again.fingerprintExceptions.contains("maps.test"))
         XCTAssertTrue(again.deAMP, "AMP replacing is on unless the person turns it off")
-        XCTAssertFalse(again.blockVideoAds); XCTAssertFalse(again.randomizeFingerprint)
+        XCTAssertTrue(again.blockVideoAds, "YouTube ad blocking is on unless the person turns it off"); XCTAssertFalse(again.randomizeFingerprint)
         let report = await again.siteReport(host: "shop.test")
         XCTAssertTrue(report.settings.contains("JavaScript off"), "the site report lists it")
     }

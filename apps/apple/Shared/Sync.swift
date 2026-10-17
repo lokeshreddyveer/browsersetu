@@ -13,6 +13,8 @@ enum SyncRules {
         // Rules and per-site choices (the "site rules" group in sync settings).
         "site_open_rules", "site_delete_rules", "site_user_agents", "containers", "split_templates", "workflows", "fingerprint_noise", "fingerprint_exceptions",
         "block_webrtc", "webrtc_exceptions", "video_ads", "autoplay_exceptions",
+        // Newer browsing features: pop-ups, chains, panels, the theme schedule, menus, previews, stacks, address bar sources.
+        "block_popups", "popup_allowed_hosts", "youtube_rules_auto", "command_chains", "web_panels", "theme_schedule", "hidden_menu_items", "hover_previews", "hover_delay", "tab_stacks", "address_sources", "tab_tree",
         // What the start page shows.
         "show_favorites", "show_continue", "show_frequent", "show_greeting", "show_recently_closed", "start_background",
     ]
@@ -21,7 +23,7 @@ enum SyncRules {
     static let siteRuleKeys: Set<String> = [
         "site_zoom", "site_styles", "site_notes", "site_appearance", "permission_expiry", "site_js_off", "never_sleep_sites", "site_open_rules", "site_delete_rules",
         "site_user_agents", "containers", "split_templates", "workflows", "fingerprint_noise", "fingerprint_exceptions", "block_webrtc", "webrtc_exceptions", "video_ads",
-        "app_link_sites",
+        "app_link_sites", "popup_allowed_hosts",
     ]
 
     static func category(forSetting key: String) -> SyncCategory { siteRuleKeys.contains(key) ? .siteRules : .settings }

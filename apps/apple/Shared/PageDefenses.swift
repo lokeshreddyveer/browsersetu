@@ -11,6 +11,8 @@ struct WebPolicy: Equatable {
     var deAMP = false
     /// Skips and mutes the video ads on YouTube.
     var blockVideoAds = false
+    /// What the ad blocker removes and hides; the built-in set, or a newer one the browser has fetched.
+    var youtubeRules = YouTubeAdRules.builtIn
     /// A page may start video or sound only after a tap or a key press, not by itself (a feed that plays as you scroll, a preview, the next video).
     var blockAutoplay = false
     var autoplayExceptions = Set<String>()
@@ -203,33 +205,6 @@ enum PageScripts {
 
     /// On YouTube only: hides the ad slots, presses Skip when it shows, and while an ad that cannot be skipped is playing, mutes it and jumps to its end. The sound and
     /// speed are put back the moment the ad is over. Does nothing at all when no ad is playing.
-    static let videoAds = """
-    (function () {
-      var host = location.hostname.toLowerCase();
-      if (!/(^|\\.)youtube\\.com$/.test(host) && !/(^|\\.)youtube-nocookie\\.com$/.test(host)) return;
-      var css = '#masthead-ad,#player-ads,.ytp-ad-overlay-container,.ytp-ad-text-overlay,.video-ads.ytp-ad-module .ytp-ad-image-overlay,ytd-ad-slot-renderer,ytd-display-ad-renderer,ytd-promoted-sparkles-web-renderer,ytd-promoted-video-renderer,ytd-in-feed-ad-layout-renderer,ytd-banner-promo-renderer,ytd-statement-banner-renderer,#related ytd-ad-slot-renderer{display:none!important}';
-      function addStyle() { var s = document.createElement('style'); s.textContent = css; (document.head || document.documentElement).appendChild(s); }
-      if (document.documentElement) addStyle(); else document.addEventListener('DOMContentLoaded', addStyle);
-      var held = null;
-      function tick() {
-        var player = document.querySelector('#movie_player') || document.querySelector('.html5-video-player');
-        var video = player && player.querySelector('video');
-        var playing = !!(player && player.classList.contains('ad-showing'));
-        if (!playing) {
-          if (held) { try { held.video.muted = held.muted; held.video.playbackRate = held.rate; } catch (e) {} held = null; }
-          return;
-        }
-        var skip = document.querySelector('.ytp-skip-ad-button, .ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-ad-skip-button-container button');
-        if (skip) { try { skip.click(); } catch (e) {} }
-        if (video && isFinite(video.duration) && video.duration > 0) {
-          if (!held) held = { video: video, muted: video.muted, rate: video.playbackRate || 1 };
-          try { video.muted = true; video.playbackRate = 16; if (video.currentTime < video.duration - 0.1) video.currentTime = video.duration; } catch (e) {}
-        }
-      }
-      setInterval(tick, 400);
-      try { new MutationObserver(tick).observe(document.documentElement, { attributes: true, subtree: true, attributeFilter: ['class'] }); } catch (e) {}
-    })();
-    """
 }
 
 // MARK: - Settings held by the model
@@ -271,7 +246,8 @@ extension BrowserModel {
         fingerprintExceptions = list("fingerprint_exceptions")
         randomizeFingerprint = get("fingerprint_noise") == "1"
         deAMP = get("de_amp") != "0"
-        blockVideoAds = get("video_ads") == "1"
+        blockVideoAds = get("video_ads") != "0"
+        loadYouTubeRules(get)
         blockAutoplay = get("block_autoplay") != "0"
         autoplayExceptions = list("autoplay_exceptions")
     }
@@ -296,7 +272,7 @@ struct PageDefensesSection: View {
     var body: some View {
         Section {
             Toggle("Stop videos and sound starting by themselves", isOn: $model.blockAutoplay)
-            ForEach(model.autoplayExceptions.sorted(), id: \.self) { site in
+            ShowMoreRows(model.autoplayExceptions.sorted(), id: \.self) { site in
                 HStack {
                     Label("\(site) may start media by itself", systemImage: "play.circle").font(.callout)
                     Spacer()
@@ -304,10 +280,14 @@ struct PageDefensesSection: View {
                 }
             }
             Toggle("Open a site's own page instead of its AMP copy", isOn: $model.deAMP)
-            Toggle("Skip and mute video ads on YouTube", isOn: $model.blockVideoAds)
+            Toggle("Block ads on YouTube", isOn: $model.blockVideoAds)
+            if model.blockVideoAds {
+                Toggle("Keep the YouTube ad rules up to date", isOn: $model.keepYouTubeRulesFresh)
+                YouTubeRulesRow()
+            }
             Toggle("Randomize canvas, audio and processor details", isOn: $model.randomizeFingerprint)
             if model.randomizeFingerprint, !model.fingerprintExceptions.isEmpty {
-                ForEach(model.fingerprintExceptions.sorted(), id: \.self) { site in
+                ShowMoreRows(model.fingerprintExceptions.sorted(), id: \.self) { site in
                     HStack {
                         Text("Not randomized on \(site)").font(.callout)
                         Spacer()
@@ -315,7 +295,7 @@ struct PageDefensesSection: View {
                     }
                 }
             }
-            ForEach(model.jsOffSites.sorted(), id: \.self) { site in
+            ShowMoreRows(model.jsOffSites.sorted(), id: \.self) { site in
                 HStack {
                     Label("JavaScript is off on \(site)", systemImage: "curlybraces").font(.callout)
                     Spacer()
@@ -325,7 +305,7 @@ struct PageDefensesSection: View {
         } header: {
             Text("Pages")
         } footer: {
-            Text("A video or sound starts only after you tap or press a key, not while you scroll, and not by itself: a page that opens after your tap has six seconds to start its player. Playlists and “Autoplay next” wait for a tap; a site that needs to play by itself (a voice-chat page, say) can be allowed in Site Privacy. AMP copies are replaced when a page names its own full version. YouTube ads are skipped by watching the player, not by blocking requests, so a change on YouTube's side can stop it working; some ads cannot be told apart from the video. Randomizing makes a site's canvas, audio and processor-count readings differ from other sites' and from run to run, so they cannot recognise this device; a few sites that draw pictures or sound can look slightly different, so each site has its own off switch in Site Privacy. Both of these apply to pages opened after the change.")
+            Text("A video or sound starts only after you tap or press a key, not while you scroll, and not by itself: a page that opens after your tap has six seconds to start its player. Playlists and “Autoplay next” wait for a tap; a site that needs to play by itself (a voice-chat page, say) can be allowed in Site Privacy. AMP copies are replaced when a page names its own full version. YouTube ads are stopped before they load, by removing the ad schedule from the video's own data, and any that still start are skipped or muted. YouTube changes this often, so the rules (names of data fields and page elements, never code) can be fetched from the project's public repository, at most once a day, while this is on: the request carries no cookies or identifiers. Turn off the update to use only the rules built into the app. Randomizing makes a site's canvas, audio and processor-count readings differ from other sites' and from run to run, so they cannot recognise this device; a few sites that draw pictures or sound can look slightly different, so each site has its own off switch in Site Privacy. Both of these apply to pages opened after the change.")
         }
     }
 }
@@ -339,7 +319,7 @@ struct NeverSleepSection: View {
             if model.neverSleepSites.isEmpty {
                 Label("No site is kept awake", systemImage: "moon.zzz").foregroundStyle(.secondary)
             }
-            ForEach(model.neverSleepSites.sorted(), id: \.self) { site in
+            ShowMoreRows(model.neverSleepSites.sorted(), id: \.self) { site in
                 HStack {
                     Text(site)
                     Spacer()
@@ -350,6 +330,29 @@ struct NeverSleepSection: View {
             Text("Never Put to Sleep")
         } footer: {
             Text("Tabs on these sites stay loaded when memory is short, and when you put all other tabs to sleep. Add a site from Site Privacy, or with “Never Put This Site to Sleep” in the command palette.")
+        }
+    }
+}
+
+/// The ad rules in use, and a button to look for newer ones.
+struct YouTubeRulesRow: View {
+    @EnvironmentObject var model: BrowserModel
+    @State private var status = ""
+    @State private var checking = false
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Ad rules version \(model.youtubeRules.version)")
+                if !status.isEmpty { Text(status).font(.caption).foregroundStyle(.secondary) }
+                else if let checked = model.youtubeRulesChecked { Text("Checked \(checked.formatted(date: .abbreviated, time: .shortened))").font(.caption).foregroundStyle(.secondary) }
+            }
+            Spacer()
+            Button(checking ? "Checking…" : "Check Now") {
+                checking = true
+                Task { @MainActor in status = await model.refreshYouTubeRules(force: true); checking = false }
+            }
+            .disabled(checking).buttonStyle(.borderless)
         }
     }
 }

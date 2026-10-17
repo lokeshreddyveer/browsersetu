@@ -267,7 +267,7 @@ struct TabListRow: View {
                 .buttonStyle(.plain).accessibilityLabel("Close tab")
         }
         .padding(.horizontal, 12).padding(.vertical, model.density.listRowPadding - 1)
-        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .themedFill(in: RoundedRectangle(cornerRadius: 14, style: .continuous), fallback: .background.secondary)
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
             .stroke(selected ? (tab.isPrivate ? Theme.privateAccent : Theme.accent) : Color.primary.opacity(0.08), lineWidth: selected ? 2 : 1))
         .contentShape(Rectangle())
@@ -300,7 +300,7 @@ struct TabCard: View {
         VStack(spacing: 0) {
             ZStack(alignment: .topTrailing) {
                 preview
-                    .frame(height: 130).frame(maxWidth: .infinity)
+                    .frame(maxWidth: .infinity).frame(height: 130)
                     .clipped()
                 Button { model.closeTab(id: tab.id) } label: {
                     Image(systemName: "xmark.circle.fill").font(.title3).accessibilityLabel("Close tab")
@@ -317,7 +317,7 @@ struct TabCard: View {
             }
             .padding(.horizontal, 10).padding(.vertical, 8)
         }
-        .background(.background.secondary, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+        .themedFill(in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous), fallback: .background.secondary)
         .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
             .stroke(selected ? (tab.isPrivate ? Theme.privateAccent : Theme.accent) : Color.primary.opacity(0.10),
@@ -346,7 +346,8 @@ struct TabCard: View {
 
     @ViewBuilder private var preview: some View {
         if model.tabPreviews, let data = tab.snapshot, let image = Image(platformData: data) {
-            image.resizable().scaledToFill().frame(maxHeight: 130, alignment: .top)
+            // The picture fills the column and is cropped to it; sized as an overlay so its own width never widens the card.
+            Color.clear.overlay(alignment: .top) { image.resizable().scaledToFill() }.clipped()
         } else {
             ZStack {
                 (tab.isPrivate ? Theme.privateAccent : Theme.accent).opacity(0.10)
@@ -514,7 +515,7 @@ struct TabOverview: View {
 struct OverlayBackground: ViewModifier {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     func body(content: Content) -> some View {
-        if reduceTransparency { content.background(Color.platformBackground) } else { content.background(.regularMaterial) }
+        if reduceTransparency { content.background(Color.platformBackground) } else { content.themedBar(fallback: .regularMaterial) }
     }
 }
 

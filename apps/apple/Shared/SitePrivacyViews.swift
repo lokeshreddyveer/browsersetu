@@ -115,7 +115,7 @@ struct SitePrivacyView: View {
 
     private var rulesSection: some View {
         Section {
-            ForEach(model.siteDeleteRules) { rule in
+            ShowMoreRows(model.siteDeleteRules) { rule in
                 VStack(alignment: .leading, spacing: 2) {
                     Text(rule.hosts.joined(separator: ", ")).lineLimit(2)
                     Text("\(rule.trigger.title) · \(rule.scope.title)").font(.caption).foregroundStyle(.secondary)

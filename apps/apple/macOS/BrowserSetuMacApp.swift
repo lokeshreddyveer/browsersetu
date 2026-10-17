@@ -133,6 +133,9 @@ struct BrowserCommands: Commands {
     private var model: BrowserModel { focused ?? primary }
 
     var body: some Commands {
+        CommandGroup(replacing: .appSettings) {
+            Button("Settings…") { SettingsRouter.open() }.keyboardShortcut(",", modifiers: .command)
+        }
         CommandGroup(replacing: .newItem) {
             Button("New Window") { openWindow(id: "browser") }.keyboardShortcut("n", modifiers: .command)
             Button("New Guest Window") { model.openGuestWindow() }.keyboardShortcut("n", modifiers: [.command, .shift, .option])

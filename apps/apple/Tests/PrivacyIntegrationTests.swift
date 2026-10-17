@@ -327,7 +327,7 @@ final class PrivacyIntegrationTests: XCTestCase {
         XCTAssertGreaterThan(sources.count, 20, "source scan found nothing; repository layout changed?")
         let forbidden = ["Firebase", "Crashlytics", "Sentry", "Mixpanel", "Amplitude", "Segment", "AppCenter", "Bugsnag", "Datadog",
                          "TelemetryDeck", "PostHog", "AdSupport", "ASIdentifierManager", "ATTrackingManager", "MetricKit", "NWConnection", "NWPathMonitor",
-                         "CFNetworkExecuteProxyAutoConfiguration", "evaluateJavaScript", "addScriptMessageHandler", "WKScriptMessage"]
+                         "CFNetworkExecuteProxyAutoConfiguration", "evaluateJavaScript", "addScriptMessageHandler"]
         for file in sources {
             let text = try String(contentsOf: file, encoding: .utf8)
             for word in forbidden {
@@ -335,12 +335,22 @@ final class PrivacyIntegrationTests: XCTestCase {
                 if word == "NWConnection", file.lastPathComponent == "LocalLink.swift" { continue }
                 XCTAssertFalse(text.contains(word), "\(file.lastPathComponent) contains \(word)")
             }
+            // Message handlers (the browser's own sign-in, link and gesture scripts) live in one file only.
+            if file.lastPathComponent != "WebKitEngine.swift" { XCTAssertFalse(text.contains("WKScriptMessage"), "\(file.lastPathComponent) contains WKScriptMessage") }
         }
+        // A page must have no way to call into the browser. The browser's own three scripts talk to it from an isolated world a page cannot reach: every handler is
+        // registered for `.defaultClient` (never the page's world), and these three are the only ones.
+        let engineSource = try String(contentsOf: repoRoot().appendingPathComponent("apps/apple/Engines/WebKit/WebKitEngine.swift"), encoding: .utf8)
+        let registrations = engineSource.split(separator: "\n").filter { $0.contains("controller.add(") && $0.contains("name:") }
+        XCTAssertEqual(registrations.count, 3, "unexpected message handlers: \(registrations)")
+        for line in registrations { XCTAssertTrue(line.contains("contentWorld: .defaultClient"), "a message handler outside the isolated world: \(line)") }
+        let handlerNames = registrations.compactMap { $0.components(separatedBy: "name: \"").last?.components(separatedBy: "\"").first }
+        XCTAssertEqual(Set(handlerNames), ["bsLogin", "bsLink", "bsGesture"])
         // The device link talks only to devices found on the local network by Bonjour, never to an address on the internet.
         let link = try String(contentsOf: repoRoot().appendingPathComponent("apps/apple/Shared/LocalLink.swift"), encoding: .utf8)
         XCTAssertFalse(link.contains("http://") || link.contains("https://"), "LocalLink must not name internet addresses")
         XCTAssertTrue(link.contains(".bonjour(type:"))
-        // The user's own scripts are installed by one file only, and nothing lets a page script call into the browser (no message handlers).
+        // The user's own scripts are installed by one file only.
         let withUserScripts = try sources.filter { try String(contentsOf: $0, encoding: .utf8).contains("WKUserScript") }.map(\.lastPathComponent)
         XCTAssertEqual(withUserScripts, ["WebKitUserScripts.swift"], "unexpected user-script code: \(withUserScripts)")
         // The browser runs script of its own in exactly one place: reading a page's icon links, in its own isolated world.

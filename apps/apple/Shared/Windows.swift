@@ -34,7 +34,7 @@ final class WindowRegistry {
         "appearance", "accent", "theme", "theme_custom", "density", "workspaces", "dark_pages", "dark_sites", "website_appearance", "site_appearance", "site_zoom",
         "site_styles", "site_notes", "bookmark_tags", "group_colors", "favorites_order", "search_template", "search_suggestions", "search_shortcuts", "homepage", "startup",
         "strip_tracking", "app_links", "app_link_sites", "permission_expiry", "show_favorites", "show_continue", "show_frequent", "show_greeting", "show_recently_closed",
-        "start_background", "shortcuts", "organize_downloads", "download_concurrent", "save_logins", "spotlight_bookmarks", "site_js_off", "never_sleep_sites", "fingerprint_noise", "fingerprint_exceptions", "de_amp", "video_ads", "user_themes", "start_tile", "block_autoplay", "autoplay_exceptions",
+        "start_background", "shortcuts", "organize_downloads", "download_concurrent", "save_logins", "spotlight_bookmarks", "site_js_off", "never_sleep_sites", "fingerprint_noise", "fingerprint_exceptions", "de_amp", "video_ads", "user_themes", "start_tile", "block_autoplay", "autoplay_exceptions", "block_popups", "popup_allowed_hosts", "youtube_rules_auto", "command_chains", "web_panels", "theme_schedule", "hidden_menu_items", "hover_previews", "hover_delay", "tab_stacks", "address_sources", "tab_tree",
     ]
 
     /// Tells the other windows that a setting changed, so what they show follows (their own layouts are left alone).

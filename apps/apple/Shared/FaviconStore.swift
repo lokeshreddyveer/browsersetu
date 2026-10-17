@@ -77,8 +77,22 @@ final class FaviconStore: ObservableObject {
             try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             try? png.write(to: directory.appendingPathComponent(key + ".png"), options: .atomic)
             if let icon = PlatformImage(data: png) { remember(key, icon) }
-            version += 1
+            announce()
             return
+        }
+    }
+
+    private var announcePending = false
+
+    /// Tells the tiles an icon has arrived, but at most a few times a second: icons come in bursts (a long history, a start page), and every announcement redraws every tile
+    /// on screen, so each arrival announcing itself made the list stutter as it filled.
+    private func announce() {
+        guard !announcePending else { return }
+        announcePending = true
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(250))
+            self?.announcePending = false
+            self?.version += 1
         }
     }
 

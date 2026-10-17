@@ -310,6 +310,7 @@ struct MacOmnibox: View {
     @ObservedObject private var siteIcons = FaviconStore.shared
     @State private var showInfo = false
     @State private var hovering = false
+    @State private var arrangingBar = false
 
     /// In the sidebar layout the field is a taller, rounder block and its icon only shows on hover, as the page's
     /// domain is the only thing that matters at rest.
@@ -359,6 +360,7 @@ struct MacOmnibox: View {
 
     private var row: some View {
         HStack(spacing: 7) {
+            if model.addressBarItems.contains(.siteInfo) {
             Button { showInfo.toggle() } label: {
                 if inSidebar, !tab.isBlank, !tab.isPrivate, let image = tab.url.flatMap({ FaviconStore.shared.image(forURL: $0.absoluteString, points: 15) }) {
                     // The site's own icon, shown at the start of the field.
@@ -375,6 +377,7 @@ struct MacOmnibox: View {
             .onChange(of: showInfo) { _, shown in holdChrome(shown) }
             .onDisappear { if showInfo { holdChrome(false) } }
             .popover(isPresented: $showInfo, arrowEdge: .bottom) { SiteInfoView(tab: tab).environmentObject(model) }
+            }
 
             OmniboxField(
                 displayText: tab.isBlank ? "" : displayHost(tab.url),
@@ -404,16 +407,65 @@ struct MacOmnibox: View {
                     .accessibilityHidden(true)
                     .transition(.opacity.combined(with: .scale(scale: 0.8)))
             }
+            // The buttons at the end of the field are the ones chosen in Settings, in that order (right-click the bar to change them).
+            ForEach(model.addressBarItems.filter { $0 != .siteInfo }) { item in trailing(item) }
+        }
+        .motion(.easeOut(duration: 0.2), value: tab.identity)
+        .motion(.easeOut(duration: 0.2), value: model.addressBarItems)
+        .padding(.horizontal, bare ? 2 : 10)
+        .frame(height: height)
+        .contextMenu { addressBarMenu }
+        .popover(isPresented: $arrangingBar, arrowEdge: .bottom) {
+            ButtonArranger(kind: "address", heading: "Address Bar Buttons", items: $model.addressBarItems, all: AddressBarItem.allCases, defaults: AddressBarItem.defaults,
+                           title: { $0.title }, symbol: { $0.symbol })
+        }
+    }
+
+    /// One of the buttons at the end of the field. Each still keeps to what its layout allows (the shield and reload are only in the top bar), and none shows while the address is being typed.
+    @ViewBuilder private func trailing(_ item: AddressBarItem) -> some View {
+        switch item {
+        case .siteInfo: EmptyView()
+        case .certificateName:
             if let label = tab.identity?.shortLabel, !address.isEditing, !inSidebar, !floating, !tabField, !tab.isPrivate {
                 // A site whose certificate names a checked organisation shows who it is, quietly, beside the padlock's address.
                 Text(label).font(.system(size: 11, weight: .medium)).foregroundStyle(Color.green.opacity(0.85)).lineLimit(1).truncationMode(.tail)
                     .frame(maxWidth: 140).help(tab.identity?.detail ?? "").accessibilityLabel(tab.identity?.headline ?? "")
                     .transition(.opacity)
             }
+        case .shield:
             if shield && !address.isEditing {
                 ShieldPill(privacy: model.privacy, host: tab.url?.host, inField: true)
                     .transition(.opacity.combined(with: .scale(scale: 0.8)))
             }
+        case .bookmarkStar:
+            if !address.isEditing, !tab.isBlank {
+                fieldButton(model.activeBookmarked ? "star.fill" : "star", "Bookmark This Page", tint: model.activeBookmarked ? .yellow : nil) { model.toggleBookmark() }
+            }
+        case .share:
+            if !address.isEditing, !tab.isBlank, let url = tab.url {
+                ShareLink(item: url) { Image(systemName: "square.and.arrow.up").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary).frame(width: 22, height: 22) }
+                    .buttonStyle(.plain).help("Share").accessibilityLabel("Share")
+            }
+        case .copyLink:
+            if !address.isEditing, !tab.isBlank, let url = tab.url {
+                fieldButton("link", "Copy Link") { copyToPasteboard(url.absoluteString); model.notice = "Link copied." }
+            }
+        case .pageActions:
+            if !address.isEditing, !tab.isBlank {
+                Menu {
+                    ForEach(PageAction.allCases) { action in
+                        Button { model.togglePageAction(action, on: tab) } label: {
+                            if tab.pageActions.contains(action) { Label(action.title, systemImage: "checkmark") } else { Label(action.title, systemImage: action.symbol) }
+                        }
+                    }
+                    Divider()
+                    Button("Reset This Page") { model.clearPageActions(on: tab) }.disabled(tab.pageActions.isEmpty)
+                } label: {
+                    Image(systemName: "wand.and.stars").font(.system(size: 11, weight: .semibold)).foregroundStyle(tab.pageActions.isEmpty ? Color.secondary : Theme.accent).frame(width: 22, height: 22)
+                }
+                .menuStyle(.button).menuIndicator(.hidden).buttonStyle(.plain).fixedSize().help("Page Actions").accessibilityLabel("Page actions")
+            }
+        case .reload:
             if showReload && !address.isEditing {
                 Button { tab.isLoading ? tab.stop() : tab.reload() } label: {
                     Image(systemName: tab.isLoading ? "xmark" : "arrow.clockwise")
@@ -430,9 +482,30 @@ struct MacOmnibox: View {
                 .transition(.opacity.combined(with: .scale(scale: 0.8)))
             }
         }
-        .motion(.easeOut(duration: 0.2), value: tab.identity)
-        .padding(.horizontal, bare ? 2 : 10)
-        .frame(height: height)
+    }
+
+    private func fieldButton(_ symbol: String, _ help: String, tint: Color? = nil, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 11, weight: .semibold)).foregroundStyle(tint ?? Color.secondary).frame(width: 22, height: 22).contentShape(Circle())
+        }
+        .buttonStyle(.plain).help(help).accessibilityLabel(help)
+    }
+
+    /// Right-click the bar (outside the text): tick the buttons to show in it.
+    @ViewBuilder private var addressBarMenu: some View {
+        ForEach(AddressBarItem.allCases) { item in
+            Button {
+                animated(.easeOut(duration: 0.2)) {
+                    if model.addressBarItems.contains(item) { model.addressBarItems.removeAll { $0 == item } }
+                    else { model.addressBarItems.append(item) }
+                }
+            } label: {
+                if model.addressBarItems.contains(item) { Label(item.title, systemImage: "checkmark") } else { Label(item.title, systemImage: item.symbol) }
+            }
+        }
+        Divider()
+        Button("Reset to Default") { animated(.easeOut(duration: 0.2)) { model.addressBarItems = AddressBarItem.defaults } }
+        Button("Arrange Buttons…") { arrangingBar = true }
     }
 }
 
@@ -444,7 +517,8 @@ struct TopBar: View {
     let leadingInset: CGFloat
 
     var body: some View {
-        if model.singleRow { InlineBar(leadingInset: leadingInset) } else { standard }
+        Group { if model.singleRow { InlineBar(leadingInset: leadingInset) } else { standard } }
+            .contextMenu { ToolbarContextMenu() }
     }
 
     private var standard: some View {

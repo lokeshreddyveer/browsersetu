@@ -25,9 +25,15 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
     @Published private(set) var identity: CertificateIdentity?
     /// The colour the page declares for browser chrome, if any.
     @Published var tint: PageTint?
+    /// The address a page tried to open in a window without a click: kept so the person can allow it from the page.
+    @Published var blockedPopup: URL?
+    /// A name and password just typed on this page, held in memory only until the page changes, so "Save password?" can be offered even when the sign-in itself is not noticed.
+    @Published var typedLogin: PendingLogin?
     @Published var group: String
     @Published var pinned: Bool
     @Published var workspace: String
+    /// The filters in use on this page (grayscale, invert…); kept for the tab, re-applied after each load.
+    @Published var pageActions: Set<PageAction> = []
     /// PNG of the page as last seen, for tab overview cards.
     @Published var snapshot: Data?
 
@@ -43,7 +49,7 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
     private var showingError = false
     private var failedURL: URL?
 
-    init(info: TabInfo, model: BrowserModel, restoredURL: URL? = nil) {
+    init(info: TabInfo, model: BrowserModel, restoredURL: URL? = nil, popupConfiguration: AnyObject? = nil) {
         id = info.id
         isPrivate = info.private
         title = info.title
@@ -53,7 +59,8 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
         url = restoredURL
         pendingURL = restoredURL
         self.owner = model
-        engine = model.engine.makeTab(isPrivate: info.private, profile: model.profileName, container: info.private ? nil : model.tabMeta[info.id]?.container, events: self)
+        engine = popupConfiguration.flatMap { model.engine.makePopupTab(configuration: $0, events: self) }
+            ?? model.engine.makeTab(isPrivate: info.private, profile: model.profileName, container: info.private ? nil : model.tabMeta[info.id]?.container, events: self)
         applyWebsiteAppearance()
     }
 
@@ -76,7 +83,16 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
 
     // MARK: Commands
 
+    /// Settings live in a tab of their own: this address is never sent to the engine; the window draws the settings in its place.
+    static let settingsURL = URL(string: "browsersetu://settings")!
+    var isSettingsPage: Bool { url == Self.settingsURL }
+
     func load(_ target: URL) {
+        if target == Self.settingsURL {
+            pendingURL = nil; showingError = false; isLoading = false
+            url = target; title = "Settings"
+            return
+        }
         if !autoRetrying { retryAttempt = 0 }
         autoRetrying = false
         // Moving to a different site starts the crash count again.
@@ -133,6 +149,7 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
         // An error page is local content; reloading it would just show the error again.
         if showingError, let target = failedURL ?? url { load(target) }
         else if engine.currentURL == nil, let url { load(url) }
+        else if isSettingsPage { return }
         else { engine.reload() }
     }
 
@@ -247,6 +264,7 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
     func engineURLChanged(_ url: URL) {
         if isReading, url != readerOrigin { isReading = false; readerOrigin = nil }
         if identity != nil, identity?.host != url.host { identity = nil }
+        if self.url?.host != url.host { typedLogin = nil }
         self.url = url
         pendingURL = nil
         owner?.tabURLChanged(self)
@@ -262,13 +280,37 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
         if !isPrivate { owner?.extensionCenter.tabChanged(self) }
     }
 
-    func engineProgress(_ progress: Double) { self.progress = progress }
+    /// WebKit reports progress many times a second; the bar only needs a visible step, and each report redraws everything that shows this tab.
+    func engineProgress(_ progress: Double) {
+        guard progress == 0 || progress >= 1 || abs(progress - self.progress) >= 0.02 else { return }
+        self.progress = progress
+    }
 
     func engineMouseGesturesEnabled() -> Bool { owner?.mouseGestures == true }
     func engineScriptsAllowed(for url: URL) -> Bool { javaScriptOn && owner?.scriptsAllowed(forHost: url.host) != false }
     func engineMouseGesture(_ sequence: String, finished: Bool) { if owner?.activeID == id { owner?.mouseGestureProgress(sequence, finished: finished) } }
 
     func engineWantsLoginCapture() -> Bool { !isPrivate && owner?.saveLoginsEnabled == true }
+    func engineLinkAction(_ url: URL, _ action: LinkAction) {
+        guard let model = owner, url.scheme == "http" || url.scheme == "https" else { return }
+        let container = model.tabMeta[id]?.container
+        switch action {
+        case .newTab: model.openTab(url: url, isPrivate: isPrivate, opener: self, container: container)
+        case .backgroundTab: model.openTab(url: url, isPrivate: isPrivate, select: false, opener: self, container: container)
+        case .privateTab: model.openTab(url: url, isPrivate: true)
+        case .split:
+            let tab = model.openTab(url: url, isPrivate: isPrivate, select: false, opener: self, container: container)
+            if model.splitTabID == nil { model.openSplit(with: tab) } else { model.addThirdPanel(with: tab) }
+        }
+    }
+    func engineLoginTyped(origin: String, user: String, password: String) {
+        guard !isPrivate, let model = owner, model.saveLoginsEnabled else { return }
+        let kept = WebLoginVault.list(origin: origin, profile: model.profileName)
+        guard LoginRules.offer(origin: origin, user: user, password: password, kept: kept, neverFor: model.neverSaveOrigins) != .nothing else { typedLogin = nil; return }
+        typedLogin = PendingLogin(origin: origin, user: user, password: password)
+    }
+
+    func engineLoginFieldFocused(origin: String?) { if !isPrivate { owner?.offerToFillLogin(in: self, frameOrigin: origin) } }
     func engineLoginSubmitted(origin: String, user: String, password: String) { owner?.loginSubmitted(origin: origin, user: user, password: password, in: self) }
 
     func engineVimKey(_ key: String) -> Bool {
@@ -312,11 +354,19 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
         applyWebsiteAppearance()
         applyDarkPages()
         applySiteStyle()
+        if !pageActions.isEmpty { applyPageActions() }
+        // Break mode holds for pages that finish loading while it is on.
+        if owner?.breakActive == true { engine.runPageScript(PowerScripts.pause, arguments: [:]) }
         if !isPrivate { owner?.offerToFillLogin(in: self) }
     }
 
     /// The page's own style sheet from Settings (per website), if the user wrote one.
     func applySiteStyle() { engine.setSiteStyle(owner?.siteStyle(forHost: url?.host)) }
+
+    func applyPageActions() {
+        guard !isSettingsPage else { return }
+        engine.runPageScript(PowerScripts.pageActions, arguments: ["css": PageAction.css(for: pageActions) ?? NSNull()])
+    }
 
     var enginePrivate: Bool { isPrivate }
 
@@ -454,6 +504,35 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
     }
 
     func engineRequestClose() {
-        owner?.closeTab(id: id)
+        // A window the page opened closes itself when it is done (a sign-in, a payment); the page that opened it comes back to the front.
+        guard let model = owner else { return }
+        let parent = model.tabMeta[id]?.parent
+        let wasActive = model.activeID == id
+        model.closeTab(id: id, force: true)
+        if wasActive, let parent, model.tabs.contains(where: { $0.id == parent }) { model.select(parent) }
     }
+
+    func engineOpenPopup(configuration: AnyObject) -> TabEngine? {
+        owner?.openPopupTab(configuration: configuration, opener: self).engine
+    }
+
+    func engineBlockedPopup(url: URL?) {
+        guard let model = owner else { return }
+        blockedPopup = url ?? URL(string: "about:blank")
+        model.notice = "A pop-up was blocked."
+        let shown = blockedPopup
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(10))
+            if self?.blockedPopup == shown { self?.blockedPopup = nil }
+        }
+    }
+
+    func enginePopupsAllowedWithoutGesture() -> Bool { owner?.popupsAllowed(forHost: url?.host) ?? false }
+}
+
+/// A sign-in typed but not yet kept. Never written anywhere; gone when the page changes or the tab closes.
+struct PendingLogin: Equatable {
+    let origin: String
+    let user: String
+    let password: String
 }

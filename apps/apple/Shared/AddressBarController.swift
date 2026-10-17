@@ -40,6 +40,8 @@ final class AddressBarController: ObservableObject {
 
     private var local: [Suggestion] = []
     private var remote: [Suggestion] = []
+    /// Which sources the address bar draws on, in the order chosen in Settings.
+    private var sources: [AddressSource] = AddressSource.defaults
     private var remoteTask: Task<Void, Never>?
 
     func refresh(model: BrowserModel) {
@@ -115,6 +117,8 @@ final class AddressBarController: ObservableObject {
                 result.append(Suggestion(kind: .command, title: item.title, subtitle: item.subtitle, target: item.id, action: item.run))
             }
         }
+        sources = model.addressSources
+        result = AddressSource.arrange(result, order: sources)
         local = result
         suggestions = result
         selection = nil
@@ -123,11 +127,8 @@ final class AddressBarController: ObservableObject {
 
     /// The engine's suggestions go right after the first row ("Go to…" or "Search for…"), ahead of the local ones.
     private func merged() -> [Suggestion] {
-        guard !remote.isEmpty else { return local }
-        var out = local
-        let first = out.first.map { $0.kind == .go || $0.kind == .search } ?? false
-        out.insert(contentsOf: remote, at: first ? 1 : 0)
-        return out
+        guard !remote.isEmpty, sources.contains(.suggestions) else { return local }
+        return AddressSource.arrange(local + remote, order: sources)
     }
 
     private func startRemote(query: String, model: BrowserModel) {

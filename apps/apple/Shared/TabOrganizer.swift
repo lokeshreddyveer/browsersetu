@@ -157,6 +157,38 @@ extension BrowserModel {
         return TabOrganizing.depths(visibleTabs.map { ($0.id, tabMeta[$0.id]?.parent) })[tab.id] ?? 0
     }
 
+    /// Whether other tabs were opened from this one (and are still open).
+    func hasTreeChildren(_ tab: TabController) -> Bool {
+        tabTree && tabs.contains { tabMeta[$0.id]?.parent == tab.id }
+    }
+
+    /// The list with every tab hidden that sits under a folded branch.
+    func treeVisible(_ list: [TabController]) -> [TabController] {
+        guard tabTree, !collapsedTreeTabs.isEmpty else { return list }
+        let parents = Dictionary(uniqueKeysWithValues: tabs.map { ($0.id, tabMeta[$0.id]?.parent) })
+        return list.filter { tab in
+            var current = parents[tab.id] ?? nil, steps = 0
+            while let p = current, steps < TabOrganizing.maxDepth + 2 {
+                if collapsedTreeTabs.contains(p) { return false }
+                current = parents[p] ?? nil; steps += 1
+            }
+            return true
+        }
+    }
+
+    func toggleTreeBranch(_ tab: TabController) {
+        if collapsedTreeTabs.contains(tab.id) { collapsedTreeTabs.remove(tab.id) } else { collapsedTreeTabs.insert(tab.id) }
+    }
+
+    /// When a tab closes, the tabs opened from it move up to its own parent, so a branch is never cut off from the rest of the tree.
+    func adoptChildren(ofClosing id: UInt64) {
+        let grand = tabMeta[id]?.parent
+        var changed = false
+        for tab in tabs where tabMeta[tab.id]?.parent == id { tabMeta[tab.id]?.parent = grand; changed = true }
+        collapsedTreeTabs.remove(id)
+        if changed { saveTabMeta() }
+    }
+
     /// A tab opened from another goes straight after it (and its other children) when the tree is on.
     func placeAfterOpener(_ tab: TabController) {
         guard tabTree, let parent = tabMeta[tab.id]?.parent else { return }

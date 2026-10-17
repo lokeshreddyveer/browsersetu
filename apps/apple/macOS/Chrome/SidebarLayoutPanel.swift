@@ -112,7 +112,7 @@ struct SidebarLayoutPanel: View {
         VStack(alignment: .leading, spacing: 4) {
             SidebarSectionLabel("Open Tabs") { _ = model.newTab() } help: { "New Tab" }
             VStack(spacing: 2) {
-                ForEach(open) { SidebarTabRow(tab: $0, selected: $0.id == model.activeID) }
+                ForEach(model.stackedVisible(model.treeVisible(open))) { SidebarTabRow(tab: $0, selected: $0.id == model.activeID) }
             }
         }
         // A tab dragged here from another window comes into this one.
@@ -318,6 +318,7 @@ struct SidebarTabRow: View {
         HStack(spacing: 9) {
             // A tab opened from another sits one step in from it when the tab tree is on.
             if model.tabTree { Color.clear.frame(width: CGFloat(model.treeDepth(of: tab)) * 14, height: 1) }
+            TreeFoldButton(tab: tab)
             ZStack(alignment: .bottomTrailing) {
                 TabFavicon(tab: tab, size: 16)
                 if !tab.group.isEmpty, let color = model.groupColor(tab.group)?.color {
@@ -329,6 +330,7 @@ struct SidebarTabRow: View {
                 .font(.system(size: 13, weight: selected ? .medium : .regular))
                 .foregroundStyle(selected ? Color.primary : Color.primary.opacity(0.74))
                 .lineLimit(1).truncationMode(.tail)
+            StackBadge(tab: tab)
             TabBadges(tab: tab)
             Spacer(minLength: 0)
             if tab.isLocked { Image(systemName: "lock.fill").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary) }

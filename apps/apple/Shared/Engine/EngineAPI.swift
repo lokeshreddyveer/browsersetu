@@ -51,6 +51,18 @@ protocol TabEngineEvents: AnyObject {
     /// Whether the browser wants to look at a login form just before it is submitted (never in a private tab, or when the setting is off).
     func engineWantsLoginCapture() -> Bool
     func engineLoginSubmitted(origin: String, user: String, password: String)
+    /// The person put the cursor in a password field: the moment to offer a saved sign-in.
+    func engineLoginFieldFocused(origin: String?)
+    /// A password was typed (and a name with it); the sign-in has not been sent. Kept in memory so the person can save it from the page.
+    func engineLoginTyped(origin: String, user: String, password: String)
+    /// A script asked for a new window and the person had just clicked or typed: the new page, connected to this one. Nil if none could be made.
+    func engineOpenPopup(configuration: AnyObject) -> TabEngine?
+    /// A script asked for a new window with no click or key press behind it, and it was not opened.
+    func engineBlockedPopup(url: URL?)
+    /// Whether this site may open windows without a click (the person allowed it, or blocking is off).
+    func enginePopupsAllowedWithoutGesture() -> Bool
+    /// A choice from the page's link menu.
+    func engineLinkAction(_ url: URL, _ action: LinkAction)
     /// A typed character while no text field has the keyboard. True means the browser acted on it.
     func engineVimKey(_ key: String) -> Bool
     /// Synchronous: engines must not start the navigation until this returns.
@@ -109,6 +121,8 @@ extension TabEngine {
     func setWebsiteAppearance(_ mode: String) {}
     func setViewportInsets(top: CGFloat, bottom: CGFloat) {}
     func setSiteStyle(_ css: String?) {}
+    /// Runs one of the browser's own short scripts in the page, with its values passed as data.
+    func runPageScript(_ script: String, arguments: [String: Any]) {}
     func scrollToEdge(bottom: Bool) {}
     func scrollBy(_ points: Double) {}
 }
@@ -120,6 +134,12 @@ extension TabEngineEvents {
     func engineFixedBars(top: Bool, bottom: Bool) {}
     func engineWantsLoginCapture() -> Bool { false }
     func engineLoginSubmitted(origin: String, user: String, password: String) {}
+    func engineLoginFieldFocused(origin: String?) {}
+    func engineLoginTyped(origin: String, user: String, password: String) {}
+    func engineOpenPopup(configuration: AnyObject) -> TabEngine? { nil }
+    func engineBlockedPopup(url: URL?) {}
+    func enginePopupsAllowedWithoutGesture() -> Bool { false }
+    func engineLinkAction(_ url: URL, _ action: LinkAction) {}
     func engineVimKey(_ key: String) -> Bool { false }
     func engineThemeColorChanged(_ tint: PageTint?) {}
     func engineScrolled(deltaY: Double) {}
@@ -180,6 +200,8 @@ protocol TabEngine: AnyObject {
     func setViewportInsets(top: CGFloat, bottom: CGFloat)
     /// Adds (or with nil, removes) a small style sheet of the user's own on the page: CSS only, never script.
     func setSiteStyle(_ css: String?)
+    /// Runs one of the browser's own short scripts in the page, with its values passed as data.
+    func runPageScript(_ script: String, arguments: [String: Any])
     func scrollToEdge(bottom: Bool)
     func scrollBy(_ points: Double)
     /// Opens the system's own find bar for the page, on platforms that have one (the iPhone). Default: nothing.
@@ -232,6 +254,8 @@ protocol BrowserEngine: AnyObject {
     func prepare() async
     /// `container` names a separate identity: the tab keeps cookies and storage of its own. "scratch" is storage that exists only for that one tab.
     func makeTab(isPrivate: Bool, profile: String, container: String?, events: TabEngineEvents) -> TabEngine
+    /// A page that a script opened with window.open: it is built from the configuration the page's engine hands over, so it stays connected to the page that opened it.
+    func makePopupTab(configuration: AnyObject, events: TabEngineEvents) -> TabEngine?
     /// Installs (or, with nil, removes) the privacy rules on every tab. Keeps the previous rules if the new ones fail.
     func applyProtection(_ snapshot: PolicySnapshot?) async -> InstallReport
     /// Called when the last private tab closed: the next private tab must start with empty storage.
@@ -282,4 +306,11 @@ struct GestureOptions: Equatable {
     var pinchZoom = true
     /// Pull down at the top of a page to reload it (iPhone).
     var pullToRefresh = true
+}
+
+/// What the page's link menu can do with a link beyond opening it in place.
+enum LinkAction { case newTab, backgroundTab, privateTab, split }
+
+extension BrowserEngine {
+    func makePopupTab(configuration: AnyObject, events: TabEngineEvents) -> TabEngine? { nil }
 }
