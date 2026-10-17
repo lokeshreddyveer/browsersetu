@@ -577,6 +577,7 @@ final class BrowserModel: ObservableObject {
     @Published var lowPowerSavesMemory = true { didSet { saveSetting("low_power_memory", lowPowerSavesMemory ? "1" : "0") } }
     /// Tabs that cannot be closed by accident, and named sets of tabs saved to open again later.
     /// Downloads are sorted into folders by kind (Images, Documents…) inside the downloads folder.
+    @Published var maxDownloads = DownloadQueueRules.defaultConcurrent { didSet { saveSetting("download_concurrent", String(maxDownloads)); engine.downloads.maxConcurrent = maxDownloads } }
     @Published var organizeDownloads = false { didSet { saveSetting("organize_downloads", organizeDownloads ? "1" : "0"); engine.downloads.organize = organizeDownloads } }
     @Published var userScripts: [UserScript] = []
     /// Ask for Touch ID, Face ID or the device passcode before sensitive changes (backup, clearing data, scripts, extensions, protection off).
@@ -694,6 +695,10 @@ final class BrowserModel: ObservableObject {
     #if DEBUG
     /// Debug-only: `-UIState <name>` puts the window into a known state so it can be screenshotted without input.
     private func applyDebugUIState() async {
+        // Debug only: `-UIInstallExtension <folder>` installs that unpacked extension at start, for looking at it on a simulator.
+        if let path = UserDefaults.standard.string(forKey: "UIInstallExtension") {
+            do { _ = try await extensionCenter.inspect(URL(fileURLWithPath: path)); try await extensionCenter.installPending() } catch { notice = "Debug install failed: \(error)" }
+        }
         if let theme = UserDefaults.standard.string(forKey: "UITheme") { themeID = theme }
         guard let state = UserDefaults.standard.string(forKey: "UIState") else { return }
         let base = "http://127.0.0.1:18765"
@@ -736,6 +741,8 @@ final class BrowserModel: ObservableObject {
             toggleFocusMode()
         case "palette": paletteVisible = true
         case "workbench": sheet = .workbench
+        case "extension-popup":
+            if let first = extensionCenter.actions.first { try? await Task.sleep(for: .seconds(2)); extensionCenter.perform(actionFor: first.id) }
         case "search": openSearchPanel(prefill: UserDefaults.standard.string(forKey: "UISearchText"))
         case "overview":
             active?.load(URL(string: base + "/page")!)
@@ -1640,6 +1647,7 @@ final class BrowserModel: ObservableObject {
         bookmarkTags = Self.decodeMap(get("bookmark_tags"), as: [String].self)
         readingList = ReadingStore.loadIndex(root: profileFolder)
         organizeDownloads = get("organize_downloads") == "1"
+        maxDownloads = DownloadQueueRules.maxConcurrentChoices.contains(Int(get("download_concurrent") ?? "") ?? 0) ? Int(get("download_concurrent") ?? "")! : DownloadQueueRules.defaultConcurrent
         permissionLog = ((get("permission_log")?.data(using: .utf8)).flatMap { try? JSONDecoder().decode([PermissionEvent].self, from: $0) }) ?? []
         lockedTabIDs = Set(((get("locked_tabs")?.data(using: .utf8)).flatMap { try? JSONDecoder().decode([UInt64].self, from: $0) }) ?? [])
         savedSessions = ((get("saved_sessions")?.data(using: .utf8)).flatMap { try? JSONDecoder().decode([SavedSession].self, from: $0) }) ?? []
@@ -1895,7 +1903,7 @@ final class BrowserModel: ObservableObject {
         "sidebar_width", "single_toolbar", "split_orientation", "start_background", "startup", "startup_workspace",
         "strip_tracking", "tab_groups", "tab_layout", "tab_previews", "tint_toolbar", "toolbar_autohide", "toolbar_items",
         "workspaces", "double_click", "collapse_on_scroll", "search_template", "search_suggestions", "speed_pill", "pill_collapsed", "site_icons", "shortcuts", "homepage", "saved_sessions", "organize_downloads", "site_notes", "search_shortcuts", "bookmark_tags", "site_styles", "phone_toolbar", "address_display", "address_icon", "search_panel_bottom", "search_panel_bottom2", "swipe_address", "app_links", "app_link_sites", "blur_private_switcher", "permission_expiry", "favorites_order", "overview_style", "overview_grouped", "overview_sort", "dark_pages", "dark_sites", "website_appearance", "site_appearance", "theme", "theme_custom", "low_power_memory", "clear_on_quit", "remember_reading", "keep_form_drafts", "site_zoom", "group_colors",
-        "save_logins", "spotlight_bookmarks", "vim_on", "vim_keymap", "workflows", "download_rules", "extension_profiles", "site_delete_rules", "site_user_agents", "containers", "split_templates", "tab_tree", "block_webrtc", "webrtc_exceptions",
+        "save_logins", "download_concurrent", "spotlight_bookmarks", "vim_on", "vim_keymap", "workflows", "download_rules", "extension_profiles", "site_delete_rules", "site_user_agents", "containers", "split_templates", "tab_tree", "block_webrtc", "webrtc_exceptions",
     ]
 
     /// The same, with the slow key derivation and encryption on a background thread so the window never stalls.

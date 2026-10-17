@@ -69,4 +69,16 @@ final class ExtensionToolsTests: XCTestCase {
         XCTAssertTrue(ExtensionPermissionPreset.highRisk.contains("cookies"))
         XCTAssertFalse(ExtensionPermissionPreset.highRisk.contains("storage"))
     }
+
+    func testWebsiteRulesBecomeMatchPatternsAndNonsenseIsRefused() {
+        XCTAssertEqual(ExtensionSitePattern.pattern(forHost: "Example.com"), "*://example.com/*")
+        XCTAssertEqual(ExtensionSitePattern.pattern(forHost: "https://docs.example.com/a/b?x=1"), "*://docs.example.com/*")
+        XCTAssertEqual(ExtensionSitePattern.pattern(forHost: "*.example.com"), "*://*.example.com/*")
+        XCTAssertEqual(ExtensionSitePattern.pattern(forHost: "example.com:8443/path"), "*://example.com/*")
+        XCTAssertNil(ExtensionSitePattern.pattern(forHost: ""))
+        XCTAssertNil(ExtensionSitePattern.pattern(forHost: "localhost"))
+        XCTAssertNil(ExtensionSitePattern.pattern(forHost: "a b.com"))
+        XCTAssertNil(ExtensionSitePattern.pattern(forHost: "<all_urls>"))
+        XCTAssertNil(ExtensionSitePattern.pattern(forHost: "exa mple..com"))
+    }
 }

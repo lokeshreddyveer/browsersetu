@@ -244,3 +244,23 @@ struct ExtensionDiagnostic: Identifiable, Equatable {
         return parts.joined(separator: " · ")
     }
 }
+
+
+/// A website rule the person adds for one extension ("allow it on this site", "block it on that one"), turned into the match pattern WebKit understands.
+enum ExtensionSitePattern {
+    /// "example.com" becomes "*://example.com/*"; "*.example.com" covers its subdomains too. Addresses with paths, ports, schemes or odd characters are cut down to the host or refused.
+    static func pattern(forHost input: String) -> String? {
+        var text = input.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if text.contains("://") { text = URL(string: text)?.host ?? "" }
+        if let slash = text.firstIndex(of: "/") { text = String(text[..<slash]) }
+        if let colon = text.firstIndex(of: ":") { text = String(text[..<colon]) }
+        var wildcard = false
+        if text.hasPrefix("*.") { wildcard = true; text.removeFirst(2) }
+        let allowed = Set("abcdefghijklmnopqrstuvwxyz0123456789-.")
+        guard !text.isEmpty, text.count <= 253, text.contains("."), !text.hasPrefix("."), !text.hasSuffix("."), !text.contains(".."), text.allSatisfy({ allowed.contains($0) }) else { return nil }
+        return wildcard ? "*://*.\(text)/*" : "*://\(text)/*"
+    }
+
+    /// The host a pattern was made from, for showing it.
+    static func host(of pattern: String) -> String { HostPatterns.host(of: pattern) }
+}

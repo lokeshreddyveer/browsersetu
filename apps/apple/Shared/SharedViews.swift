@@ -302,6 +302,7 @@ private struct DownloadsList: View {
 
     var body: some View {
         List {
+            DownloadQueueControls(coordinator: coordinator)
             if !coordinator.active.isEmpty {
                 Section("In Progress") {
                     ForEach(Array(coordinator.active.values)) { d in
@@ -838,6 +839,8 @@ struct DownloadsSettingsSection: View {
     var body: some View {
         Section("Downloads") {
             LabeledContent("Saved to", value: DownloadCoordinator.directory.path)
+            Picker("Downloads at a time", selection: $model.maxDownloads) { ForEach(DownloadQueueRules.maxConcurrentChoices, id: \.self) { Text("\($0)").tag($0) } }
+            Text("The rest wait their turn, and you can move one to the front. WebKit has no way to limit a download's speed, so there is no bandwidth limit.").font(.caption).foregroundStyle(.secondary)
             Toggle("Sort downloads into folders by kind", isOn: $model.organizeDownloads)
             if model.organizeDownloads {
                 Text("New downloads go into Images, Documents, Archives, Audio, Video, Installers or Other inside that folder.").font(.caption).foregroundStyle(.secondary)
@@ -1113,6 +1116,8 @@ struct ExtensionPermissionsSheet: View {
     @State private var rows: [ExtensionPermissionRow] = []
     @State private var access = ExtensionSiteAccess.specific
     @State private var history: [String] = []
+    @State private var newSite = ""
+    @State private var siteProblem: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -1139,6 +1144,15 @@ struct ExtensionPermissionsSheet: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            VStack(alignment: .leading, spacing: 4) {
+                Text("A rule for one website").font(.subheadline.weight(.semibold))
+                HStack {
+                    TextField("example.com or *.example.com", text: $newSite).textFieldStyle(.roundedBorder).onSubmit { addRule(allow: true) }
+                    Button("Allow") { addRule(allow: true) }.disabled(newSite.isEmpty)
+                    Button("Block") { addRule(allow: false) }.disabled(newSite.isEmpty)
+                }
+                if let siteProblem { Text(siteProblem).font(.caption).foregroundStyle(.red) }
+            }
             Text("Turning something off can stop parts of the extension from working. It stays off until you turn it on again.")
                 .font(.caption).foregroundStyle(.secondary)
             HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
@@ -1146,6 +1160,11 @@ struct ExtensionPermissionsSheet: View {
         .padding(20)
         .frame(width: 460, height: 480)
         .onAppear { refresh() }
+    }
+
+    private func addRule(allow: Bool) {
+        if model.extensionCenter.addSiteRule(info.id, host: newSite, allow: allow) { newSite = ""; siteProblem = nil; refresh() }
+        else { siteProblem = "Use a website name such as example.com." }
     }
 
     private func refresh() {
@@ -1158,10 +1177,13 @@ struct ExtensionPermissionsSheet: View {
         if !list.isEmpty {
             Text(title).font(.subheadline.weight(.semibold))
             ForEach(list) { row in
-                Toggle(row.title, isOn: Binding(get: { row.granted }, set: { on in
-                    model.extensionCenter.setPermission(info.id, key: row.key, isSite: row.isSite, granted: on)
-                    refresh()
-                }))
+                HStack {
+                    Toggle(row.title, isOn: Binding(get: { row.granted }, set: { on in
+                        model.extensionCenter.setPermission(info.id, key: row.key, isSite: row.isSite, granted: on)
+                        refresh()
+                    }))
+                    if row.custom { Button(role: .destructive) { model.extensionCenter.removeSiteRule(info.id, key: row.key); refresh() } label: { Image(systemName: "trash") }.buttonStyle(.borderless) }
+                }
             }
         }
     }
@@ -1332,6 +1354,56 @@ struct RemoteExtensionsSection: View {
             } header: { Text("On Your Other Devices") } footer: {
                 Text("These extensions are installed on your other devices but not here. Sync never installs one for you: add it from its own page, so you review what it asks for on this device.")
             }
+        }
+    }
+}
+
+
+/// Pause and resume everything, hold the queue until a time, and the downloads that are waiting or put off for later. Used at the top of every downloads list.
+struct DownloadQueueControls: View {
+    @ObservedObject var coordinator: DownloadCoordinator
+
+    private var held: Bool { DownloadSchedule.isHeld(until: coordinator.heldUntil) }
+    private var hasWork: Bool { !coordinator.active.isEmpty || !coordinator.waiting.isEmpty || !coordinator.interrupted.isEmpty || !coordinator.scheduled.isEmpty }
+
+    var body: some View {
+        if hasWork || held {
+            Section {
+                HStack {
+                    if held { Button("Resume All") { coordinator.resumeAll() } } else { Button("Pause All") { coordinator.pauseAll() } }
+                    Menu("Hold Until…") {
+                        Button("In an hour") { coordinator.holdQueue(until: Date().addingTimeInterval(3600)) }
+                        ForEach([(2, "2:00 at night"), (7, "7:00 in the morning"), (22, "10:00 in the evening")], id: \.0) { hour, label in
+                            Button(label) { if let t = DownloadSchedule.nextOccurrence(hour: hour, minute: 0) { coordinator.holdQueue(until: t) } }
+                        }
+                        Divider()
+                        Button("Until I resume") { coordinator.holdQueue(until: .distantFuture) }
+                    }
+                    Spacer()
+                }
+                if held {
+                    Label(coordinator.heldUntil == .distantFuture ? "Downloads are held until you resume them." : "Downloads are held until \(coordinator.heldUntil.map { $0.formatted(date: .omitted, time: .shortened) } ?? "").",
+                          systemImage: "pause.circle").font(.caption).foregroundStyle(.secondary)
+                }
+                ForEach(coordinator.waiting) { item in
+                    HStack {
+                        VStack(alignment: .leading) { Text(item.filename).lineLimit(1); Text("Waiting for a free place").font(.caption).foregroundStyle(.secondary) }
+                        Spacer()
+                        Menu(item.priority.title) {
+                            ForEach(DownloadPriority.allCases.reversed()) { p in Button(p.title) { coordinator.setPriority(item.id, p) } }
+                        }.fixedSize()
+                        Button(role: .destructive) { coordinator.cancelWaiting(item.id) } label: { Image(systemName: "xmark") }.buttonStyle(.borderless)
+                    }
+                }
+                ForEach(coordinator.scheduled) { item in
+                    HStack {
+                        VStack(alignment: .leading) { Text(item.filename).lineLimit(1); Text("Starts when the hold ends").font(.caption).foregroundStyle(.secondary) }
+                        Spacer()
+                        Button(role: .destructive) { coordinator.removeScheduled(item.id) } label: { Image(systemName: "xmark") }.buttonStyle(.borderless)
+                    }
+                }
+                if !held, !coordinator.scheduled.isEmpty { Button("Start Them Now") { coordinator.startScheduledNow() } }
+            } header: { Text("Queue") }
         }
     }
 }

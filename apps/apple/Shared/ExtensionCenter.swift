@@ -47,6 +47,8 @@ struct ExtensionPermissionRow: Identifiable, Equatable {
     /// A website pattern (true) or a browser feature (false).
     var isSite: Bool
     var granted: Bool
+    /// A website rule the person added themselves (it can be removed); the others come from the extension's own request.
+    var custom = false
     var id: String { (isSite ? "site:" : "api:") + key }
 }
 
@@ -79,6 +81,8 @@ enum ExtensionError: LocalizedError {
 @MainActor
 protocol ExtensionBackend: AnyObject {
     func permissionRows(id: String) -> [ExtensionPermissionRow]
+    func addSiteRule(id: String, host: String, allow: Bool) -> Bool
+    func removeSiteRule(id: String, key: String)
     func manifestSummaries() -> [ExtensionManifestSummary]
     func diagnostics(openTabs: Int) -> [ExtensionDiagnostic]
     func previousVersionChanges(id: String) -> ExtensionFileDiff.Result?
@@ -146,17 +150,13 @@ final class ExtensionCenter: ObservableObject {
     var pinnedActions: [ExtensionActionItem] { actions.filter { isPinned($0.id) } }
     var hasExtensions: Bool { isSupported && !extensions.isEmpty }
 
-    /// Adding extensions is a Mac feature. The iPhone cannot open an extension's popup or list them, and installing code from a store inside an App
-    /// Store app needs a review decision first, so it offers no way to install.
-    var canInstall: Bool {
-        #if os(macOS)
-        isSupported
-        #else
-        false
-        #endif
-    }
+    /// Adding extensions works wherever WebKit's extension support does (macOS 15.4, iOS 18.4). On the iPhone the same review screen, hash-bound approval and
+    /// permission controls apply. Installing code from a store inside an App Store app still needs an App Review decision before any App Store release.
+    var canInstall: Bool { isSupported }
 
     func permissionHistory(_ id: String) -> [String] { backend?.permissionHistory(id: id) ?? [] }
+    @discardableResult func addSiteRule(_ id: String, host: String, allow: Bool) -> Bool { backend?.addSiteRule(id: id, host: host, allow: allow) ?? false }
+    func removeSiteRule(_ id: String, key: String) { backend?.removeSiteRule(id: id, key: key) }
     func manifestSummaries() -> [ExtensionManifestSummary] { backend?.manifestSummaries() ?? [] }
     func diagnostics(openTabs: Int) -> [ExtensionDiagnostic] { backend?.diagnostics(openTabs: openTabs) ?? [] }
     func previousVersionChanges(_ id: String) -> ExtensionFileDiff.Result? { backend?.previousVersionChanges(id: id) }
