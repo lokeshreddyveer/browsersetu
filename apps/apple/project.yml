@@ -56,6 +56,7 @@ targets:
         NSMicrophoneUsageDescription: Websites you allow can use your microphone.
         NSRemindersFullAccessUsageDescription: Browser Setu adds a reminder only when you choose Remind Me on selected text.
         NSLocalNetworkUsageDescription: Browser Setu finds your other devices on this network when you send them a link or file.
+        NSUserActivityTypes: [com.browsersetu.page]
         NSBonjourServices: [_browsersetu._tcp]
         NSLocationWhenInUseUsageDescription: Websites you allow can use your location.
     entitlements:
@@ -125,6 +126,7 @@ targets:
         NSMicrophoneUsageDescription: Websites you allow can use your microphone.
         NSRemindersFullAccessUsageDescription: Browser Setu adds a reminder only when you choose Remind Me on selected text.
         NSLocalNetworkUsageDescription: Browser Setu finds your other devices on this network when you send them a link or file.
+        NSUserActivityTypes: [com.browsersetu.page]
         NSBonjourServices: [_browsersetu._tcp]
         NSLocationWhenInUseUsageDescription: Websites you allow can use your location.
         SUFeedURL: https://raw.githubusercontent.com/lokeshreddyveer/browsersetu/main/appcast.xml
@@ -229,6 +231,7 @@ targets:
         NSCalendarsWriteOnlyAccessUsageDescription: Browser Setu adds an event to your calendar only when you open a calendar file you downloaded.
         NSFaceIDUsageDescription: Browser Setu asks for Face ID before sensitive changes, if you turn that on.
         NSLocalNetworkUsageDescription: Browser Setu finds your other devices on this network when you send them a link or file.
+        NSUserActivityTypes: [com.browsersetu.page]
         NSBonjourServices: [_browsersetu._tcp]
         NSRemindersFullAccessUsageDescription: Browser Setu adds a reminder only when you choose Remind Me on selected text.
     settings:

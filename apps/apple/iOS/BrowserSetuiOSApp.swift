@@ -41,6 +41,7 @@ struct BrowserSetuiOSApp: App {
                     if let pending = QuickAction.pending { QuickAction.pending = nil; Self.run(quick: pending, model: model) }
                 }
                 .onOpenURL { model.handleExternal($0) }
+                .handoff(model)
                 .overlay { privateCover }
         }
         .onChange(of: scenePhase) { _, phase in if phase != .active { model.saveNow() } }

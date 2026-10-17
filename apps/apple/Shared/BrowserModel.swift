@@ -69,12 +69,14 @@ final class BrowserModel: ObservableObject {
     /// Bumped whenever indexing is switched off, a site is excluded or the copy is erased; a page being read when it changes is not saved.
     var indexGeneration = 0
     var pageIndexStore: PageIndex?
+    @Published var spotlightBookmarks = false { didSet { saveSetting("spotlight_bookmarks", spotlightBookmarks ? "1" : "0"); syncSpotlight() } }
     var researchBacking: ResearchStore?
     var saveLoginsEnabled = true
     var neverSaveOrigins: Set<String> = []
     var askingAboutLogin = false
     var declinedFill: Set<String> = []
     var workbenchBacking: Workbench?
+    var spotlightTask: Task<Void, Never>?
     @Published var pageSnapshots: [String: [PageSnapshot]] = [:] { didSet { saveSetting("page_snapshots", encodedMap(pageSnapshots)) } }
     @Published var comparedProducts: [ComparedProduct] = [] { didSet { saveSetting("compared_products", encodedList(comparedProducts)) } }
     @Published var coupons: [SavedCoupon] = [] { didSet { saveSetting("saved_coupons", encodedList(coupons)) } }
@@ -1387,11 +1389,17 @@ final class BrowserModel: ObservableObject {
     // MARK: Bookmarks
 
     func refreshBookmarkState() {
+        if spotlightBookmarks { scheduleSpotlightSync() }
         guard let url = active?.url?.absoluteString, active?.isBlank == false else {
             activeBookmarked = false
             return
         }
         activeBookmarked = (try? core.isBookmarked(url: url)) ?? false
+    }
+
+    private func scheduleSpotlightSync() {
+        spotlightTask?.cancel()
+        spotlightTask = Task { try? await Task.sleep(for: .seconds(2)); if !Task.isCancelled { syncSpotlight() } }
     }
 
     func toggleBookmark() {
@@ -1638,6 +1646,7 @@ final class BrowserModel: ObservableObject {
         splitTemplates = Self.decodeMap(get("split_templates"), as: [SplitTemplate].self)["list"] ?? []
         tabTree = get("tab_tree") == "1"
         loadLoginSettings(get)
+        spotlightBookmarks = get("spotlight_bookmarks") == "1"
         siteUserAgents = Self.decodeMap(get("site_user_agents"), as: String.self)
         siteDeleteRules = Self.decodeMap(get("site_delete_rules"), as: [SiteDeleteRule].self)["list"] ?? []
         tempPermissions = Self.decodeMap(get("temp_permissions"), as: Double.self)
@@ -1867,7 +1876,7 @@ final class BrowserModel: ObservableObject {
         "sidebar_width", "single_toolbar", "split_orientation", "start_background", "startup", "startup_workspace",
         "strip_tracking", "tab_groups", "tab_layout", "tab_previews", "tint_toolbar", "toolbar_autohide", "toolbar_items",
         "workspaces", "double_click", "collapse_on_scroll", "search_template", "search_suggestions", "speed_pill", "pill_collapsed", "site_icons", "shortcuts", "homepage", "saved_sessions", "organize_downloads", "site_notes", "search_shortcuts", "bookmark_tags", "site_styles", "phone_toolbar", "address_display", "address_icon", "search_panel_bottom", "search_panel_bottom2", "swipe_address", "app_links", "app_link_sites", "blur_private_switcher", "permission_expiry", "favorites_order", "overview_style", "overview_grouped", "overview_sort", "dark_pages", "dark_sites", "website_appearance", "site_appearance", "theme", "theme_custom", "low_power_memory", "clear_on_quit", "remember_reading", "keep_form_drafts", "site_zoom", "group_colors",
-        "save_logins", "vim_on", "vim_keymap", "workflows", "download_rules", "extension_profiles", "site_delete_rules", "site_user_agents", "containers", "split_templates", "tab_tree", "block_webrtc", "webrtc_exceptions",
+        "save_logins", "spotlight_bookmarks", "vim_on", "vim_keymap", "workflows", "download_rules", "extension_profiles", "site_delete_rules", "site_user_agents", "containers", "split_templates", "tab_tree", "block_webrtc", "webrtc_exceptions",
     ]
 
     /// The same, with the slow key derivation and encryption on a background thread so the window never stalls.

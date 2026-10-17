@@ -653,7 +653,8 @@ struct BookmarkTransferSection: View {
         Section("Bookmarks") {
             Button("Import Bookmarks…") { importing = true }
             Button("Export Bookmarks…") { document = BookmarkHTMLDocument(text: model.bookmarksHTML()); exporting = true }
-            Text("Works with the HTML file that Safari, Chrome, Brave and Firefox export. Only web addresses are imported, and bookmarks you already have are not added twice.")
+            Toggle("Show bookmarks in Spotlight", isOn: $model.spotlightBookmarks)
+            Text("Works with the HTML file that Safari, Chrome, Brave and Firefox export. Only web addresses are imported, and bookmarks you already have are not added twice. Spotlight lists only your bookmarks (their titles and sites), on this device; history and open pages are never added. Handoff passes the page in front, never a private tab, to your other devices signed in to the same Apple Account.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.html]) { result in
