@@ -1,0 +1,52 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+env:
+  DEVELOPER_DIR: /Applications/Xcode_26.0.app/Contents/Developer
+jobs:
+  core:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain (pinned by core/rust-toolchain.toml)
+        run: rustup show
+      - name: Format
+        run: cd core && cargo fmt --check
+      - name: Lint
+        run: cd core && cargo clippy --locked --all-targets -- -D warnings
+      - name: Test
+        run: cd core && cargo test --locked
+      - name: Dependency audit
+        run: |
+          cargo install cargo-audit --locked
+          cd core && cargo audit
+      - name: Rust to Swift smoke test
+        run: scripts/ffi-smoke.sh
+  privacy-package:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Privacy package tests (core policy and WebKit rule compilation)
+        run: cd Packages/SetuPrivacyKit && swift test
+  apple:
+    runs-on: macos-26
+    needs: core
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install xcodegen
+      - run: scripts/build-xcframework.sh
+      - run: cd apps/apple && xcodegen generate
+      - name: Build macOS
+        run: cd apps/apple && xcodebuild -scheme BrowserSetuMac -destination 'platform=macOS' build
+      - name: macOS unit tests
+        run: cd apps/apple && xcodebuild -scheme BrowserSetuMac -destination 'platform=macOS' test -only-testing:BrowserSetuMacTests
+      - name: Build iOS
+        run: cd apps/apple && xcodebuild -scheme BrowserSetuiOS -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+      - name: iPhone unit tests
+        run: cd apps/apple && xcodebuild -scheme BrowserSetuiOS -destination 'platform=iOS Simulator,name=iPhone 17' CODE_SIGNING_ALLOWED=NO test -only-testing:BrowserSetuiOSTests
+      - name: Extension compatibility fixtures (must install and run)
+        run: cd apps/apple && xcodebuild -scheme BrowserSetuMac -destination 'platform=macOS' test -only-testing:BrowserSetuMacTests/ExtensionTests
+      - name: Source and evidence checks
+        run: scripts/check-privacy-kit-drift.sh

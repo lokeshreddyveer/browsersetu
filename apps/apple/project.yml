@@ -1,0 +1,316 @@
+name: BrowserSetu
+packages:
+  SetuPrivacyKit:
+    path: ../../Packages/SetuPrivacyKit
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: 2.10.0
+options:
+  bundleIdPrefix: com.browsersetu
+  deploymentTarget:
+    macOS: "14.0"
+    iOS: "17.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    ENABLE_HARDENED_RUNTIME: YES
+    GENERATE_INFOPLIST_FILE: NO
+    EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64
+targets:
+  BrowserSetuMac:
+    type: application
+    platform: macOS
+    sources: [Shared, Engines, macOS, Generated/browser_core.swift]
+    dependencies:
+      - package: SetuPrivacyKit
+        product: SetuPrivacyCore
+      - package: SetuPrivacyKit
+        product: SetuPrivacyWebKit
+      - framework: Generated/BrowserCore.xcframework
+        embed: false
+    info:
+      path: macOS/Info.plist
+      properties:
+        CFBundleDisplayName: Browser Setu
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleName: Browser Setu
+        LSApplicationCategoryType: public.app-category.productivity
+        # Files this app downloads are marked as coming from the internet, so macOS checks them before anything in them is opened.
+        LSFileQuarantineEnabled: true
+        # Registers the app for web links, so it can be chosen as the default browser.
+        CFBundleURLTypes:
+          - CFBundleURLName: Web link
+            CFBundleURLSchemes: [http, https]
+            CFBundleTypeRole: Viewer
+        # A browser must be able to open plain-HTTP pages. This exempts web content only; the app's own URLSession
+        # traffic (filter-list updates) stays under ATS and is HTTPS-only.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoadsInWebContent: true
+        # Lets the browser see whether a site's own app is installed, so it can ask before sending a link there.
+        LSApplicationQueriesSchemes: [youtube, instagram, twitter, spotify, reddit, whatsapp]
+        NSCameraUsageDescription: Websites you allow can use your camera.
+        NSMicrophoneUsageDescription: Websites you allow can use your microphone.
+        NSRemindersFullAccessUsageDescription: Browser Setu adds a reminder only when you choose Remind Me on selected text.
+        NSLocalNetworkUsageDescription: Browser Setu finds your other devices on this network when you send them a link or file.
+        NSBonjourServices: [_browsersetu._tcp]
+        NSLocationWhenInUseUsageDescription: Websites you allow can use your location.
+    entitlements:
+      path: macOS/BrowserSetu.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.network.client: true
+        com.apple.security.files.user-selected.read-write: true
+        com.apple.security.files.downloads.read-write: true
+        com.apple.security.print: true
+        com.apple.security.device.camera: true
+        com.apple.security.device.audio-input: true
+        com.apple.security.personal-information.calendars: true
+        # iCloud sync (an opt-in setting). The same identifier on every device is what lets them see each other's data.
+        com.apple.developer.ubiquity-kvstore-identifier: $(TeamIdentifierPrefix)com.browsersetu.sync
+    settings:
+      base:
+        # The bundled Rust XCFramework currently supplies Apple Silicon macOS only.
+        ARCHS: arm64
+        BROWSERSETU_BUNDLE_ID: com.browsersetu.mac
+        PRODUCT_BUNDLE_IDENTIFIER: $(BROWSERSETU_BUNDLE_ID)
+        PRODUCT_NAME: Browser Setu
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        DEVELOPMENT_TEAM: X4MH29QNRS
+        CODE_SIGN_IDENTITY: "Apple Development"
+        CODE_SIGN_STYLE: Automatic
+        # Debug builds are loaded by the test runner, which signs its bundles another way, so library validation is left off there only.
+        ENABLE_HARDENED_RUNTIME[config=Debug]: NO
+      configs:
+        Release:
+          CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
+  BrowserSetuMacDirect:
+    # The downloadable build (signed with Developer ID, notarized, updates itself with Sparkle). The App Store build above has no updater and no
+    # iCloud sync entitlement difference is needed here: iCloud key-value storage needs a profile only the App Store gives, so sync by iCloud is off in this build.
+    type: application
+    platform: macOS
+    sources: [Shared, Engines, macOS, Direct, Generated/browser_core.swift]
+    dependencies:
+      - package: SetuPrivacyKit
+        product: SetuPrivacyCore
+      - package: SetuPrivacyKit
+        product: SetuPrivacyWebKit
+      - package: Sparkle
+        product: Sparkle
+      - framework: Generated/BrowserCore.xcframework
+        embed: false
+    info:
+      path: Direct/Info.plist
+      properties:
+        CFBundleDisplayName: Browser Setu
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleName: Browser Setu
+        LSApplicationCategoryType: public.app-category.productivity
+        LSFileQuarantineEnabled: true
+        CFBundleURLTypes:
+          - CFBundleURLName: Web link
+            CFBundleURLSchemes: [http, https]
+            CFBundleTypeRole: Viewer
+          - CFBundleURLName: Browser Setu actions
+            CFBundleURLSchemes: [browsersetu]
+            CFBundleTypeRole: Viewer
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoadsInWebContent: true
+        LSApplicationQueriesSchemes: [youtube, instagram, twitter, spotify, reddit, whatsapp]
+        NSCameraUsageDescription: Websites you allow can use your camera.
+        NSMicrophoneUsageDescription: Websites you allow can use your microphone.
+        NSRemindersFullAccessUsageDescription: Browser Setu adds a reminder only when you choose Remind Me on selected text.
+        NSLocalNetworkUsageDescription: Browser Setu finds your other devices on this network when you send them a link or file.
+        NSBonjourServices: [_browsersetu._tcp]
+        NSLocationWhenInUseUsageDescription: Websites you allow can use your location.
+        SUFeedURL: https://raw.githubusercontent.com/lokeshreddyveer/browsersetu/main/appcast.xml
+        SUPublicEDKey: $(SPARKLE_PUBLIC_KEY)
+        SUEnableInstallerLauncherService: true
+        SUEnableAutomaticChecks: true
+    entitlements:
+      path: Direct/BrowserSetuDirect.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.network.client: true
+        com.apple.security.files.user-selected.read-write: true
+        com.apple.security.files.downloads.read-write: true
+        com.apple.security.print: true
+        com.apple.security.device.camera: true
+        com.apple.security.device.audio-input: true
+        com.apple.security.personal-information.calendars: true
+        # Sparkle's installer helpers, which the sandbox must be told about (its documented setup for sandboxed apps).
+        com.apple.security.temporary-exception.mach-lookup.global-name:
+          - com.browsersetu.mac-spks
+          - com.browsersetu.mac-spki
+    settings:
+      base:
+        ARCHS: arm64
+        PRODUCT_BUNDLE_IDENTIFIER: com.browsersetu.mac
+        # Named apart from the App Store build so both can be built in one products folder; the release script names the shipped copy "Browser Setu.app".
+        PRODUCT_NAME: Browser Setu Direct
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        DEVELOPMENT_TEAM: X4MH29QNRS
+        CODE_SIGN_IDENTITY: "Apple Development"
+        CODE_SIGN_STYLE: Automatic
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) DIRECT_BUILD"
+        SPARKLE_PUBLIC_KEY: "oUSDBhWVan2geZeulpgZHzdKPeeMAgJ8XQXg0toPm3c="
+        ENABLE_HARDENED_RUNTIME[config=Debug]: NO
+      configs:
+        Release:
+          CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
+  BrowserSetuSpeedWidget:
+    type: app-extension
+    platform: iOS
+    sources: [LiveActivity, SpeedWidget]
+    info:
+      path: SpeedWidget/Info.plist
+      properties:
+        CFBundleDisplayName: Browser Setu Speed
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.browsersetu.ios.speedwidget
+        PRODUCT_NAME: BrowserSetuSpeedWidget
+        TARGETED_DEVICE_FAMILY: "1"
+        SKIP_INSTALL: YES
+        EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64
+  BrowserSetuiOS:
+    type: application
+    platform: iOS
+    sources: [Shared, Engines, iOS, LiveActivity, Generated/browser_core.swift]
+    dependencies:
+      - target: BrowserSetuSpeedWidget
+      - package: SetuPrivacyKit
+        product: SetuPrivacyCore
+      - package: SetuPrivacyKit
+        product: SetuPrivacyWebKit
+      - framework: Generated/BrowserCore.xcframework
+        embed: false
+    entitlements:
+      path: iOS/BrowserSetu.entitlements
+      properties:
+        com.apple.developer.ubiquity-kvstore-identifier: $(TeamIdentifierPrefix)com.browsersetu.sync
+    info:
+      path: iOS/Info.plist
+      properties:
+        CFBundleDisplayName: Browser Setu
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        UILaunchScreen: {}
+        UIApplicationShortcutItems:
+          - UIApplicationShortcutItemType: com.browsersetu.quick.newtab
+            UIApplicationShortcutItemTitle: New Tab
+            UIApplicationShortcutItemIconSymbolName: plus.square
+          - UIApplicationShortcutItemType: com.browsersetu.quick.search
+            UIApplicationShortcutItemTitle: Search
+            UIApplicationShortcutItemIconSymbolName: magnifyingglass
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        NSSupportsLiveActivities: true
+        # Picture-in-picture for web video needs the app to be allowed to keep playing audio when it is not in front.
+        UIBackgroundModes: [audio]
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        # A browser must be able to open plain-HTTP pages. This exempts web content only; the app's own URLSession
+        # traffic (filter-list updates) stays under ATS and is HTTPS-only.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoadsInWebContent: true
+        NSCameraUsageDescription: Websites you allow can use your camera.
+        NSMicrophoneUsageDescription: Websites you allow can use your microphone.
+        NSLocationWhenInUseUsageDescription: Websites you allow can use your location.
+        NSCalendarsWriteOnlyAccessUsageDescription: Browser Setu adds an event to your calendar only when you open a calendar file you downloaded.
+        NSFaceIDUsageDescription: Browser Setu asks for Face ID before sensitive changes, if you turn that on.
+        NSLocalNetworkUsageDescription: Browser Setu finds your other devices on this network when you send them a link or file.
+        NSBonjourServices: [_browsersetu._tcp]
+        NSRemindersFullAccessUsageDescription: Browser Setu adds a reminder only when you choose Remind Me on selected text.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.browsersetu.ios
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        PRODUCT_NAME: Browser Setu
+        TARGETED_DEVICE_FAMILY: "1,2"
+  BrowserSetuMacTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources: [Tests]
+    dependencies:
+      - package: SetuPrivacyKit
+        product: SetuPrivacyCore
+      - package: SetuPrivacyKit
+        product: SetuPrivacyWebKit
+      - target: BrowserSetuMac
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.browsersetu.mac.tests
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_NSPrincipalClass: TestCleanup
+        CODE_SIGN_IDENTITY: "-"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Browser Setu.app/Contents/MacOS/Browser Setu"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+  BrowserSetuMacUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources: [UITests]
+    dependencies:
+      - target: BrowserSetuMac
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.browsersetu.mac.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_IDENTITY: "-"
+        TEST_TARGET_NAME: BrowserSetuMac
+        ENABLE_HARDENED_RUNTIME: NO
+  BrowserSetuiOSTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [iOSTests, Tests/LayoutPaletteTests.swift, Tests/WorkspaceAndPerformanceTests.swift, Tests/PrivacyIntegrationTests.swift, Tests/TestCleanup.swift]
+    dependencies:
+      - package: SetuPrivacyKit
+        product: SetuPrivacyCore
+      - package: SetuPrivacyKit
+        product: SetuPrivacyWebKit
+      - target: BrowserSetuiOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.browsersetu.ios.tests
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_NSPrincipalClass: TestCleanup
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Browser Setu.app/Browser Setu"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64
+  BrowserSetuiOSUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [iOSUITests]
+    dependencies:
+      - target: BrowserSetuiOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.browsersetu.ios.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: BrowserSetuiOS
+        EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64
+schemes:
+  BrowserSetuMac:
+    build:
+      targets:
+        BrowserSetuMac: all
+    test:
+      targets: [BrowserSetuMacTests, BrowserSetuMacUITests]
+  BrowserSetuMacDirect:
+    build:
+      targets:
+        BrowserSetuMacDirect: all
+  BrowserSetuiOS:
+    build:
+      targets:
+        BrowserSetuiOS: all
+    test:
+      targets: [BrowserSetuiOSTests, BrowserSetuiOSUITests]

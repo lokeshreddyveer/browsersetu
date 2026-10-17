@@ -1,0 +1,160 @@
+import CryptoKit
+import Foundation
+
+/// What is shared between your own devices, and how two copies are combined. The same snapshot travels over iCloud (sealed with your sync
+/// passphrase, so Apple stores only scrambled bytes) and over Wi-Fi (inside the one-time-code tunnel). Passwords, cookies, history and the
+/// page index are never part of it, and neither are private tabs.
+enum SyncRules {
+    /// Settings that mean the same on every device. Layout, sidebar and toolbar choices are left out on purpose: they belong to each screen.
+    static let settingKeys: Set<String> = [
+        "search_template", "search_suggestions", "search_shortcuts", "accent", "appearance", "address_display", "dark_pages", "dark_sites", "website_appearance", "site_appearance",
+        "site_zoom", "site_styles", "site_notes", "bookmark_tags", "group_colors", "strip_tracking", "app_links", "app_link_sites",
+        "blur_private_switcher", "permission_expiry", "homepage", "favorites_order",
+    ]
+    static let maxTabs = 100
+    static let maxBookmarks = 3_000
+    /// iCloud's key-value store holds 1 MB in all; a snapshot stays well under it.
+    static let maxSealedBytes = 600 * 1024
+
+    /// Combines another device's snapshot into this one. Bookmarks are added, never removed (so nothing is lost by syncing); settings follow
+    /// the newer snapshot, and only if the person asked for settings to sync. Returns what changed.
+    struct Outcome: Equatable { var bookmarksAdded = 0; var settingsApplied = 0; var tabs = 0 }
+
+    static func bookmarksToAdd(remote: [BackupPayload.Bookmark], existing: Set<String>) -> [BackupPayload.Bookmark] {
+        var seen = existing
+        var out: [BackupPayload.Bookmark] = []
+        for b in remote.prefix(maxBookmarks) {
+            guard ["http", "https"].contains(URL(string: b.url)?.scheme?.lowercased() ?? ""), seen.insert(b.url).inserted else { continue }
+            out.append(b)
+        }
+        return out
+    }
+
+    static func acceptedSettings(_ remote: [String: String]) -> [String: String] { remote.filter { settingKeys.contains($0.key) } }
+
+    static func cleanTabs(_ tabs: [BackupPayload.Tab]) -> [BackupPayload.Tab] {
+        Array(tabs.filter { ["http", "https"].contains(URL(string: $0.url)?.scheme?.lowercased() ?? "") }.prefix(maxTabs))
+    }
+
+    /// Makes a snapshot fit: first the tabs go, then the oldest bookmarks, until the sealed size is under the limit.
+    static func sealedFitting(_ snapshot: BackupPayload, passphrase: String, iterations: UInt32 = BackupFile.defaultIterations) throws -> Data {
+        var working = snapshot
+        var sealed = try BackupFile.seal(working, passphrase: passphrase, iterations: iterations)
+        while sealed.count > maxSealedBytes, !(working.tabs ?? []).isEmpty || working.bookmarks.count > 50 {
+            if let t = working.tabs, !t.isEmpty { working.tabs = Array(t.prefix(t.count / 2)) }
+            else { working.bookmarks = Array(working.bookmarks.prefix(working.bookmarks.count * 3 / 4)) }
+            sealed = try BackupFile.seal(working, passphrase: passphrase, iterations: iterations)
+        }
+        return sealed
+    }
+}
+
+struct RemoteTabs: Codable, Equatable, Identifiable {
+    var device: String
+    var date: Date
+    var tabs: [BackupPayload.Tab]
+    var id: String { device }
+}
+
+enum SyncKeys {
+    static let service = "com.browsersetu.sync"
+    /// The passphrase belongs to one profile: two profiles never share one by accident.
+    private static func account(_ profile: String) -> String { "passphrase|" + profile }
+
+    static func passphrase(profile: String) -> String? {
+        let own = SecretStore.get(service: service, account: account(profile)).flatMap { String(data: $0, encoding: .utf8) }
+        if own != nil || profile != "default" { return own }
+        // The one passphrase older versions kept belongs to the default profile only.
+        return SecretStore.get(service: service, account: "passphrase").flatMap { String(data: $0, encoding: .utf8) }
+    }
+    @discardableResult static func setPassphrase(_ text: String, profile: String) -> Bool { SecretStore.set(Data(text.utf8), service: service, account: account(profile)) }
+    static func clearPassphrase(profile: String) {
+        _ = SecretStore.delete(service: service, account: account(profile))
+        if profile == "default" { _ = SecretStore.delete(service: service, account: "passphrase") }
+    }
+
+    /// A short, stable name for a sync group, used in the iCloud key so only devices in the same group see each other's snapshots.
+    static func groupTag(_ group: String) -> String {
+        SHA256.hash(data: Data(("browser-setu-sync-group|" + group.lowercased()).utf8)).prefix(6).map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+/// iCloud's small key-value store. Each device writes its own sealed snapshot under its own key and reads the others, so two devices never
+/// overwrite each other. There is no server of ours, and without the passphrase what is stored cannot be read.
+@MainActor
+final class CloudSync {
+    private let store = NSUbiquitousKeyValueStore.default
+    private var observer: NSObjectProtocol?
+    var onChange: (() -> Void)?
+
+    static var available: Bool { FileManager.default.ubiquityIdentityToken != nil }
+
+    /// iCloud's key-value store holds 1 MB in all, for every group and device together; staying under this keeps writes from being refused.
+    static let storeBudget = 900 * 1024
+    private(set) var group: String
+
+    init(group: String) { self.group = group }
+
+    private var prefix: String { "bs.sync.v2." + SyncKeys.groupTag(group) + "." }
+    private func key(_ deviceID: String) -> String { prefix + deviceID }
+
+    /// Everything held under the sync names, in every group: what the 1 MB limit counts.
+    var bytesInUse: Int { store.dictionaryRepresentation.filter { $0.key.hasPrefix("bs.sync.") }.reduce(0) { $0 + (($1.value as? Data)?.count ?? 0) } }
+
+    func start() {
+        observer = NotificationCenter.default.addObserver(forName: NSUbiquitousKeyValueStore.didChangeExternallyNotification, object: store, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.onChange?() }
+        }
+        store.synchronize()
+    }
+
+    func stop() { if let observer { NotificationCenter.default.removeObserver(observer) }; observer = nil }
+
+    /// False when the snapshot does not fit: it is too big on its own, or this would push the whole store past its limit.
+    @discardableResult
+    func push(_ sealed: Data, deviceID: String) -> Bool {
+        guard sealed.count <= SyncRules.maxSealedBytes + 4096 else { return false }
+        let replacing = (store.data(forKey: key(deviceID))?.count ?? 0)
+        guard bytesInUse - replacing + sealed.count <= Self.storeBudget else { return false }
+        store.set(sealed, forKey: key(deviceID))
+        store.synchronize()
+        return true
+    }
+
+    /// The sealed snapshots of the other devices in this group, with each device's id.
+    func others(except deviceID: String) -> [(deviceID: String, data: Data)] {
+        store.dictionaryRepresentation.compactMap { name, value in
+            guard name.hasPrefix(prefix), name != key(deviceID), let data = value as? Data else { return nil }
+            return (String(name.dropFirst(prefix.count)), data)
+        }
+    }
+
+    func forgetThisDevice(deviceID: String) { store.removeObject(forKey: key(deviceID)); store.synchronize() }
+
+    /// The devices in this group that have written a snapshot, by their ids.
+    func deviceIDs() -> [String] {
+        store.dictionaryRepresentation.keys.filter { $0.hasPrefix(prefix) }.map { String($0.dropFirst(prefix.count)) }.sorted()
+    }
+
+    /// Removes another device's snapshot: it can no longer be read by the others, and does nothing until that device writes again.
+    func revoke(deviceID: String) { store.removeObject(forKey: key(deviceID)); store.synchronize() }
+}
+
+
+/// A device seen in this sync group. Nothing from a device is taken in until the user approves it, and a blocked device is ignored for good.
+struct SyncDevice: Codable, Equatable, Identifiable {
+    enum Status: String, Codable { case pending, approved, blocked }
+    var id: String
+    var name: String
+    var status: Status
+    var lastSeen: Date
+}
+
+/// A setting that differs between this device and another, waiting for the user's choice.
+struct SyncConflict: Equatable, Identifiable {
+    var key: String
+    var mine: String
+    var theirs: String
+    var device: String
+    var id: String { key }
+}
