@@ -28,8 +28,11 @@ struct PhoneRootView: View {
         UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first?.keyWindow?.safeAreaInsets.bottom ?? 0
     }
 
-    private static var topSafeInset: CGFloat {
-        UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first?.keyWindow?.safeAreaInsets.top ?? 0
+    /// Room kept clear of the page for the whole dock, measured from the home-indicator edge (the page already stops there): the dock's height and a small gap.
+    /// It must not read the window's own safe area while laying out: that made the whole screen come up blank.
+    private var pageReservedBottom: CGFloat {
+        guard showsDock, !landscape, !dockOnItsOwnStrip, !dockCompact, !model.floatingAddressVisible else { return 0 }
+        return PhoneChrome.height + PhoneChrome.dockLift + 8
     }
 
     private var landscape: Bool { isPhone && verticalSizeClass == .compact }
@@ -63,13 +66,6 @@ struct PhoneRootView: View {
         .onChange(of: sizeClass) { _, c in if c == .regular, !isPhone { model.sidebarVisible = true } }
         .onChange(of: scenePhase, initial: true) { _, phase in speedActivity.update(wanted: model.showSpeedPill, phase: phase, popups: model.speedPopups); model.speedActivityStatus = speedActivity.status }
         .onChange(of: model.showSpeedPill) { _, on in speedActivity.update(wanted: on, phase: scenePhase, popups: model.speedPopups); model.speedActivityStatus = speedActivity.status }
-        .onChange(of: showsDock && !dockCompact && !landscape && !dockOnItsOwnStrip, initial: true) { _, covered in
-            model.phoneBottomInset = covered ? PhoneChrome.height + PhoneChrome.dockLift + 8 : 0
-        }
-        // With the bars away the page runs under the status bar; it is told to lay itself out below it, so a site's own top bar is never hidden by the clock.
-        .onChange(of: showsDock && !dockOnItsOwnStrip, initial: true) { _, running in
-            model.phoneTopInset = running ? Self.topSafeInset : 0
-        }
         .onChange(of: model.speedPopups) { _, on in speedActivity.update(wanted: model.showSpeedPill, phase: scenePhase, popups: on) }
         .onAppear {
             if sizeClass == .regular, !isPhone { model.sidebarVisible = true }
@@ -102,7 +98,7 @@ struct PhoneRootView: View {
                         if tab.isBlank {
                             StartPageView(isPrivate: tab.isPrivate)
                                 // A floating toolbar covers the foot of the page, so the page leaves room for it.
-                                .environment(\.startBottomInset, showsDock && !landscape ? PhoneChrome.height + PhoneChrome.dockLift + Self.bottomSafeInset + 14 : 0)
+                                .environment(\.startBottomInset, showsDock && !landscape && pageReservedBottom == 0 ? PhoneChrome.height + PhoneChrome.dockLift + Self.bottomSafeInset + 14 : 0)
                         }
                         // With the dock in charge, suggestions appear in the search panel instead.
                         if !showsDock { PhoneSuggestions(address: model.addressBar, position: model.addressBarPosition) }
@@ -110,7 +106,7 @@ struct PhoneRootView: View {
                     .clipped()
                     .overlay(alignment: .bottom) {
                         WebStoreBanner()
-                            .padding(.bottom, showsDock && !landscape ? PhoneChrome.height + PhoneChrome.dockLift + Self.bottomSafeInset + 12 : 12)
+                            .padding(.bottom, showsDock && !landscape && pageReservedBottom == 0 ? PhoneChrome.height + PhoneChrome.dockLift + Self.bottomSafeInset + 12 : 12)
                     }
                     // In landscape the page runs under the sides of the screen (the notch side and the home-indicator side), so there are
                     // no black strips; WebKit keeps the text itself clear of them.
@@ -125,8 +121,17 @@ struct PhoneRootView: View {
                     PhoneAddressArea(tab: tab).transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
-            // With the bars away the page runs to every edge of the screen, top and bottom: nothing is drawn behind it.
-            .ignoresSafeArea(.container, edges: showsDock && !dockOnItsOwnStrip ? .vertical : [])
+            // With the bars away the page still starts below the status bar (a site's own top bar would otherwise sit under the clock) and ends above the dock
+            // (a site's own bottom tabs would otherwise be hidden by it). It runs under the home-indicator strip, which the dock's own room includes. When the dock
+            // folds into its small pill, the page takes that room back.
+            .ignoresSafeArea(.container, edges: showsDock && !dockOnItsOwnStrip ? .bottom : [])
+            // The strip behind the clock takes the page's own colour, so a dark site does not get a white band above it. It belongs to the page's area only.
+            .background(alignment: .top) {
+                if showsDock, model.tintToolbar, let tab = model.active { PageTopStrip(tab: tab) }
+            }
+            .padding(.bottom, pageReservedBottom)
+            .motion(.spring(response: 0.4, dampingFraction: 0.88), value: pageReservedBottom)
+            // The strip behind the clock takes the page's own colour, so a dark site does not get a white band above it.
             .motion(.easeInOut(duration: 0.3), value: dockOnItsOwnStrip)
             if showsDock, !dockOnItsOwnStrip, let tab = model.active {
                 // The dock is always at the bottom, where the thumb is: whole, or folded into one small pill.
@@ -866,4 +871,18 @@ final class KeyboardLift: ObservableObject {
     }
 
     deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
+}
+
+/// The strip behind the clock, in the page's own colour. A view of its own, so it follows the tab's colour as the page reports it.
+private struct PageTopStrip: View {
+    @ObservedObject var tab: TabController
+    var body: some View {
+        Group {
+            if !tab.isBlank, let tint = tab.tint {
+                Color(red: tint.red, green: tint.green, blue: tint.blue).transition(.opacity)
+            }
+        }
+        .ignoresSafeArea(edges: .top)
+        .animation(.easeInOut(duration: 0.25), value: tab.tint)
+    }
 }
