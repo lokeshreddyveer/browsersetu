@@ -3,6 +3,15 @@
   <channel>
     <title>Browser Setu</title>
     <item>
+      <title>Browser Setu 0.3.0</title>
+      <pubDate>Sat, 17 Oct 2026 16:18:34 -0000</pubDate>
+      <sparkle:version>4</sparkle:version>
+      <sparkle:shortVersionString>0.3.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <description><![CDATA[Advanced sync (a switch for each kind of thing, history sync, send a tab to another device, clear sync status), ten classic themes plus theme import and export, a Customize panel on the start page, typo-tolerant search across tabs, three-panel split view, certificate summary, guest window, per-site JavaScript and never-sleep list, fingerprint randomizing, De-AMP, YouTube ad skipping, leaked-password check, calculator and unit conversions, PDF editor with signing and redaction, accessibility improvements.]]></description>
+      <enclosure url="https://github.com/lokeshreddyveer/browsersetu/releases/download/v0.3.0/BrowserSetu-0.3.0.dmg" type="application/octet-stream" sparkle:edSignature="u629uKacjrImHH22rMursBcO9OrNTD+lWm6JtFRUG2FJnwXd7GlPfwNyw5zbjsDjoEN/luapqsu+cHYDVdseBQ==" length="16335974"/>
+    </item>
+    <item>
       <title>Browser Setu 0.2.0</title>
       <pubDate>Sat, 17 Oct 2026 01:55:42 -0000</pubDate>
       <sparkle:version>2</sparkle:version>
@@ -11,5 +20,5 @@
       <description><![CDATA[First public release. A native WebKit browser for macOS with a Rust core: tabs, sidebar layouts, workspaces, content blocking, per-site privacy, saved passwords in your Keychain, web extensions, research collections, developer tools, and automatic updates. Early release: see docs/capabilities.md for what has been checked and what has not.]]></description>
       <enclosure url="https://github.com/lokeshreddyveer/browsersetu/releases/download/v0.2.0/BrowserSetu-0.2.0.dmg" type="application/octet-stream" sparkle:edSignature="grmp8aD3U/KjtKeEkUcI3ESkfohsFjkds81VYV6rBzRGW6/JUxDLtcQ1hg178QCZEWXFRCB4AwrzLHSqGC2VCw==" length="14528271"/>
     </item>
-  </channel>
+    </channel>
 </rss>
