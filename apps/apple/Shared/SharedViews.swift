@@ -984,6 +984,7 @@ struct SettingsView: View {
         case "sync":
             SyncSection()
             BookmarkTransferSection()
+            ImportExportSection()
             BackupSection()
             RecoverySection()
         case "performance":
@@ -1054,6 +1055,7 @@ struct SettingsView: View {
             HealthCheckSection()
             MediaCompatibilitySection()
             BookmarkTransferSection()
+            ImportExportSection()
             SyncSection()
             BackupSection()
             RecoverySection()
