@@ -197,7 +197,7 @@ extension BrowserModel {
     @discardableResult
     func suspendAll(except keep: Set<UInt64> = []) async -> Int {
         var slept = 0
-        for tab in tabs where !keep.contains(tab.id) && tab.id != activeID && tab.id != splitTabID && tab.id != thirdSplitTabID && !tab.pinned && !isLocked(tab) && !tab.isPrivate && !tab.isBlank && !tab.isDiscarded && !neverSleeps(host: tab.url?.host) {
+        for tab in tabs where !keep.contains(tab.id) && tab.id != activeID && tab.id != splitTabID && tab.id != thirdSplitTabID && tab.id != fourthSplitTabID && !tab.pinned && !isLocked(tab) && !tab.isPrivate && !tab.isBlank && !tab.isDiscarded && !neverSleeps(host: tab.url?.host) {
             if await tab.engine.isBusy() { continue }
             guard tab.id != activeID else { continue }
             tab.discard(reason: "you put all other tabs to sleep")

@@ -48,9 +48,10 @@ the evidence for each item, is [`docs/capabilities.md`](docs/capabilities.md). M
 - **Several windows (Mac).** ⌘N opens another window; each has its own tabs, layout and workspace and they are all brought back at the next start. Right-click a tab › Move to Window, or **drag a tab
   from one window's tab bar or sidebar onto another's**: it moves with its page, history and place, and a window left with no tabs closes. **File › New Guest Window** (⌥⇧⌘N) opens private tabs only,
   keeps nothing and is not restored.
-- **Split view (Mac).** Two pages side by side or stacked, and a **third panel**. Start it from the Split View button in the toolbar, the Split View menu, the More menu, or right-click a tab ›
-  Open in Split View (or Add to Split View as a Third Panel). Click a panel to make it the active one; swap panels, change direction or close it from the same places. Every page in a panel stays loaded
-  and is never put to sleep. Save the two-page pair as a template to reopen it later.
+- **Split view (Mac).** Two to four pages in one window: two share it **exactly 50-50**, three are one tall page with two stacked beside it, four are a **2×2 grid**; or stack them instead of side by side.
+  Start it from the Split View button in the toolbar, the Split View menu, the More menu, or right-click a tab › Open in Split View (then Add to Split View as a Panel). Drag the divider between two panels
+  to resize them (double-click it to make them equal again), click a panel to make it the active one, swap panels or close the split from the same places. Every page in a panel stays loaded and is
+  never put to sleep. Save the pair as a template to reopen it later.
 - **Focus mode** drops the toolbar and card for an edge-to-edge page.
 - **Memory.** Tabs you are not using give their memory back in Balanced, Saver or Performance mode, and the app tells you which tabs are asleep and why. A **never-sleep list** keeps chosen sites awake;
   **Put all other tabs to sleep** respects it. A sleeping tab keeps its title, address, history and scroll position and reloads when you open it.

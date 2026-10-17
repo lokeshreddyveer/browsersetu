@@ -1,5 +1,6 @@
 import XCTest
 import WebKit
+import SwiftUI
 @testable import Browser_Setu
 
 final class FuzzyTextTests: XCTestCase {
@@ -113,10 +114,16 @@ final class CertificateIdentityTests: XCTestCase {
 
 @MainActor
 final class ThreePanelSplitTests: XCTestCase {
-    func testAThirdPanelJoinsTheSplitSwapsInAndLeavesWhenItsTabCloses() async throws {
+    func testPanelsShareTheWindowTheWayTheirCountSuggests() {
+        XCTAssertEqual(SplitLayout<EmptyView>.groups(count: 2), [[0], [1]])
+        XCTAssertEqual(SplitLayout<EmptyView>.groups(count: 3), [[0], [1, 2]], "one tall page with two beside it")
+        XCTAssertEqual(SplitLayout<EmptyView>.groups(count: 4), [[0, 2], [1, 3]], "two by two")
+    }
+
+    func testPanelsJoinUpToFourSwapInAndCloseUpTheGap() async throws {
         let m = BrowserModel(engine: WebKitEngine(), root: NSTemporaryDirectory() + "bs-3p-\(UUID().uuidString)", profile: "default")
         await m.start()
-        let a = m.active!, b = m.newTab(), c = m.newTab(), d = m.newTab()
+        let a = m.active!, b = m.newTab(), c = m.newTab(), d = m.newTab(), e = m.newTab()
         m.select(a.id)
         m.addThirdPanel(with: c)
         XCTAssertEqual(m.splitTabID, c.id, "with no split open, the first one added makes the pair")
@@ -124,23 +131,23 @@ final class ThreePanelSplitTests: XCTestCase {
         XCTAssertEqual(m.splitPanels.map(\.id), [a.id, c.id, b.id])
         let views = (a.hostView, b.hostView, c.hostView)
         m.addThirdPanel(with: d)
-        XCTAssertEqual(m.thirdSplitTabID, d.id, "a fourth replaces the third; three is the most")
-        m.addThirdPanel(with: b)
+        XCTAssertEqual(m.splitPanels.map(\.id), [a.id, c.id, b.id, d.id], "a fourth makes a grid")
+        m.addThirdPanel(with: e)
+        XCTAssertEqual(m.fourthSplitTabID, e.id, "a fifth replaces the fourth; four is the most")
         m.swapSplit(with: b.id)
         XCTAssertEqual(m.activeID, b.id)
-        XCTAssertEqual(m.splitPanels.map(\.id), [b.id, c.id, a.id], "the tab swapped out takes the panel's place")
+        XCTAssertEqual(m.splitPanels.map(\.id), [b.id, c.id, a.id, e.id], "the tab swapped out takes the panel's place")
         XCTAssertTrue(a.hostView === views.0 && b.hostView === views.1 && c.hostView === views.2, "no page is reloaded or recreated")
         m.closeTab(id: c.id)
-        XCTAssertEqual(m.splitTabID, a.id, "closing the second panel promotes the third")
-        XCTAssertNil(m.thirdSplitTabID)
-        m.addThirdPanel(with: d)
+        XCTAssertEqual(m.splitPanels.map(\.id), [b.id, a.id, e.id], "closing the second panel moves the others up")
         m.removeThirdPanel()
-        XCTAssertEqual(m.splitPanels.count, 2)
+        XCTAssertEqual(m.splitPanels.map(\.id), [b.id, a.id], "the last panel goes first")
         let priv = m.openTab(url: nil, isPrivate: true, select: false)
         m.addThirdPanel(with: priv)
         XCTAssertNil(m.thirdSplitTabID, "private tabs cannot join a normal split")
+        m.addThirdPanel(with: d); m.addThirdPanel(with: e)
         m.closeSplit()
-        XCTAssertNil(m.thirdSplitTabID, "closing the split closes the third panel too")
+        XCTAssertTrue(m.thirdSplitTabID == nil && m.fourthSplitTabID == nil, "closing the split closes every panel")
     }
 
     func testTabsInPanelsAreNotPutToSleep() async throws {

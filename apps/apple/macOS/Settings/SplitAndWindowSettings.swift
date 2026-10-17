@@ -18,8 +18,8 @@ struct SplitAndWindowSettingsSection: View {
                     if on { chosen.insert(.splitView) } else { chosen.remove(.splitView) }
                     model.toolbarItems = ToolbarItemID.allCases.filter { chosen.contains($0) }
                 }))
-            howTo("rectangle.split.2x1", "Split a page", "Right-click a tab and choose Open in Split View, press the Split View button in the toolbar, or use the Split View menu. Choose Add a Third Panel for a third page.")
-            howTo("hand.tap", "Change the active panel", "Click a panel to make it the active one. The one with the coloured edge receives typing and the address bar.")
+            howTo("rectangle.split.2x1", "Split a page", "Right-click a tab and choose Open in Split View, press the Split View button in the toolbar, or use the Split View menu. Add a Panel brings a third and then a fourth: three are one tall page with two beside it, four are a grid of two by two.")
+            howTo("hand.tap", "Change the active panel", "Click a panel to make it the active one. The one with the coloured edge receives typing and the address bar. Drag a divider to resize; double-click it to make the panels equal again.")
         } header: {
             Text("Split View")
         } footer: {
