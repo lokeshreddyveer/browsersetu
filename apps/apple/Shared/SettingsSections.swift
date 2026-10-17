@@ -230,7 +230,7 @@ struct SiteZoomSection: View {
             if model.siteZoom.isEmpty {
                 Label("No site has its own zoom", systemImage: "plus.magnifyingglass").foregroundStyle(.secondary)
             } else {
-                ForEach(model.siteZoom.sorted(by: { $0.key < $1.key }), id: \.key) { host, factor in
+                ShowMoreRows(model.siteZoom.sorted(by: { $0.key < $1.key }), id: \.key) { host, factor in
                     HStack {
                         Text(host)
                         Spacer()
@@ -270,7 +270,7 @@ struct SearchShortcutsSection: View {
             ForEach(SearchShortcuts.builtIn, id: \.keyword) { entry in
                 LabeledContent(entry.keyword, value: entry.name)
             }
-            ForEach(model.customSearchShortcuts.sorted(by: { $0.key < $1.key }), id: \.key) { key, template in
+            ShowMoreRows(model.customSearchShortcuts.sorted(by: { $0.key < $1.key }), id: \.key) { key, template in
                 HStack {
                     VStack(alignment: .leading) { Text(key).fontWeight(.medium); Text(template).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
                     Spacer()
@@ -332,7 +332,10 @@ struct SavedSignInsSection: View {
     var body: some View {
         Section {
             Toggle("Offer to save passwords", isOn: Binding(get: { saving }, set: { saving = $0; model.setSaveLogins($0) }))
-            ForEach(logins) { login in
+            Toggle("Keep my passwords in iCloud Keychain", isOn: Binding(get: { model.passwordsInICloudKeychain }, set: { on in Task { await model.setPasswordsInICloudKeychain(on) } }))
+            Text("Your saved passwords appear on your other Apple devices that use the same Apple Account, sealed end to end by Apple. Off keeps them on this device only. Needs iCloud Keychain on, and Browser Setu on those devices.")
+                .font(.caption).foregroundStyle(.secondary)
+            ShowMoreRows(logins) { login in
                 HStack {
                     VStack(alignment: .leading) {
                         Text(URL(string: login.origin)?.host ?? login.origin).fontWeight(.medium)
@@ -358,12 +361,12 @@ struct SavedSignInsSection: View {
                 if let checkSummary { Text(checkSummary).font(.caption).foregroundStyle(.secondary).transition(.opacity) }
             }
             if !model.neverSaveOrigins.isEmpty {
-                ForEach(model.neverSaveOrigins.sorted(), id: \.self) { origin in
+                ShowMoreRows(model.neverSaveOrigins.sorted(), id: \.self) { origin in
                     HStack { Text("Never offered for \(URL(string: origin)?.host ?? origin)").font(.caption); Spacer(); Button("Allow Again") { model.allowSavingLogins(for: origin); load() } }
                 }
             }
             if entries.isEmpty { Label("No saved sign-ins", systemImage: "key").foregroundStyle(.secondary) }
-            ForEach(entries, id: \.account) { entry in
+            ShowMoreRows(entries, id: \.account) { entry in
                 HStack {
                     VStack(alignment: .leading) {
                         Text(entry.host).fontWeight(.medium)
@@ -500,7 +503,7 @@ struct SitePermissionsSection: View {
             if origins.isEmpty {
                 Label("No saved decisions yet", systemImage: "camera").foregroundStyle(.secondary)
             }
-            ForEach(origins, id: \.self) { origin in
+            ShowMoreRows(origins, id: \.self) { origin in
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         Text(origin).fontWeight(.medium)
@@ -804,19 +807,20 @@ struct BackupSection: View {
     @State private var document = BackupDocument(data: Data())
     @State private var importing = false
     @State private var restoreData: Data?
+    @State private var includePasswords = false
 
     var body: some View {
         Section("Backup") {
             Button("Export an Encrypted Backup…") { Task { if await model.requireAuthentication("Export a backup of your settings and bookmarks") { exportSheet = true } } }
             Button("Restore from a Backup…") { Task { if await model.requireAuthentication("Restore a backup") { importing = true } } }
-            Text("A backup holds your bookmarks and Browser Setu settings, locked with a passphrase you choose. Passwords, cookies and history are not included. Browser Setu cannot recover a forgotten passphrase.")
+            Text("A backup holds your bookmarks and Browser Setu settings, locked with a passphrase you choose. Your saved passwords go in only if you tick that box; cookies and history never do. Save the file in iCloud Drive to keep it safe off this device. Browser Setu cannot recover a forgotten passphrase.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .sheet(isPresented: $exportSheet) {
-            PassphraseSheet(title: "Export a Backup", confirmLabel: "Create Backup", askTwice: true) { passphrase in
-                document = BackupDocument(data: try await model.makeBackupAsync(passphrase: passphrase))
+            PassphraseSheet(title: "Export a Backup", confirmLabel: "Create Backup", askTwice: true, action: { passphrase in
+                document = BackupDocument(data: try await model.makeBackupAsync(passphrase: passphrase, includePasswords: includePasswords))
                 exporting = true
-            }
+            }, optionTitle: "Include my saved passwords", option: $includePasswords)
         }
         .fileExporter(isPresented: $exporting, document: document, contentType: .data,
                       defaultFilename: "Browser Setu \(Date().formatted(.iso8601.year().month().day())).bsbackup") { result in
@@ -832,7 +836,7 @@ struct BackupSection: View {
             PassphraseSheet(title: "Restore a Backup", confirmLabel: "Restore", askTwice: false) { passphrase in
                 guard let data = restoreData else { return }
                 let result = try await model.restoreBackupAsync(data, passphrase: passphrase)
-                model.notice = "Restored \(result.bookmarks) bookmarks and \(result.settings) settings."
+                model.notice = "Restored \(result.bookmarks) bookmarks and \(result.settings) settings" + (model.lastRestoredPasswords > 0 ? " and \(model.lastRestoredPasswords) passwords." : ".")
                 restoreData = nil
             }
         }
@@ -845,6 +849,9 @@ struct PassphraseSheet: View {
     let confirmLabel: String
     let askTwice: Bool
     let action: (String) async throws -> Void
+    /// An extra choice shown under the passphrase (for the backup: whether to include saved passwords).
+    var optionTitle: String? = nil
+    var option: Binding<Bool>? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var first = ""
     @State private var second = ""
@@ -861,6 +868,7 @@ struct PassphraseSheet: View {
                 SecureField("Type it again", text: $second)
                 if !second.isEmpty && first != second { Text("The two passphrases do not match.").font(.caption).foregroundStyle(.red) }
             }
+            if let optionTitle, let option { Toggle(optionTitle, isOn: option).toggleStyle(.switch) }
             if let problem { Text(problem).font(.caption).foregroundStyle(.red) }
             HStack {
                 Spacer()

@@ -70,6 +70,8 @@ struct BrowserTheme: Identifiable, Equatable {
 
     static let all: [BrowserTheme] = [
         midnight,
+        BrowserTheme(id: "pureblack", name: "Pure Black", note: "True black everywhere, for OLED screens", accent: RGB(hex: 0x4DA3FF), chrome: RGB(hex: 0x000000),
+                     top: RGB(hex: 0x000000), bottom: RGB(hex: 0x000000), glow: RGB(hex: 0x000000), scheme: .dark, decoration: .none),
         BrowserTheme(id: "slime", name: "Slime Night", note: "Green ooze under a creeping fog", accent: RGB(hex: 0x7CFF3A), chrome: RGB(hex: 0x0A1409),
                      top: RGB(hex: 0x0B1A0C), bottom: RGB(hex: 0x050A05), glow: RGB(hex: 0x1F5A1A), scheme: .dark, decoration: .fog),
         BrowserTheme(id: "bloodmoon", name: "Blood Moon", note: "A red moon over a black sky", accent: RGB(hex: 0xFF3B4E), chrome: RGB(hex: 0x120609),
@@ -430,5 +432,23 @@ extension RGB {
         UIColor(color).getRed(&r, green: &g, blue: &b, alpha: &a)
         self.init(Double(r), Double(g), Double(b))
         #endif
+    }
+}
+
+// MARK: - Surfaces that follow the theme
+
+extension View {
+    /// A panel's own surface: the theme's raised colour when a theme with its own colours is in use, otherwise `fallback` (a system material or colour).
+    func themedFill<S: InsettableShape, F: ShapeStyle>(in shape: S, fallback: F) -> some View {
+        Group {
+            if let raised = ThemeState.raised { background(raised.opacity(0.94), in: shape) } else { background(fallback, in: shape) }
+        }
+    }
+
+    /// The same for a surface that fills its whole area (a bar, a drawer).
+    func themedBar<F: ShapeStyle>(fallback: F) -> some View {
+        Group {
+            if let raised = ThemeState.raised { background(raised.opacity(0.94)) } else { background(fallback) }
+        }
     }
 }
