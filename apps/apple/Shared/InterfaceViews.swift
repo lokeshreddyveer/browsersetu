@@ -280,8 +280,7 @@ struct TabListRow: View {
         .draggable(String(tab.id))
         .dropDestination(for: String.self) { items, _ in
             guard let raw = items.first, let dragged = UInt64(raw), dragged != tab.id else { return false }
-            model.reorder(dragged, before: tab.id)
-            return true
+            return model.acceptDroppedTab(dragged, before: tab.id)
         }
         #if os(iOS)
         .modifier(SwipeToClose(tab: tab))
@@ -336,8 +335,7 @@ struct TabCard: View {
         .draggable(String(tab.id))
         .dropDestination(for: String.self) { items, _ in
             guard let raw = items.first, let dragged = UInt64(raw), dragged != tab.id else { return false }
-            model.reorder(dragged, before: tab.id)
-            return true
+            return model.acceptDroppedTab(dragged, before: tab.id)
         }
         #if os(iOS)
         .modifier(SwipeToClose(tab: tab))

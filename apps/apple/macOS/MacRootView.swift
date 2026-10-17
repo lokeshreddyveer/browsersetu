@@ -108,7 +108,7 @@ struct MacRootView: View {
                 if (topBarVisible || toolbarPeek.revealed) && !model.floatingAddressVisible {
                     SuggestionsOverlay(address: model.addressBar)
                         .frame(width: model.singleRow ? max(model.inlineField.width, 440)
-                               : ToolbarPriority(fitting: geometry.size.width, leadingInset: toolbarInset).fieldWidth(window: geometry.size.width, leadingInset: toolbarInset))
+                               : ToolbarPriority(fitting: geometry.size.width, leadingInset: toolbarInset, extras: model.toolbarExtrasCount).fieldWidth(window: geometry.size.width, leadingInset: toolbarInset))
                         .frame(maxWidth: .infinity, alignment: model.singleRow ? .leading : .center)
                         .padding(.leading, model.singleRow ? min(model.inlineField.x, max(8, geometry.size.width - 448)) : 0)
                         .padding(.top, model.singleRow ? InlineBar.height : 40)
@@ -174,7 +174,8 @@ struct MacRootView: View {
             .onChange(of: geometry.size.width) { _, width in model.windowWidth = width }
         }
         .ignoresSafeArea(.container, edges: .top)
-        .background(WindowBackdrop())
+        // Behind the title bar too: a background does not reach into the safe area by itself, and the strip above the toolbar showed the system's grey instead of the theme.
+        .background(WindowBackdrop().ignoresSafeArea())
         .background(WindowObserver { model.windowFullScreen = $0 })
         .background(TrafficLightsController(hidden: foldedAway || floatingLayout || model.singleToolbar))
         .onAppear {

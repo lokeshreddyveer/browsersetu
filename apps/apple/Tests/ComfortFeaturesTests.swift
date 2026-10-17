@@ -174,3 +174,74 @@ final class RestingColorTests: XCTestCase {
     }
 }
 #endif
+
+final class ToolbarTintTests: XCTestCase {
+    func testAColourThatWouldClashOnlyWashesTheBar() {
+        let white = PageTint(red: 1, green: 1, blue: 1), navy = PageTint(red: 0.1, green: 0.15, blue: 0.4), cream = PageTint(red: 0.95, green: 0.92, blue: 0.8)
+        XCTAssertLessThanOrEqual(ToolbarTint.strength(for: white, dark: true, themed: false), 0.14, "a white page in a dark window")
+        XCTAssertLessThanOrEqual(ToolbarTint.strength(for: navy, dark: false, themed: false), 0.14, "a dark page in a light window")
+        XCTAssertEqual(ToolbarTint.strength(for: navy, dark: true, themed: false), 0.5, "a colour that suits the window shows clearly")
+        XCTAssertEqual(ToolbarTint.strength(for: cream, dark: false, themed: false), 0.5)
+        XCTAssertEqual(ToolbarTint.strength(for: navy, dark: true, themed: true), 0.30, "with a theme the page adds a lighter touch")
+        XCTAssertLessThan(ToolbarTint.strength(for: navy, dark: true, themed: true), ToolbarTint.strength(for: navy, dark: true, themed: false))
+    }
+}
+
+#if os(macOS)
+@MainActor
+final class ToolbarAndWindowDropTests: XCTestCase {
+    private func model(root: String? = nil) async -> BrowserModel {
+        let m = BrowserModel(engine: WebKitEngine(), root: root ?? NSTemporaryDirectory() + "bs-tb-\(UUID().uuidString)", profile: "default")
+        await m.start()
+        return m
+    }
+
+    func testTheWorkspaceAndSplitButtonsAreOnByDefaultAndEarlierToolbarsGetThemOnce() async throws {
+        let fresh = await model()
+        XCTAssertTrue(fresh.shows(.workspaces) && fresh.shows(.splitView))
+        XCTAssertEqual(fresh.toolbarExtrasCount, 2)
+        let root = NSTemporaryDirectory() + "bs-tbm-\(UUID().uuidString)"
+        let seed = await model(root: root)
+        // A toolbar saved before these buttons existed has no version marker.
+        try seed.core.setSetting(key: "toolbar_items", value: "sidebar,backForward,reload")
+        let old = BrowserModel(engine: WebKitEngine(), root: root, profile: "default")
+        await old.start()
+        XCTAssertTrue(old.shows(.workspaces) && old.shows(.splitView), "added once")
+        XCTAssertTrue(old.shows(.reload) && !old.shows(.bookmark), "and the rest of the choice is kept")
+        old.toolbarItems = old.toolbarItems.filter { $0 != .splitView }
+        let again = BrowserModel(engine: WebKitEngine(), root: root, profile: "default")
+        await again.start()
+        XCTAssertFalse(again.shows(.splitView), "switched off stays off")
+    }
+
+    func testATabDroppedFromAnotherWindowComesInWithItsPageAndTheEmptyWindowCloses() async throws {
+        let a = await model()
+        let b = BrowserModel(sharing: a)
+        b.hasStarted = true
+        let moving = b.openTab(url: nil, isPrivate: false)
+        var closed = false
+        b.onWindowShouldClose = { closed = true }
+        let first = a.active!
+        let view = moving.hostView
+        XCTAssertTrue(a.acceptDroppedTab(moving.id, before: first.id), "a tab from another window is accepted")
+        XCTAssertTrue(a.tabs.contains { $0.id == moving.id })
+        XCTAssertEqual(a.tabs.firstIndex { $0.id == moving.id }, a.tabs.firstIndex { $0.id == first.id }.map { $0 - 1 }, "and lands where it was dropped")
+        XCTAssertTrue(moving.hostView === view, "the same live page, not a reload")
+        XCTAssertFalse(b.tabs.contains { $0.id == moving.id })
+        XCTAssertTrue(closed, "the window it left has no tabs and closes")
+        XCTAssertFalse(a.acceptDroppedTab(999_999, before: nil), "an unknown tab is refused")
+    }
+
+    func testTabsDroppedWithinAWindowAreReorderedAndGuestWindowsRefuseNormalTabs() async throws {
+        let a = await model()
+        let t1 = a.active!, t2 = a.newTab(), t3 = a.newTab()
+        XCTAssertTrue(a.acceptDroppedTab(t3.id, before: t1.id))
+        XCTAssertEqual(a.tabs.map(\.id).prefix(3), [t3.id, t1.id, t2.id])
+        let guest = BrowserModel(sharing: a)
+        guest.hasStarted = true
+        guest.isGuest = true
+        _ = guest.openTab(url: nil, isPrivate: true)
+        XCTAssertFalse(guest.acceptDroppedTab(t1.id, before: nil), "a normal tab cannot be dropped into a guest window")
+    }
+}
+#endif

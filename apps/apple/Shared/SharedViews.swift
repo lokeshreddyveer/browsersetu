@@ -456,6 +456,10 @@ struct AppearanceSettingsSection: View {
                 }
                 Text(model.layoutPreset.summary).font(.caption).foregroundStyle(.secondary)
                 Toggle("Tint the toolbar with the page’s colour", isOn: $model.tintToolbar)
+                Text(model.themeIsActive
+                     ? "The bar takes a lighter touch of each page's colour on top of your theme. A colour that would clash with it (a white page in a dark window) only adds a faint wash."
+                     : "The bar takes on the colour of each page, the way Safari's does. A colour that would clash with the window (a white page in a dark window) only adds a faint wash.")
+                    .font(.caption).foregroundStyle(.secondary)
                 Toggle("Fold the toolbar and tabs into a pill while reading", isOn: $model.collapseOnScroll)
                 Picker("Double-click the top bar", selection: $model.doubleClickAction) {
                     ForEach(DoubleClickAction.allCases) { Text($0.title).tag($0) }
@@ -499,7 +503,7 @@ struct AppearanceSettingsSection: View {
             }
             #endif
             Section("Toolbar") {
-                ForEach(ToolbarItemID.allCases) { item in
+                ForEach(ToolbarItemID.available) { item in
                     #if os(iOS)
                     if item != .sidebar { toolbarToggle(item) }
                     #else
@@ -553,61 +557,35 @@ struct TabsSettingsSection: View {
     }
 }
 
+/// Every workspace as one tidy row: its icon, its name, how many tabs it holds, and a menu for the rest. Opening a row shows the colour and layout it uses.
 struct WorkspacesSettingsSection: View {
     @EnvironmentObject var model: BrowserModel
+    @State private var open: String?
 
     var body: some View {
-        Section("Workspaces") {
-            HStack {
-                Label("Personal", systemImage: "person")
-                Spacer()
-                Text("\(model.workspaceTabCount(""))").foregroundStyle(.secondary)
-            }
-            ForEach(model.workspaces) { ws in
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Menu {
-                            ForEach(Workspace.iconChoices, id: \.self) { icon in
-                                Button { model.setWorkspaceIcon(ws.name, icon: icon) } label: { Label(icon, systemImage: icon) }
-                            }
-                        } label: { Image(systemName: ws.icon).foregroundStyle(Theme.accent) }
-                            .menuStyle(.borderlessButton).fixedSize()
-                        Text(ws.name)
-                        Spacer()
-                        Text("\(model.workspaceTabCount(ws.name))").foregroundStyle(.secondary)
-                        Button { model.moveWorkspace(ws.name, by: -1) } label: { Image(systemName: "chevron.up").accessibilityLabel("Move workspace up") }.buttonStyle(.borderless)
-                        Button { model.moveWorkspace(ws.name, by: 1) } label: { Image(systemName: "chevron.down").accessibilityLabel("Move workspace down") }.buttonStyle(.borderless)
-                        Button("Rename") { rename(ws.name) }.buttonStyle(.borderless)
-                        Button("Delete", role: .destructive) { model.deleteWorkspace(ws.name) }.buttonStyle(.borderless)
-                    }
-                    Picker("Accent colour", selection: Binding(
-                        get: { ws.accent.flatMap(AccentChoice.init(rawValue:)) },
-                        set: { model.setWorkspaceAccent(ws.name, accent: $0) })) {
-                        Text("Same as everywhere").tag(AccentChoice?.none)
-                        ForEach(AccentChoice.allCases) { Text($0.title).tag(AccentChoice?.some($0)) }
-                    }
-                    #if os(macOS)
-                    Picker("Layout", selection: Binding(
-                        get: { ws.preset.flatMap(LayoutPreset.init(rawValue:)) },
-                        set: { model.setWorkspacePreset(ws.name, preset: $0) })) {
-                        Text("Keep current").tag(LayoutPreset?.none)
-                        ForEach(LayoutPreset.allCases) { Text($0.title).tag(LayoutPreset?.some($0)) }
-                    }
-                    #endif
-                }
-            }
-            Button("New Workspace…") { promptNewWorkspaceShared() }
-            Text("Deleting a workspace keeps its tabs; they move to Personal.").font(.caption).foregroundStyle(.secondary)
+        Section {
+            personalRow
+            ForEach(model.workspaces) { ws in WorkspaceSettingsRow(workspace: ws, expanded: open == ws.name) { animated(.easeOut(duration: 0.2)) { open = open == ws.name ? nil : ws.name } } }
+            Button { promptNewWorkspaceShared() } label: { Label("New Workspace…", systemImage: "plus.circle") }
+        } header: {
+            Text("Workspaces")
+        } footer: {
+            Text("A workspace keeps its own tabs, and can have its own accent colour and layout. Switch with the workspace button in the toolbar, the Workspace menu, or the sidebar. Deleting one keeps its tabs; they move to Personal.")
         }
     }
 
-    private func rename(_ old: String) {
-        let model = model
-        Task { @MainActor in
-            if let name = await Dialogs.promptText(title: "Rename Workspace", message: "New name for “\(old)”.", placeholder: old), !name.isEmpty {
-                model.renameWorkspace(old, to: name)
+    private var personalRow: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "person").font(.system(size: 14)).foregroundStyle(.secondary).frame(width: 30, height: 30)
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(0.07)))
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Personal").fontWeight(.medium)
+                Text("The default workspace").font(.caption).foregroundStyle(.secondary)
             }
+            Spacer()
+            TabCountBadge(count: model.workspaceTabCount(""))
         }
+        .padding(.vertical, 2)
     }
 
     private func promptNewWorkspaceShared() {
@@ -615,6 +593,120 @@ struct WorkspacesSettingsSection: View {
         Task { @MainActor in
             if let name = await Dialogs.promptText(title: "New Workspace", message: "Name this workspace.", placeholder: ""), !name.isEmpty {
                 model.createWorkspace(name)
+            }
+        }
+    }
+}
+
+private struct TabCountBadge: View {
+    let count: Int
+    var body: some View {
+        Text("\(count) tab\(count == 1 ? "" : "s")").font(.caption).foregroundStyle(.secondary)
+            .padding(.horizontal, 8).padding(.vertical, 2).background(Capsule().fill(Color.primary.opacity(0.07)))
+    }
+}
+
+private struct WorkspaceSettingsRow: View {
+    @EnvironmentObject var model: BrowserModel
+    let workspace: Workspace
+    let expanded: Bool
+    let toggle: () -> Void
+
+    private var accent: AccentChoice? { workspace.accent.flatMap(AccentChoice.init(rawValue:)) }
+    private var layout: LayoutPreset? { workspace.preset.flatMap(LayoutPreset.init(rawValue:)) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 12) {
+                Menu {
+                    ForEach(Workspace.iconChoices, id: \.self) { icon in
+                        Button { model.setWorkspaceIcon(workspace.name, icon: icon) } label: { Label(icon, systemImage: icon) }
+                    }
+                } label: {
+                    Image(systemName: workspace.icon).font(.system(size: 14)).foregroundStyle(accent?.color ?? Theme.accent).frame(width: 30, height: 30)
+                        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill((accent?.color ?? Theme.accent).opacity(0.14)))
+                }
+                .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize().help("Change the icon")
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(workspace.name).fontWeight(.medium)
+                    Text(summary).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Spacer()
+                TabCountBadge(count: model.workspaceTabCount(workspace.name))
+                Menu {
+                    Button("Rename…") { rename() }
+                    Button("Move Up") { model.moveWorkspace(workspace.name, by: -1) }
+                    Button("Move Down") { model.moveWorkspace(workspace.name, by: 1) }
+                    Divider()
+                    Button("Delete Workspace", role: .destructive) { model.deleteWorkspace(workspace.name) }
+                } label: {
+                    Image(systemName: "ellipsis.circle").font(.system(size: 15)).foregroundStyle(.secondary).accessibilityLabel("More for \(workspace.name)")
+                }
+                .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+                Button(action: toggle) {
+                    Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(expanded ? 90 : 0)).frame(width: 18, height: 28).contentShape(Rectangle())
+                        .accessibilityLabel(expanded ? "Hide options" : "Show options")
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.vertical, 2)
+            if expanded {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text("Accent colour").foregroundStyle(.secondary)
+                        Spacer()
+                        HStack(spacing: 9) {
+                            swatch(nil)
+                            ForEach(AccentChoice.allCases) { swatch($0) }
+                        }
+                    }
+                    #if os(macOS)
+                    HStack {
+                        Text("Layout when opened").foregroundStyle(.secondary)
+                        Spacer()
+                        Picker("", selection: Binding(get: { layout }, set: { model.setWorkspacePreset(workspace.name, preset: $0) })) {
+                            Text("Keep current").tag(LayoutPreset?.none)
+                            ForEach(LayoutPreset.allCases) { Text($0.title).tag(LayoutPreset?.some($0)) }
+                        }
+                        .labelsHidden().pickerStyle(.menu).fixedSize()
+                    }
+                    #endif
+                }
+                .padding(.top, 10).padding(.leading, 42)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: expanded)
+    }
+
+    private var summary: String {
+        var parts: [String] = []
+        parts.append(accent.map { "\($0.title) accent" } ?? "Same accent as everywhere")
+        if let layout { parts.append("opens in \(layout.title)") }
+        return parts.joined(separator: " · ")
+    }
+
+    private func swatch(_ choice: AccentChoice?) -> some View {
+        let selected = accent == choice
+        return Button { model.setWorkspaceAccent(workspace.name, accent: choice) } label: {
+            ZStack {
+                if let choice { Circle().fill(choice.color) } else { Circle().strokeBorder(Color.secondary.opacity(0.6), style: StrokeStyle(lineWidth: 1, dash: [2, 2])) }
+                Image(systemName: "checkmark").font(.system(size: 9, weight: .bold)).foregroundStyle(choice == nil ? Color.secondary : Color.white).opacity(selected ? 1 : 0)
+            }
+            .frame(width: 20, height: 20)
+            .overlay(Circle().strokeBorder(Theme.accent, lineWidth: 1.5).padding(-3).opacity(selected ? 1 : 0))
+        }
+        .buttonStyle(.plain)
+        .help(choice?.title ?? "Same as everywhere")
+        .accessibilityLabel((choice?.title ?? "Same as everywhere") + (selected ? ", selected" : ""))
+    }
+
+    private func rename() {
+        let model = model, old = workspace.name
+        Task { @MainActor in
+            if let name = await Dialogs.promptText(title: "Rename Workspace", message: "New name for “\(old)”.", placeholder: old), !name.isEmpty {
+                model.renameWorkspace(old, to: name)
             }
         }
     }

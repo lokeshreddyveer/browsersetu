@@ -88,6 +88,17 @@ extension BrowserModel {
         return true
     }
 
+    /// A tab was dropped on this window's tab list. From this window it is put in front of `target` (or at the end); from another window it is brought here with its page,
+    /// history and place intact, and the window it left closes if that was its last tab.
+    @discardableResult
+    func acceptDroppedTab(_ dragged: UInt64, before target: UInt64?) -> Bool {
+        if tabs.contains(where: { $0.id == dragged }) { reorder(dragged, before: target); return true }
+        guard let source = windows.model(forTab: dragged), source !== self, !isGuest || source.tabs.first(where: { $0.id == dragged })?.isPrivate == true else { return false }
+        guard source.moveTab(dragged, to: self) else { return false }
+        reorder(dragged, before: target)
+        return true
+    }
+
     /// Takes a tab that another window gave up. It joins this window's current workspace and group, so it is shown here.
     func adopt(_ tab: TabController, meta: TabMeta?) {
         tab.reassign(to: self)
@@ -161,3 +172,13 @@ extension WindowRegistry {
 }
 
 private extension String { var nonEmpty: String? { isEmpty ? nil : self } }
+
+extension View {
+    /// Lets this view take a tab dropped from this window or another one. Dropping anywhere on a tab list puts it at the end.
+    func acceptsDroppedTabs(_ model: BrowserModel) -> some View {
+        dropDestination(for: String.self) { items, _ in
+            guard let raw = items.first, let dragged = UInt64(raw) else { return false }
+            return model.acceptDroppedTab(dragged, before: nil)
+        }
+    }
+}
