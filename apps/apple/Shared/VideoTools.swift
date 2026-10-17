@@ -94,6 +94,9 @@ struct PageRepairView: View {
                     model.privacy.toggleSite(host: model.active?.url?.host); model.active?.reload()
                 }
                 step("Load the desktop version", "For pages that fail on the mobile layout.", "desktopcomputer") { model.active?.engine.setDesktopMode(true); model.active?.reload() }
+                step("Let this site start video by itself", "If a player on this page waits for a tap that it should not need.", "play.circle") {
+                    model.setAutoplayException(host: model.active?.url?.host, allowed: true); model.active?.reload()
+                }
                 step("Turn JavaScript back on", "In case it was switched off for the page.", "curlybraces") { model.active?.engine.setJavaScriptEnabled(true); model.active?.reload() }
                 step("Clear this site’s data and reload", "Removes its cookies and storage. You will be signed out of it.", "trash") {
                     guard let host = model.active?.url?.host else { return }

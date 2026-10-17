@@ -194,3 +194,60 @@ final class PageDefensePageTests: XCTestCase {
         XCTAssertEqual(display, "block")
     }
 }
+
+@MainActor
+final class AutoplayGuardTests: XCTestCase {
+    private func model() async -> BrowserModel {
+        let m = BrowserModel(engine: WebKitEngine(), root: NSTemporaryDirectory() + "bs-ap-\(UUID().uuidString)", profile: "default")
+        await m.start()
+        return m
+    }
+
+    private func probe(_ m: BrowserModel, host: String) async throws -> [String: Any] {
+        let tab = m.openTab(url: nil, isPrivate: false)
+        (tab.hostView as? WKWebView)?.frame = CGRect(x: 0, y: 0, width: 400, height: 300)
+        tab.engine.showHTML("<html><body><video id='v' autoplay muted></video><audio id='a'></audio></body></html>", baseURL: URL(string: "https://\(host)/"))
+        try await Task.sleep(for: .seconds(1.2))
+        let web = try XCTUnwrap(tab.hostView as? WKWebView)
+        let script = """
+        const v = document.getElementById('v'), a = document.getElementById('a');
+        let message = 'resolved';
+        try { message = await Promise.race([a.play().then(() => 'resolved'), new Promise(r => setTimeout(() => r('still waiting'), 800))]); } catch (e) { message = e.name + ': ' + e.message; }
+        return { message: message, autoplayAttribute: v.hasAttribute('autoplay'), patched: HTMLMediaElement.prototype.play.toString().indexOf('native code') < 0 };
+        """
+        let value = try await web.callAsyncJavaScript(script, contentWorld: .page)
+        return try XCTUnwrap(value as? [String: Any])
+    }
+
+    func testAPageCannotStartMediaWithoutATapAndTheAutoplayAttributeIsRemoved() async throws {
+        let m = await model()
+        XCTAssertTrue(m.blockAutoplay, "on unless the person turns it off")
+        let r = try await probe(m, host: "feed.example.test")
+        XCTAssertEqual(r["patched"] as? Bool, true)
+        XCTAssertTrue((r["message"] as? String ?? "").hasPrefix("NotAllowedError"), "play() with no tap is refused: \(String(describing: r["message"]))")
+        XCTAssertEqual(r["autoplayAttribute"] as? Bool, false, "an autoplay attribute does not start anything")
+    }
+
+    func testASiteOnTheExceptionListAndTheSwitchBeingOffLeavePlaybackAlone() async throws {
+        let m = await model()
+        m.setAutoplayException(host: "www.call.example.test", allowed: true)
+        let allowed = try await probe(m, host: "call.example.test")
+        XCTAssertFalse((allowed["message"] as? String ?? "").hasPrefix("NotAllowedError: Playback needs a tap"), "this site is let alone")
+        let other = await model()
+        other.blockAutoplay = false
+        let off = try await probe(other, host: "feed.example.test")
+        XCTAssertEqual(off["patched"] as? Bool, false, "nothing is installed with the switch off")
+    }
+
+    func testTheChoiceIsRememberedPerProfile() async throws {
+        let root = NSTemporaryDirectory() + "bs-apr-\(UUID().uuidString)"
+        let a = BrowserModel(engine: WebKitEngine(), root: root, profile: "default")
+        await a.start()
+        a.blockAutoplay = false
+        a.setAutoplayException(host: "x.test", allowed: true)
+        let b = BrowserModel(engine: WebKitEngine(), root: root, profile: "default")
+        await b.start()
+        XCTAssertFalse(b.blockAutoplay)
+        XCTAssertTrue(b.autoplayExceptions.contains("x.test"))
+    }
+}

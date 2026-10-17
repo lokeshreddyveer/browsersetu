@@ -11,6 +11,9 @@ struct WebPolicy: Equatable {
     var deAMP = false
     /// Skips and mutes the video ads on YouTube.
     var blockVideoAds = false
+    /// A page may start video or sound only after a tap or a key press, not by itself (a feed that plays as you scroll, a preview, the next video).
+    var blockAutoplay = false
+    var autoplayExceptions = Set<String>()
 }
 
 // MARK: - AMP links
@@ -160,6 +163,44 @@ enum PageScripts {
     })();
     """
 
+    /// Runs in every page and frame, before the page's own scripts. A page may start media (`play()`, an `autoplay` attribute, a video that begins on its own) only within six
+    /// seconds of a real tap, click or key press. Scrolling is neither: on a phone a scroll counts as a touch to WebKit, which is how a feed could start videos while you scrolled.
+    /// The six seconds cover the page that opens after a tap and starts its own player. Sites in `exceptions` are left alone.
+    static func noAutoplay(exceptions: Set<String>) -> String {
+        """
+        (function () {
+          var skip = \(json(Array(exceptions).sorted()));
+          var host = location.hostname.toLowerCase();
+          try { host = window.top.location.hostname.toLowerCase(); } catch (e) {}
+          host = host.replace(/^www\\./, '');
+          if (skip.some(function (s) { return host === s || host.endsWith('.' + s); })) return;
+          var armedUntil = 0;
+          function arm(e) { if (e.isTrusted) armedUntil = Date.now() + 6000; }
+          ['click', 'keydown', 'pointerup', 'touchend'].forEach(function (name) { if (name === 'click' || name === 'keydown') window.addEventListener(name, arm, true); });
+          try { var stored = Number(sessionStorage.getItem('__bsArm') || 0); if (Date.now() - stored < 8000) armedUntil = Date.now() + 6000; } catch (e) {}
+          window.addEventListener('click', function (e) { if (e.isTrusted) { try { sessionStorage.setItem('__bsArm', String(Date.now())); } catch (x) {} } }, true);
+          var realPlay = HTMLMediaElement.prototype.play;
+          HTMLMediaElement.prototype.play = function () {
+            if (Date.now() <= armedUntil || this.controls) return realPlay.apply(this, arguments);
+            try { this.pause(); } catch (e) {}
+            return Promise.reject(new DOMException('Playback needs a tap first.', 'NotAllowedError'));
+          };
+          // An element with the autoplay attribute starts without anyone calling play(): take the attribute away, and stop anything that starts by itself.
+          function tame(el) { try { if (el.autoplay) { el.autoplay = false; el.removeAttribute('autoplay'); } } catch (e) {} }
+          document.addEventListener('DOMContentLoaded', function () { document.querySelectorAll('video[autoplay],audio[autoplay]').forEach(tame); });
+          try {
+            new MutationObserver(function (list) {
+              list.forEach(function (m) { m.addedNodes.forEach(function (n) { if (n.nodeType === 1) { if (n.matches && n.matches('video,audio')) tame(n); if (n.querySelectorAll) n.querySelectorAll('video[autoplay],audio[autoplay]').forEach(tame); } }); });
+            }).observe(document, { childList: true, subtree: true });
+          } catch (e) {}
+          window.addEventListener('play', function (e) {
+            var el = e.target;
+            if (el && el.pause && !el.controls && Date.now() > armedUntil) { try { el.pause(); } catch (x) {} }
+          }, true);
+        })();
+        """
+    }
+
     /// On YouTube only: hides the ad slots, presses Skip when it shows, and while an ad that cannot be skipped is playing, mutes it and jumps to its end. The sound and
     /// speed are put back the moment the ad is over. Does nothing at all when no ad is playing.
     static let videoAds = """
@@ -231,6 +272,15 @@ extension BrowserModel {
         randomizeFingerprint = get("fingerprint_noise") == "1"
         deAMP = get("de_amp") != "0"
         blockVideoAds = get("video_ads") == "1"
+        blockAutoplay = get("block_autoplay") != "0"
+        autoplayExceptions = list("autoplay_exceptions")
+    }
+
+    func setAutoplayException(host: String?, allowed: Bool) {
+        guard let key = FaviconStore.key(forHost: host) else { return }
+        if allowed { autoplayExceptions.insert(key) } else { autoplayExceptions.remove(key) }
+        saveSetting("autoplay_exceptions", encodedMap(["list": Array(autoplayExceptions).sorted()]))
+        pushWebPolicy()
     }
 
     /// An AMP cache link, or nil. Cannot loop: the result is never an AMP cache address.
@@ -245,6 +295,14 @@ struct PageDefensesSection: View {
 
     var body: some View {
         Section {
+            Toggle("Stop videos and sound starting by themselves", isOn: $model.blockAutoplay)
+            ForEach(model.autoplayExceptions.sorted(), id: \.self) { site in
+                HStack {
+                    Label("\(site) may start media by itself", systemImage: "play.circle").font(.callout)
+                    Spacer()
+                    Button("Stop It") { model.setAutoplayException(host: site, allowed: false) }.buttonStyle(.borderless)
+                }
+            }
             Toggle("Open a site's own page instead of its AMP copy", isOn: $model.deAMP)
             Toggle("Skip and mute video ads on YouTube", isOn: $model.blockVideoAds)
             Toggle("Randomize canvas, audio and processor details", isOn: $model.randomizeFingerprint)
@@ -267,7 +325,7 @@ struct PageDefensesSection: View {
         } header: {
             Text("Pages")
         } footer: {
-            Text("AMP copies are replaced when a page names its own full version. YouTube ads are skipped by watching the player, not by blocking requests, so a change on YouTube's side can stop it working; some ads cannot be told apart from the video. Randomizing makes a site's canvas, audio and processor-count readings differ from other sites' and from run to run, so they cannot recognise this device; a few sites that draw pictures or sound can look slightly different, so each site has its own off switch in Site Privacy. Both of these apply to pages opened after the change.")
+            Text("A video or sound starts only after you tap or press a key, not while you scroll, and not by itself: a page that opens after your tap has six seconds to start its player. Playlists and “Autoplay next” wait for a tap; a site that needs to play by itself (a voice-chat page, say) can be allowed in Site Privacy. AMP copies are replaced when a page names its own full version. YouTube ads are skipped by watching the player, not by blocking requests, so a change on YouTube's side can stop it working; some ads cannot be told apart from the video. Randomizing makes a site's canvas, audio and processor-count readings differ from other sites' and from run to run, so they cannot recognise this device; a few sites that draw pictures or sound can look slightly different, so each site has its own off switch in Site Privacy. Both of these apply to pages opened after the change.")
         }
     }
 }

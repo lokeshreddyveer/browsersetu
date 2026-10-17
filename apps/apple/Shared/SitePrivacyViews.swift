@@ -96,6 +96,11 @@ struct SitePrivacyView: View {
         Toggle("Allow JavaScript on this site", isOn: Binding(
             get: { model.scriptsAllowed(forHost: host) },
             set: { model.setScripts(host: host, allowed: $0) }))
+        if model.blockAutoplay {
+            Toggle("Let this site start video and sound by itself", isOn: Binding(
+                get: { key.map { model.autoplayExceptions.contains($0) } ?? false },
+                set: { model.setAutoplayException(host: host, allowed: $0) }))
+        }
         Toggle("Never put this site's tabs to sleep", isOn: Binding(
             get: { model.neverSleeps(host: host) },
             set: { model.setNeverSleeps(host: host, $0) }))

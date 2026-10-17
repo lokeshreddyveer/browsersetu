@@ -3,7 +3,7 @@
 A native, security-first web browser for **macOS** and **iPhone/iPad**. It renders with the system's own WebKit, keeps everything on your device, and
 puts a small Rust core (tabs, address-bar logic, permission and navigation rules, per-profile SQLite storage) under a SwiftUI interface.
 
-> **Status: release candidate, in the production-hardening phase (0.3.1).** It is a real, working browser with a large automated test suite (about 650 tests), but
+> **Status: release candidate, in the production-hardening phase (0.3.2).** It is a real, working browser with a large automated test suite (about 650 tests), but
 > it is **not yet called production grade**: that needs the evidence in [`docs/RELEASE-BAR.md`](docs/RELEASE-BAR.md) to be complete and recorded. [`docs/capabilities.md`](docs/capabilities.md)
 > lists every feature as *Checked*, *Built* (compiled, not exercised end to end) or *Parked* (switched off), with the evidence and the limits. Read both before you rely on anything.
 
@@ -99,6 +99,9 @@ Every one can be changed in Settings › Shortcuts. The defaults:
   lists are optional downloads, fetched straight from their publishers only when you press Update (or turn on automatic updates, which is off by default). WebKit does not report blocked counts, so none is shown.
 - **Cleaner links and pages.** Tracking parameters are stripped from links (Copy Clean Link does the same); plain-HTTP addresses are upgraded to HTTPS; **De-AMP** sends links through Google's AMP cache to the site's
   own page, and replaces an AMP page that names its own full version.
+- **No videos or sound starting by themselves (on by default).** A page can start media only after a real tap or key press (and for six seconds after one, so the page you open by tapping can start its own player), not
+  while you scroll. On a phone a scroll counts as a touch to WebKit, which is how a feed such as YouTube's could start videos as you scrolled. Playlists and "Autoplay next" wait for a tap, and a site that needs to
+  play by itself (a voice-chat page, say) can be allowed in Site Privacy or with Repair This Page.
 - **Fingerprint randomizing (off by default).** Small, per-site changes to what canvas, WebGL read-back, audio and the processor count report, different for every site and every start, so a site cannot
   recognise this device by them. Each site has its own off switch for the few pages that draw pictures.
 - **YouTube ad skipping (off by default).** Hides the ad slots, presses Skip, and mutes and jumps past an ad that cannot be skipped. It watches the player instead of blocking requests, so a change on YouTube's

@@ -13,6 +13,9 @@ enum UserScriptInstaller {
             controller.addUserScript(WKUserScript(source: PageScripts.fingerprint(seed: fingerprintSeed, exceptions: policy.fingerprintExceptions),
                                                   injectionTime: .atDocumentStart, forMainFrameOnly: false))
         }
+        if policy.blockAutoplay {
+            controller.addUserScript(WKUserScript(source: PageScripts.noAutoplay(exceptions: policy.autoplayExceptions), injectionTime: .atDocumentStart, forMainFrameOnly: false))
+        }
         if policy.deAMP {
             controller.addUserScript(WKUserScript(source: PageScripts.deAMP, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: .defaultClient))
         }
