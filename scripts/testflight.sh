@@ -17,7 +17,7 @@ case "$BUILD" in ''|*[!0-9]*) echo "build number must be a whole number"; exit 1
 ARCHIVE="$OUT/BrowserSetu-$BUILD.xcarchive"
 scripts/build-xcframework.sh >/dev/null
 (cd apps/apple && xcodegen generate --spec project.yml >/dev/null)
-echo "▸ Archiving build $BUILD…"
+echo "▸ Archiving build ${BUILD}..."
 xcodebuild archive -project apps/apple/BrowserSetu.xcodeproj -scheme BrowserSetuiOS -configuration Release -destination 'generic/platform=iOS' \
   -archivePath "$ARCHIVE" -allowProvisioningUpdates DEVELOPMENT_TEAM="$TEAM" CURRENT_PROJECT_VERSION="$BUILD" 2>&1 | grep -E "error:|ARCHIVE (SUCCEEDED|FAILED)"
 [ -d "$ARCHIVE" ] || { echo "✘ archive failed"; exit 1; }
@@ -33,7 +33,7 @@ cat > "$OUT/ExportOptions.plist" <<PL
   <key>uploadSymbols</key><true/>
 </dict></plist>
 PL
-echo "▸ Uploading to App Store Connect…"
+echo "▸ Uploading to App Store Connect..."
 xcodebuild -exportArchive -archivePath "$ARCHIVE" -exportOptionsPlist "$OUT/ExportOptions.plist" -allowProvisioningUpdates 2>&1 | grep -E "error:|Upload|EXPORT (SUCCEEDED|FAILED)|Uploaded|There is no|Cloud signing"
 echo "$BUILD" > "$OUT/last-build"
 echo "Done. Build $BUILD is uploaded; it appears in TestFlight after Apple finishes processing it (usually 5-15 minutes)."

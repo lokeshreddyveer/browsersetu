@@ -69,7 +69,7 @@ if [ -d "$SP" ]; then
   codesign --force --timestamp --options runtime --sign "$SIGN_IDENTITY" --entitlements "$DERIVED/Build/Intermediates.noindex/BrowserSetu.build/Release/BrowserSetuMacDirect.build/Browser Setu Direct.app.xcent" "$APP"
 fi
 codesign --verify --deep --strict --verbose=2 "$APP" 2>&1 | tail -2
-SANDBOX="$(codesign -d --entitlements :- "$APP" 2>/dev/null | plutil -extract com.apple.security.app-sandbox raw -o - - 2>/dev/null || echo missing)"
+SANDBOX="$(codesign -d --entitlements - --xml "$APP" 2>/dev/null | python3 -c 'import sys,plistlib; d=sys.stdin.buffer.read(); print(str(plistlib.loads(d[d.index(b"<?xml"):]).get("com.apple.security.app-sandbox", "missing")).lower())' 2>/dev/null || echo missing)"
 [ "$SANDBOX" = "true" ] || fail "the app's sandbox entitlement is '$SANDBOX', not true; refusing to release it."
 
 echo "▸ Notarizing the app (this waits for Apple)"
