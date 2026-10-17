@@ -9,9 +9,10 @@ extension EnvironmentValues {
     }
 }
 
-/// The page a blank tab shows. Quiet and fast: a small greeting, one large search field, your favorites, one card to carry on where you were,
-/// compact chips for places you go often, and a single honest line about protection at the bottom. It is plain SwiftUI over the browser's own
-/// data (bookmarks, history, tabs); there is no web view behind it, and nothing on it is fetched from the network except site icons you allow.
+/// The page a blank tab shows. Quiet and fast: the day and a greeting, one large search field, your favorites as cards, one card to carry on where you
+/// were, the places you go often, and a single honest line about protection at the foot. Long lists show a few and say how many more there are. It is plain
+/// SwiftUI over the browser's own data (bookmarks, history, tabs); there is no web view behind it, and nothing on it is fetched from the network except site
+/// icons you allow.
 struct StartPageView: View {
     @EnvironmentObject var model: BrowserModel
     let isPrivate: Bool
@@ -21,15 +22,24 @@ struct StartPageView: View {
     @State private var newURL = ""
     @State private var newName = ""
 
+    /// The Customize size choice scales the greeting and the search box as well as the site tiles.
+    private var startScale: CGFloat { model.startTile.points / 52 }
+
     private var accent: Color { isPrivate ? Theme.privateAccent : Theme.accent }
+
+    #if os(macOS)
+    private let contentWidth: CGFloat = 720
+    #else
+    private let contentWidth: CGFloat = 640
+    #endif
 
     var body: some View {
         GeometryReader { geo in
             ScrollView {
                 VStack(spacing: 0) {
-                    Spacer(minLength: 24)
-                    VStack(spacing: 34) {
-                        VStack(spacing: 22) {
+                    Spacer(minLength: 28)
+                    VStack(spacing: 30) {
+                        VStack(spacing: 24) {
                             greeting
                             heroSearch
                         }
@@ -45,17 +55,17 @@ struct StartPageView: View {
                             if !model.remoteTabs.isEmpty { OtherDeviceTabs() }
                         }
                     }
-                    Spacer(minLength: 24)
+                    Spacer(minLength: 28)
                     if !isPrivate {
-                        HStack(spacing: 14) {
+                        HStack(spacing: 10) {
                             PrivacyLine()
                             CustomizeMenu()
                         }
-                        .padding(.top, 18)
+                        .padding(.top, 20)
                         .padding(.bottom, bottomInset)
                     }
                 }
-                .frame(maxWidth: 600)
+                .frame(maxWidth: contentWidth)
                 .padding(.horizontal, 24).padding(.vertical, 18)
                 .frame(maxWidth: .infinity, minHeight: geo.size.height)
             }
@@ -63,6 +73,7 @@ struct StartPageView: View {
             .scrollBounceBehavior(.basedOnSize)
         }
         .background(background)
+        .motion(.easeOut(duration: 0.25), value: model.startBackground)
         .alert("Add Favorite", isPresented: $addingFavorite) {
             TextField("Website address", text: $newURL)
             TextField("Name (optional)", text: $newName)
@@ -78,9 +89,18 @@ struct StartPageView: View {
     private var greeting: some View {
         let hour = Calendar.current.component(.hour, from: Date())
         let word = switch hour { case 5..<12: "Good morning"; case 12..<17: "Good afternoon"; case 17..<22: "Good evening"; default: "Good night" }
-        return Text(isPrivate ? "Private Browsing" : (model.showGreeting ? word : "Browser Setu"))
-            .font(.system(size: 22, weight: .medium)).foregroundStyle(.secondary)
-            .accessibilityAddTraits(.isHeader)
+        let title = isPrivate ? "Private Browsing" : (model.showGreeting ? word : "Browser Setu")
+        return VStack(spacing: 6) {
+            if !isPrivate, model.showGreeting {
+                Text(Date().formatted(.dateTime.weekday(.wide).day().month(.wide)))
+                    .font(.system(size: 12, weight: .semibold)).tracking(0.9).textCase(.uppercase).foregroundStyle(accent.opacity(0.9))
+            }
+            Text(title)
+                .font(.system(size: 34 * startScale, weight: .semibold, design: .rounded)).foregroundStyle(.primary.opacity(0.92))
+                .minimumScaleFactor(0.7).lineLimit(1)
+                .accessibilityAddTraits(.isHeader)
+        }
+        .motion(.easeOut(duration: 0.2), value: model.startTile)
     }
 
     /// On the Mac this is a real text field of its own: clicking it keeps focus and typing in the page, with suggestions right under it. The
@@ -92,12 +112,13 @@ struct StartPageView: View {
         #else
         Button { model.openSearchPanel() } label: {
             HStack(spacing: 10) {
-                Image(systemName: "magnifyingglass").font(.system(size: 16, weight: .regular)).foregroundStyle(.secondary)
-                Text("Search or enter address").font(.system(size: 16)).foregroundStyle(.secondary)
+                Image(systemName: "magnifyingglass").font(.system(size: 17 * startScale, weight: .medium)).foregroundStyle(accent)
+                Text("Search or enter address").font(.system(size: 16 * startScale)).foregroundStyle(.secondary)
                 Spacer()
+                EngineBadge()
             }
-            .padding(.horizontal, 18).frame(height: 54)
-            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(scheme == .dark ? Color(red: 0.110, green: 0.133, blue: 0.188) : Color.primary.opacity(0.06)))
+            .padding(.horizontal, 18).frame(height: 56)
+            .startField(radius: 28)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -117,13 +138,18 @@ struct StartPageView: View {
         }
         .scaledFont(14)
         .padding(16).frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(accent.opacity(0.10)))
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(accent.opacity(0.10)))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(accent.opacity(0.25), lineWidth: 0.5))
     }
 
     /// Midnight charcoal with a barely perceptible blue tint in the middle.
     private var background: some View {
         Group {
             if isPrivate { Color.platformBackground }
+            else if model.startBackground == .plain {
+                // Plain: one flat colour, no glow, decoration or photo.
+                if model.themeIsActive { model.activeTheme.top.color } else if scheme == .dark { Color(red: 0.047, green: 0.059, blue: 0.090) } else { Color.platformBackground }
+            }
             else if model.themeIsActive { ThemeBackdrop(theme: model.activeTheme, photo: model.themePhoto, photoDim: model.customTheme.photoDim) }
             else if scheme == .dark {
                 ZStack {
@@ -139,52 +165,146 @@ struct StartPageView: View {
     }
 }
 
-// MARK: - Shared pieces
+// MARK: - Shared style
 
-/// A small heading over a section, centered, quiet.
-private struct SectionHeading: View {
-    let title: String
-    var body: some View {
-        Text(title).scaledFont(11, weight: .semibold).tracking(0.8).foregroundStyle(.secondary).textCase(.uppercase)
-            .accessibilityAddTraits(.isHeader)
+/// The card every block of the page sits on: the theme's raised colour when a theme is in use, otherwise a soft tint of the text colour, with a hairline edge.
+private struct StartCardStyle: ViewModifier {
+    var radius: CGFloat = 16
+    @Environment(\.colorScheme) private var scheme
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        content
+            .background(shape.fill(ThemeState.raised?.opacity(0.62) ?? Color.primary.opacity(scheme == .dark ? 0.075 : 0.05)))
+            .overlay(shape.strokeBorder(Color.primary.opacity(scheme == .dark ? 0.09 : 0.07), lineWidth: 0.5))
     }
 }
 
-/// Chips that wrap onto further lines and stay centered, so a long title never runs off the edge.
-private struct WrapLayout: Layout {
-    var spacing: CGFloat = 8
+/// The large search field's surface: slightly brighter than a card, with a soft shadow, so it is the first thing the eye lands on.
+private struct StartFieldStyle: ViewModifier {
+    var radius: CGFloat = 28
+    var focused = false
+    @Environment(\.colorScheme) private var scheme
 
-    private func rows(_ subviews: Subviews, width: CGFloat) -> [[Int]] {
-        var rows: [[Int]] = [[]], x: CGFloat = 0
-        for index in subviews.indices {
-            let size = subviews[index].sizeThatFits(.unspecified)
-            if x + size.width > width, !rows[rows.count - 1].isEmpty { rows.append([]); x = 0 }
-            rows[rows.count - 1].append(index)
-            x += size.width + spacing
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        content
+            .background(shape.fill(ThemeState.raised?.opacity(0.85) ?? (scheme == .dark ? Color(red: 0.115, green: 0.138, blue: 0.195) : Color.white.opacity(0.9))))
+            .overlay(shape.strokeBorder(focused ? Theme.accent.opacity(0.85) : Color.primary.opacity(scheme == .dark ? 0.10 : 0.08), lineWidth: focused ? 1.5 : 0.5))
+            .shadow(color: focused ? Theme.accent.opacity(0.25) : .black.opacity(scheme == .dark ? 0.30 : 0.08), radius: focused ? 14 : 10, y: 3)
+    }
+}
+
+private extension View {
+    func startCard(radius: CGFloat = 16) -> some View { modifier(StartCardStyle(radius: radius)) }
+    func startField(radius: CGFloat = 28, focused: Bool = false) -> some View { modifier(StartFieldStyle(radius: radius, focused: focused)) }
+}
+
+/// A button that rises slightly under the pointer.
+private struct HoverLift: ViewModifier {
+    @State private var hovering = false
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(hovering ? 1.035 : 1)
+            .offset(y: hovering ? -2 : 0)
+            .motion(.spring(response: 0.25, dampingFraction: 0.75), value: hovering)
+            .onHover { hovering = $0 }
+    }
+}
+
+private extension View { func hoverLift() -> some View { modifier(HoverLift()) } }
+
+/// The name of the search engine in use, as a small capsule at the end of the search field.
+private struct EngineBadge: View {
+    @EnvironmentObject var model: BrowserModel
+    var body: some View {
+        Text(SearchEngines.preset(for: model.searchTemplate)?.name ?? "Search")
+            .font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+            .padding(.horizontal, 9).frame(height: 22)
+            .background(Capsule().fill(Color.primary.opacity(0.08)))
+            .accessibilityHidden(true)
+    }
+}
+
+/// A heading over a section, at its leading edge, with the number of items and an optional action at the other end.
+private struct SectionHeader: View {
+    let title: String
+    var count: Int?
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(title).scaledFont(12, weight: .semibold).tracking(0.7).foregroundStyle(.secondary).textCase(.uppercase)
+                .accessibilityAddTraits(.isHeader)
+            if let count, count > 0 { Text("\(count)").scaledFont(11, weight: .medium).foregroundStyle(.tertiary) }
+            Spacer(minLength: 0)
         }
-        return rows
     }
+}
 
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let width = proposal.width ?? 600
-        let rows = rows(subviews, width: width)
-        let height = rows.map { row in row.map { subviews[$0].sizeThatFits(.unspecified).height }.max() ?? 0 }.reduce(0, +) + spacing * CGFloat(max(rows.count - 1, 0))
-        return CGSize(width: width, height: height)
-    }
+/// "Show 8 more" / "Show less": every long list on the page ends with one.
+private struct ShowMoreButton: View {
+    @Binding var expanded: Bool
+    let hidden: Int
 
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        var y = bounds.minY
-        for row in rows(subviews, width: bounds.width) {
-            let sizes = row.map { subviews[$0].sizeThatFits(.unspecified) }
-            let rowWidth = sizes.map(\.width).reduce(0, +) + spacing * CGFloat(max(row.count - 1, 0))
-            var x = bounds.minX + (bounds.width - rowWidth) / 2
-            for (offset, index) in row.enumerated() {
-                subviews[index].place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(sizes[offset]))
-                x += sizes[offset].width + spacing
+    var body: some View {
+        Button { animated(.easeOut(duration: 0.22)) { expanded.toggle() } } label: {
+            HStack(spacing: 5) {
+                Text(expanded ? "Show less" : "Show \(hidden) more")
+                Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold)).rotationEffect(.degrees(expanded ? 180 : 0))
             }
-            y += (sizes.map(\.height).max() ?? 0) + spacing
+            .scaledFont(12, weight: .medium).foregroundStyle(Theme.accent)
+            .padding(.horizontal, 12).frame(height: 28)
+            .background(Capsule().fill(Theme.accent.opacity(0.12)))
+            .contentShape(Capsule())
+            .keyboardFocusRing(radius: 14)
         }
+        .buttonStyle(.plain).focusEffectDisabled()
+        .accessibilityLabel(expanded ? "Show fewer" : "Show \(hidden) more")
     }
+}
+
+/// One place as a card: its icon, its name and its site; used for the pages you visit often, tabs on other devices and tabs sent to this one.
+private struct SiteCard: View {
+    let title: String
+    let detail: String
+    let url: String
+    var symbol: String?
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                if let symbol {
+                    Image(systemName: symbol).font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.accent).frame(width: 28, height: 28)
+                        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.accent.opacity(0.14)))
+                } else {
+                    SiteTile(url: url, title: title, size: 28)
+                }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title).scaledFont(13, weight: .medium).foregroundStyle(.primary.opacity(0.9)).lineLimit(1).truncationMode(.tail)
+                    if !detail.isEmpty { Text(detail).scaledFont(11).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail) }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10).frame(height: 48)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .startCard(radius: 12)
+            .contentShape(Rectangle())
+            .keyboardFocusRing(radius: 12)
+        }
+        .buttonStyle(.plain).focusEffectDisabled()
+        .hoverLift()
+    }
+}
+
+/// Cards in two columns on a phone and three on a wide window.
+private struct CardGrid<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+    #if os(macOS)
+    private let columns = [GridItem(.adaptive(minimum: 200), spacing: 10)]
+    #else
+    private let columns = [GridItem(.adaptive(minimum: 150), spacing: 10)]
+    #endif
+    var body: some View { LazyVGrid(columns: columns, spacing: 10, content: content) }
 }
 
 // MARK: - Favorites
@@ -193,41 +313,44 @@ private struct FavoritesGrid: View {
     @EnvironmentObject var model: BrowserModel
     @Binding var addingFavorite: Bool
 
-    private let columns = [GridItem(.adaptive(minimum: 76, maximum: 96), spacing: 14, alignment: .top)]
     private var tileSize: CGFloat { model.startTile.points }
+    private let capacity = 12
+    @State private var showAll = false
+    private let columns = [GridItem(.adaptive(minimum: 84, maximum: 110), spacing: 12, alignment: .top)]
 
     var body: some View {
-        let items = Array(model.orderedFavorites.prefix(8))
-        VStack(spacing: 14) {
-            SectionHeading(title: "Favorites")
-            if items.isEmpty {
+        let all = model.orderedFavorites
+        let limit = 8
+        let items = showAll ? Array(all.prefix(capacity)) : Array(all.prefix(limit))
+        VStack(spacing: 12) {
+            SectionHeader(title: "Favorites", count: all.count)
+            if all.isEmpty {
                 emptyCard.transition(.opacity)
             } else {
-                // Up to eight in one centered row; more than fit across wrap into a tidy grid.
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .top, spacing: 16) { tiles(items) }.frame(maxWidth: .infinity)
-                    LazyVGrid(columns: columns, spacing: 16) { tiles(items) }
+                LazyVGrid(columns: columns, spacing: 12) {
+                    ForEach(items, id: \.url) { favorite in tile(favorite) }
+                    if all.count < capacity || showAll { addTile }
                 }
+                if all.count > limit { ShowMoreButton(expanded: $showAll, hidden: min(all.count, capacity) - limit) }
             }
         }
-    }
-
-    @ViewBuilder private func tiles(_ items: [BookmarkItem]) -> some View {
-        ForEach(items, id: \.url) { favorite in tile(favorite) }
-        if items.count < 8 { addTile }
+        .motion(.easeOut(duration: 0.2), value: all.map(\.url))
     }
 
     private func tile(_ favorite: BookmarkItem) -> some View {
         Button { model.open(urlString: favorite.url) } label: {
-            VStack(spacing: 7) {
+            VStack(spacing: 8) {
                 SiteTile(url: favorite.url, title: favorite.title, size: tileSize)
+                    .frame(width: tileSize + 22, height: tileSize + 22)
+                    .startCard(radius: (tileSize + 22) * 0.28)
                 Text(favorite.title.isEmpty ? displayHost(URL(string: favorite.url)) : favorite.title)
-                    .scaledFont(12).lineLimit(1).truncationMode(.tail).foregroundStyle(.primary.opacity(0.85)).frame(width: 76)
+                    .scaledFont(12).lineLimit(1).truncationMode(.tail).foregroundStyle(.primary.opacity(0.85)).frame(maxWidth: 92)
             }
-            .frame(width: 76)
+            .frame(maxWidth: .infinity)
             .keyboardFocusRing(radius: 14)
         }
         .buttonStyle(.plain).focusEffectDisabled()
+        .hoverLift()
         .draggable(favorite.url) { SiteTile(url: favorite.url, title: favorite.title, size: tileSize) }
         .dropDestination(for: String.self) { dropped, _ in
             guard let url = dropped.first else { return false }
@@ -246,13 +369,13 @@ private struct FavoritesGrid: View {
     /// Never filled in for you: suggestions are only offered here, and nothing is added until you choose it.
     private var addTile: some View {
         addMenu {
-            VStack(spacing: 7) {
+            VStack(spacing: 8) {
                 Image(systemName: "plus").font(.system(size: 18, weight: .regular)).foregroundStyle(.secondary)
-                    .frame(width: tileSize, height: tileSize)
-                    .background(RoundedRectangle(cornerRadius: tileSize * 0.26, style: .continuous).strokeBorder(Color.secondary.opacity(0.45), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
-                Text("Add").font(.system(size: 12)).foregroundStyle(.secondary).frame(width: 76)
+                    .frame(width: tileSize + 22, height: tileSize + 22)
+                    .background(RoundedRectangle(cornerRadius: (tileSize + 22) * 0.28, style: .continuous).strokeBorder(Color.secondary.opacity(0.45), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+                Text("Add").font(.system(size: 12)).foregroundStyle(.secondary)
             }
-            .frame(width: 76)
+            .frame(maxWidth: .infinity)
             .keyboardFocusRing(radius: 14)
         }
     }
@@ -266,12 +389,13 @@ private struct FavoritesGrid: View {
                     Text("Pin your favorite sites here").scaledFont(13, weight: .medium).foregroundStyle(.primary.opacity(0.85))
                     Text("One tap away from every new tab. Nothing is added unless you choose it.").scaledFont(12).foregroundStyle(.secondary)
                 }
+                Spacer(minLength: 0)
             }
             .padding(.horizontal, 18).padding(.vertical, 14)
-            .frame(maxWidth: 420)
-            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.secondary.opacity(0.45), style: StrokeStyle(lineWidth: 1, dash: [5, 4])))
+            .frame(maxWidth: .infinity)
+            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Color.secondary.opacity(0.45), style: StrokeStyle(lineWidth: 1, dash: [5, 4])))
             .contentShape(Rectangle())
-            .keyboardFocusRing(radius: 14)
+            .keyboardFocusRing(radius: 16)
         }
         .accessibilityLabel("Add a favorite site")
     }
@@ -310,60 +434,47 @@ private struct ContinueCard: View {
     @ObservedObject var tab: TabController
 
     var body: some View {
-        VStack(spacing: 12) {
-            SectionHeading(title: "Continue browsing")
+        VStack(spacing: 10) {
+            SectionHeader(title: "Continue browsing")
             Button { model.select(tab.id) } label: {
-                HStack(spacing: 12) {
-                    SiteTile(url: tab.url?.absoluteString ?? "", title: tab.displayTitle, size: 36)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(tab.displayTitle).scaledFont(14, weight: .medium).lineLimit(1)
+                HStack(spacing: 14) {
+                    if let data = tab.snapshot, let image = Image(platformData: data) {
+                        Color.clear.frame(width: 96, height: 62)
+                            .overlay(alignment: .top) { image.resizable().scaledToFill() }
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5))
+                    } else {
+                        SiteTile(url: tab.url?.absoluteString ?? "", title: tab.displayTitle, size: 44)
+                    }
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(tab.displayTitle).scaledFont(15, weight: .semibold).lineLimit(2).multilineTextAlignment(.leading)
                         Text("\(displayHost(tab.url)) · \(RelativeDateTimeFormatter().localizedString(for: tab.lastActive, relativeTo: Date()))")
                             .scaledFont(12).foregroundStyle(.secondary).lineLimit(1)
                     }
                     Spacer(minLength: 0)
-                    Image(systemName: "arrow.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(.tertiary)
+                    Image(systemName: "arrow.right").font(.system(size: 12, weight: .bold)).foregroundStyle(Theme.accent)
+                        .frame(width: 30, height: 30).background(Circle().fill(Theme.accent.opacity(0.14)))
                 }
                 .padding(12)
-                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.primary.opacity(0.05)))
+                .startCard(radius: 18)
                 .contentShape(Rectangle())
-                .keyboardFocusRing(radius: 14)
+                .keyboardFocusRing(radius: 18)
             }
             .buttonStyle(.plain).focusEffectDisabled()
+            .hoverLift()
             .accessibilityLabel("Continue browsing: \(tab.displayTitle), \(displayHost(tab.url))")
             .accessibilityIdentifier("continue-card")
         }
     }
 }
 
-// MARK: - Chips
+// MARK: - Places you go often, and tabs you just closed
 
-private struct Chip: View {
-    let title: String
-    let url: String
-    var symbol: String?
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                if let symbol { Image(systemName: symbol).font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary) }
-                else { SiteTile(url: url, title: title, size: 16) }
-                Text(title).font(.system(size: 12.5)).lineLimit(1).truncationMode(.tail).frame(maxWidth: 170)
-            }
-            .padding(.horizontal, 11).frame(height: 30)
-            .background(Capsule().fill(Color.primary.opacity(0.07)))
-            .contentShape(Capsule())
-            .keyboardFocusRing(radius: 15)
-        }
-        .buttonStyle(.plain).focusEffectDisabled()
-    }
-}
-
-/// Places you go often, and tabs you just closed: a few chips each, no repeats, and nothing that is already a favorite or the continue card.
 private struct HistoryChips: View {
     @EnvironmentObject var model: BrowserModel
     @State private var often: [OftenSite] = []
     @State private var showAllOften = false
+    @State private var showAllClosed = false
 
     struct OftenSite: Identifiable { let id: String; let title: String; let url: String; let isLocal: Bool }
 
@@ -372,7 +483,7 @@ private struct HistoryChips: View {
         return host == "localhost" || host == "127.0.0.1" || host == "::1" || host.hasSuffix(".local") || host.hasPrefix("192.168.") || host.hasPrefix("10.")
     }
 
-    /// One chip per page (no repeats), local development addresses folded into a single "Local" chip, readable titles.
+    /// One card per page (no repeats), local development addresses folded into a single "Local" card, readable titles.
     private func load() {
         guard model.showFrequent else { often = []; return }
         let favorites = Set(model.favorites.map(\.url))
@@ -386,7 +497,7 @@ private struct HistoryChips: View {
             if isLocal(url?.host) {
                 localCount += 1
                 if firstLocal == nil { firstLocal = OftenSite(id: "local", title: "", url: site.url, isLocal: true) }
-            } else if titles.insert(readable.lowercased()).inserted {      // two pages with the same title are one chip
+            } else if titles.insert(readable.lowercased()).inserted {      // two pages with the same title are one card
                 result.append(OftenSite(id: site.url, title: readable, url: site.url, isLocal: false))
             }
         }
@@ -400,50 +511,59 @@ private struct HistoryChips: View {
         #else
         let limit = 6
         #endif
-        let shown = showAllOften ? often : Array(often.prefix(limit))
+        let shown = !model.showFrequent ? [] : (showAllOften ? often : Array(often.prefix(limit)))
         let continueURL = model.continueTab?.url?.absoluteString
-        let closed = model.showRecentlyClosed
-            ? Array(model.closedTabs.enumerated().reversed().filter { $0.element.url.absoluteString != continueURL }.prefix(3))
+        let allClosed = model.showRecentlyClosed
+            ? Array(model.closedTabs.enumerated().reversed().filter { $0.element.url.absoluteString != continueURL })
             : []
-        VStack(spacing: 30) {
+        let closed = showAllClosed ? Array(allClosed.prefix(10)) : Array(allClosed.prefix(3))
+        VStack(spacing: 28) {
             if !shown.isEmpty {
-                VStack(spacing: 12) {
-                    SectionHeading(title: "Often visited")
-                    WrapLayout {
+                VStack(spacing: 10) {
+                    SectionHeader(title: "Often visited", count: often.count)
+                    CardGrid {
                         ForEach(shown) { site in
-                            Chip(title: site.title, url: site.url, symbol: site.isLocal ? "laptopcomputer" : nil) { model.open(urlString: site.url) }
+                            SiteCard(title: site.title, detail: site.isLocal ? "On this computer" : displayHost(URL(string: site.url)), url: site.url, symbol: site.isLocal ? "laptopcomputer" : nil) { model.open(urlString: site.url) }
                         }
-                        if often.count > limit, !showAllOften { Chip(title: "More", url: "", symbol: "ellipsis") { showAllOften = true } }
                     }
+                    if often.count > limit { ShowMoreButton(expanded: $showAllOften, hidden: often.count - limit) }
                 }
             }
             if !closed.isEmpty {
-                VStack(spacing: 12) {
-                    SectionHeading(title: "Recently closed")
-                    WrapLayout {
+                VStack(spacing: 10) {
+                    SectionHeader(title: "Recently closed", count: allClosed.count)
+                    CardGrid {
                         ForEach(closed, id: \.offset) { index, tab in
-                            Chip(title: tab.title.isEmpty ? displayHost(tab.url) : tab.title, url: tab.url.absoluteString, symbol: "arrow.uturn.backward") { model.reopenClosedTab(at: index) }
+                            SiteCard(title: tab.title.isEmpty ? displayHost(tab.url) : tab.title, detail: displayHost(tab.url), url: tab.url.absoluteString, symbol: "arrow.uturn.backward") { model.reopenClosedTab(at: index) }
                         }
                     }
+                    if allClosed.count > 3 { ShowMoreButton(expanded: $showAllClosed, hidden: min(allClosed.count, 10) - 3) }
                 }
             }
         }
         .onAppear(perform: load)
+        // The list is read when the switch changes, not only when the section first appears; and it follows the favorites, which it leaves out.
+        .onChange(of: model.showFrequent) { _, _ in load() }
+        .onChange(of: model.favorites.map(\.url)) { _, _ in load() }
+        .motion(.easeOut(duration: 0.2), value: model.showFrequent)
     }
 }
 
 private struct SentToThisDevice: View {
     @EnvironmentObject var model: BrowserModel
+    @State private var showAll = false
 
     var body: some View {
-        VStack(spacing: 12) {
-            SectionHeading(title: "Sent to this device")
-            WrapLayout {
-                ForEach(model.inbox.prefix(6)) { item in
-                    Chip(title: (item.title.isEmpty ? displayHost(URL(string: item.url)) : item.title) + " · " + item.fromName, url: item.url) { model.openSentTab(item) }
+        let items = Array(model.inbox.prefix(showAll ? 12 : 4))
+        VStack(spacing: 10) {
+            SectionHeader(title: "Sent to this device", count: model.inbox.count)
+            CardGrid {
+                ForEach(items) { item in
+                    SiteCard(title: item.title.isEmpty ? displayHost(URL(string: item.url)) : item.title, detail: "From \(item.fromName)", url: item.url) { model.openSentTab(item) }
                         .contextMenu { Button("Dismiss") { model.dismissSentTab(item) } }
                 }
             }
+            if model.inbox.count > 4 { ShowMoreButton(expanded: $showAll, hidden: min(model.inbox.count, 12) - 4) }
         }
         .transition(.opacity)
     }
@@ -451,16 +571,23 @@ private struct SentToThisDevice: View {
 
 private struct OtherDeviceTabs: View {
     @EnvironmentObject var model: BrowserModel
+    @State private var expanded: Set<String> = []
 
     var body: some View {
-        VStack(spacing: 20) {
-            ForEach(model.remoteTabs.prefix(2)) { device in
-                VStack(spacing: 12) {
-                    SectionHeading(title: "On \(device.device)")
-                    WrapLayout {
-                        ForEach(device.tabs.prefix(6), id: \.url) { tab in
-                            Chip(title: tab.title.isEmpty ? displayHost(URL(string: tab.url)) : tab.title, url: tab.url) { model.open(urlString: tab.url, newTab: true) }
+        VStack(spacing: 24) {
+            ForEach(model.remoteTabs.prefix(3)) { device in
+                let isOpen = expanded.contains(device.device)
+                let tabs = Array(device.tabs.prefix(isOpen ? 12 : 4))
+                VStack(spacing: 10) {
+                    SectionHeader(title: "On \(device.device)", count: device.tabs.count)
+                    CardGrid {
+                        ForEach(tabs, id: \.url) { tab in
+                            SiteCard(title: tab.title.isEmpty ? displayHost(URL(string: tab.url)) : tab.title, detail: displayHost(URL(string: tab.url)), url: tab.url) { model.open(urlString: tab.url, newTab: true) }
                         }
+                    }
+                    if device.tabs.count > 4 {
+                        ShowMoreButton(expanded: Binding(get: { isOpen }, set: { if $0 { expanded.insert(device.device) } else { expanded.remove(device.device) } }),
+                                       hidden: min(device.tabs.count, 12) - 4)
                     }
                 }
             }
@@ -481,11 +608,13 @@ private struct PrivacyLine: View {
             let cleaned = model.strippedLinkCount
             Button { model.sheet = .dashboard } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: "checkmark.shield").font(.system(size: 11))
+                    Image(systemName: "checkmark.shield.fill").font(.system(size: 11)).foregroundStyle(Theme.accent)
                     Text("Protection on · \(rules.formatted()) rules" + (cleaned > 0 ? " · \(cleaned) tracking link\(cleaned == 1 ? "" : "s") cleaned" : ""))
                         .font(.system(size: 11.5)).lineLimit(1)
                 }
                 .foregroundStyle(.secondary)
+                .padding(.horizontal, 12).frame(height: 28)
+                .background(Capsule().fill(Color.primary.opacity(0.06)))
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Protection is on with \(rules) rules. Open the privacy dashboard.")
@@ -501,9 +630,11 @@ private struct CustomizeMenu: View {
     var body: some View {
         Button { animated(.easeOut(duration: 0.22)) { model.startDrawerOpen = true } } label: {
             Label("Customize", systemImage: "slider.horizontal.3").font(.system(size: 11.5)).foregroundStyle(.secondary)
+                .padding(.horizontal, 12).frame(height: 28)
+                .background(Capsule().fill(Color.primary.opacity(0.06)))
         }
         .buttonStyle(.plain).focusEffectDisabled()
-        .keyboardFocusRing(radius: 6)
+        .keyboardFocusRing(radius: 14)
         .fixedSize()
         .accessibilityIdentifier("customize-start")
     }
@@ -523,7 +654,7 @@ private struct StartSearchField: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: "magnifyingglass").font(.system(size: 16)).foregroundStyle(.secondary)
+            Image(systemName: "magnifyingglass").font(.system(size: 17, weight: .medium)).foregroundStyle(focused ? Theme.accent : Color.secondary)
             TextField("Search or enter address", text: $address.text)
                 .textFieldStyle(.plain).font(.system(size: 16))
                 .focused($focused)
@@ -539,20 +670,24 @@ private struct StartSearchField: View {
                 }
                 .buttonStyle(.plain).accessibilityLabel("Clear")
                 .transition(.opacity)
+            } else {
+                EngineBadge()
             }
         }
-        .padding(.horizontal, 18).frame(height: 54)
-        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(scheme == .dark ? Color(red: 0.110, green: 0.133, blue: 0.188) : Color.primary.opacity(0.06)))
-        .motion(.easeOut(duration: 0.15), value: focused)
+        .padding(.horizontal, 18).frame(height: 56)
+        .startField(radius: 28, focused: focused)
+        .motion(.easeOut(duration: 0.18), value: focused)
         .contentShape(Rectangle())
         .onTapGesture { focused = true }
         // Suggestions open straight under this field, over the rest of the page.
         .overlay(alignment: .top) {
             if focused || overList {
                 SuggestionsList(address: address)
-                    // Solid, so the page behind it never shows through the list.
-                    .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Color(red: 0.075, green: 0.090, blue: 0.135)))
-                    .padding(.top, 62)
+                    // Solid, so the page behind it never shows through the list; in the theme's own colour when one is in use.
+                    .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(ThemeState.raised ?? Color(red: 0.075, green: 0.090, blue: 0.135)))
+                    .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5))
+                    .shadow(color: .black.opacity(0.35), radius: 18, y: 8)
+                    .padding(.top, 64)
                     .onHover { overList = $0 }
             }
         }

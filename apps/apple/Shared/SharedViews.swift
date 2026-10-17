@@ -2,11 +2,13 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 extension Color {
+    /// The window's plain background: the theme's own chrome colour when a theme is in use, otherwise the system's.
     static var platformBackground: Color {
+        if let chrome = ThemeState.chrome { return chrome }
         #if os(macOS)
-        Color(nsColor: .windowBackgroundColor)
+        return Color(nsColor: .windowBackgroundColor)
         #else
-        Color(uiColor: .systemBackground)
+        return Color(uiColor: .systemBackground)
         #endif
     }
 }
@@ -20,9 +22,9 @@ struct SheetContainer: View {
         NavigationStack {
             Group {
                 switch sheet {
-                case .bookmarks: BookmarksView()
-                case .history: HistoryView()
-                case .downloads: DownloadsView()
+                case .bookmarks: BookmarksPanel()
+                case .history: HistoryPanel()
+                case .downloads: DownloadsPanel(coordinator: model.downloads)
                 case .settings: SettingsView()
                 case .findAll: FindInAllTabsView()
                 case .sessions: SavedSessionsView()
@@ -71,9 +73,8 @@ struct SheetContainer: View {
 
     private var title: String {
         switch sheet {
-        case .bookmarks: "Bookmarks"
-        case .history: "History"
-        case .downloads: "Downloads"
+        // These three carry their own large heading, so the sheet's bar says nothing.
+        case .bookmarks, .history, .downloads: ""
         case .settings: "Settings"
         case .findAll: "Find in All Tabs"
         case .sessions: "Saved Sessions"
@@ -289,83 +290,6 @@ struct HistoryView: View {
     }
 }
 
-struct DownloadsView: View {
-    @EnvironmentObject var model: BrowserModel
-
-    var body: some View {
-        DownloadsList(coordinator: model.downloads)
-    }
-}
-
-private struct DownloadsList: View {
-    @EnvironmentObject var model: BrowserModel
-    @ObservedObject var coordinator: DownloadCoordinator
-    @State private var items: [DownloadItem] = []
-
-    var body: some View {
-        List {
-            DownloadQueueControls(coordinator: coordinator)
-            if !coordinator.active.isEmpty {
-                Section("In Progress") {
-                    ForEach(Array(coordinator.active.values)) { d in
-                        HStack {
-                            VStack(alignment: .leading) {
-                                Text(d.filename)
-                                ProgressView(value: d.fraction)
-                                Text("\(Int(d.fraction * 100))%").font(.caption).foregroundStyle(.secondary)
-                            }
-                            Button("Cancel") { coordinator.cancel(d.id) }
-                        }
-                    }
-                }
-            }
-            if !coordinator.interrupted.isEmpty {
-                Section("Interrupted") {
-                    ForEach(Array(coordinator.interrupted.values)) { d in
-                        HStack {
-                            VStack(alignment: .leading) {
-                                Text(d.filename)
-                                Text("Stopped part-way. Resuming works if the website allows it.").font(.caption).foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Button("Resume") { coordinator.resume(d.id) }
-                            Button("Remove") { coordinator.dismissInterrupted(d.id) }
-                        }
-                    }
-                }
-            }
-            Section("Completed") {
-                ForEach(items, id: \.created) { d in
-                    HStack {
-                        VStack(alignment: .leading) {
-                            Text(d.filename)
-                            Text(d.url).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                        }
-                        Spacer()
-                        // Preview, share and show-in-Finder, for files that are still where they were saved.
-                        if let file = DownloadCoordinator.locate(filename: d.filename) { DownloadFileActions(url: file) }
-                    }
-                }
-            }
-        }
-        .toolbar {
-            ToolbarItem(placement: .destructiveAction) {
-                Button("Clear Completed", role: .destructive) {
-                    try? model.core.clearDownloads()
-                    coordinator.clearCompleted()
-                    reload()
-                }
-                .disabled(items.isEmpty)
-            }
-        }
-        .overlay { if items.isEmpty && coordinator.active.isEmpty && coordinator.interrupted.isEmpty { ContentUnavailableView("No Downloads", systemImage: "arrow.down.circle") } }
-        .onChange(of: coordinator.completed) { _, _ in reload() }
-        .onAppear(perform: reload)
-    }
-
-    private func reload() { items = (try? model.core.listDownloads(limit: 200)) ?? [] }
-}
-
 // MARK: - Settings sections
 
 struct GeneralSettingsSection: View {
@@ -449,6 +373,9 @@ struct AppearanceSettingsSection: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             ThemesSection()
+            #if os(macOS)
+            ThemeScheduleSection()
+            #endif
             #if os(macOS)
             Section("Layout") {
                 Picker("Preset", selection: $model.layoutPreset) {
@@ -545,9 +472,14 @@ struct TabsSettingsSection: View {
                 Text("Previews are captured only when you leave a tab or open the overview, and are kept in memory only.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Section("Tab Tree") {
+                Toggle("Show tabs under the tab they were opened from", isOn: $model.tabTree)
+                Text("In the vertical tab list, a tab opened from a link sits one step in under its parent. The arrow beside a parent folds its branch. Closing a parent moves its tabs up a level.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Tab Groups") {
                 if model.groupNames.isEmpty { Text("No tab groups").foregroundStyle(.secondary) }
-                ForEach(model.groupNames, id: \.self) { name in
+                ShowMoreRows(model.groupNames, id: \.self) { name in
                     HStack { Label(name, systemImage: "folder"); Spacer()
                         Button("Delete", role: .destructive) { model.deleteGroup(name) } }
                 }
@@ -742,6 +674,7 @@ struct PrivacySettingsSection: View {
             ProxySection()
             PageDefensesSection()
             SitePermissionsSection()
+            PopupSettingsSection()
             WebsiteDataSection()
             BrowsingDataSection()
         }
@@ -1452,56 +1385,6 @@ struct RemoteExtensionsSection: View {
             } header: { Text("On Your Other Devices") } footer: {
                 Text("These extensions are installed on your other devices but not here. Sync never installs one for you: add it from its own page, so you review what it asks for on this device.")
             }
-        }
-    }
-}
-
-
-/// Pause and resume everything, hold the queue until a time, and the downloads that are waiting or put off for later. Used at the top of every downloads list.
-struct DownloadQueueControls: View {
-    @ObservedObject var coordinator: DownloadCoordinator
-
-    private var held: Bool { DownloadSchedule.isHeld(until: coordinator.heldUntil) }
-    private var hasWork: Bool { !coordinator.active.isEmpty || !coordinator.waiting.isEmpty || !coordinator.interrupted.isEmpty || !coordinator.scheduled.isEmpty }
-
-    var body: some View {
-        if hasWork || held {
-            Section {
-                HStack {
-                    if held { Button("Resume All") { coordinator.resumeAll() } } else { Button("Pause All") { coordinator.pauseAll() } }
-                    Menu("Hold Until…") {
-                        Button("In an hour") { coordinator.holdQueue(until: Date().addingTimeInterval(3600)) }
-                        ForEach([(2, "2:00 at night"), (7, "7:00 in the morning"), (22, "10:00 in the evening")], id: \.0) { hour, label in
-                            Button(label) { if let t = DownloadSchedule.nextOccurrence(hour: hour, minute: 0) { coordinator.holdQueue(until: t) } }
-                        }
-                        Divider()
-                        Button("Until I resume") { coordinator.holdQueue(until: .distantFuture) }
-                    }
-                    Spacer()
-                }
-                if held {
-                    Label(coordinator.heldUntil == .distantFuture ? "Downloads are held until you resume them." : "Downloads are held until \(coordinator.heldUntil.map { $0.formatted(date: .omitted, time: .shortened) } ?? "").",
-                          systemImage: "pause.circle").font(.caption).foregroundStyle(.secondary)
-                }
-                ForEach(coordinator.waiting) { item in
-                    HStack {
-                        VStack(alignment: .leading) { Text(item.filename).lineLimit(1); Text("Waiting for a free place").font(.caption).foregroundStyle(.secondary) }
-                        Spacer()
-                        Menu(item.priority.title) {
-                            ForEach(DownloadPriority.allCases.reversed()) { p in Button(p.title) { coordinator.setPriority(item.id, p) } }
-                        }.fixedSize()
-                        Button(role: .destructive) { coordinator.cancelWaiting(item.id) } label: { Image(systemName: "xmark").accessibilityLabel("Cancel download") }.buttonStyle(.borderless)
-                    }
-                }
-                ForEach(coordinator.scheduled) { item in
-                    HStack {
-                        VStack(alignment: .leading) { Text(item.filename).lineLimit(1); Text("Starts when the hold ends").font(.caption).foregroundStyle(.secondary) }
-                        Spacer()
-                        Button(role: .destructive) { coordinator.removeScheduled(item.id) } label: { Image(systemName: "xmark").accessibilityLabel("Remove from schedule") }.buttonStyle(.borderless)
-                    }
-                }
-                if !held, !coordinator.scheduled.isEmpty { Button("Start Them Now") { coordinator.startScheduledNow() } }
-            } header: { Text("Queue") }
         }
     }
 }

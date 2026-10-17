@@ -325,7 +325,7 @@ struct StartDrawer: View {
                 panel
                     .frame(width: min(340, geo.size.width - 36))
                     .frame(maxHeight: .infinity)
-                    .background(.regularMaterial)
+                    .themedBar(fallback: .regularMaterial)
                     .overlay(alignment: .leading) { Rectangle().fill(Color.primary.opacity(0.1)).frame(width: 0.5) }
                     .transition(.move(edge: .trailing).combined(with: .opacity))
                     .accessibilityElement(children: .contain)
@@ -387,6 +387,10 @@ struct StartDrawer: View {
             .toggleStyle(.switch)
             .padding(20)
         }
+        #if os(iOS)
+        // Below the status bar and clear of the Dynamic Island, in either orientation.
+        .safeAreaPadding(.vertical, 6)
+        #endif
     }
 
     private func group<Content: View>(_ title: String, @ViewBuilder _ content: () -> Content) -> some View {
