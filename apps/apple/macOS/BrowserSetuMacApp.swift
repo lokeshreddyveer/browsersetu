@@ -55,6 +55,7 @@ struct BrowserSetuMacApp: App {
                     #endif
                 }
                 .onOpenURL { model.handleExternal($0) }
+                .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in model.downloads.suspendAllBeforeQuit() }
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1200, height: 800)

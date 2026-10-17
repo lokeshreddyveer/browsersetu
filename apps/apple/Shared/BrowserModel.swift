@@ -649,6 +649,7 @@ final class BrowserModel: ObservableObject {
         expirePermissions()
         expireTemporaryPermissions(atStart: true)
         IntentInbox.attach { [weak self] in self?.workbench.handle($0) }
+        downloads.store = profileFolder.appendingPathComponent("downloads", isDirectory: true)
         pushWebPolicy()
         if persistsProfileChoice {
             safeStart = LaunchGuard.isLoop(unfinishedLaunches: LaunchGuard.begin(root: root))
@@ -1417,6 +1418,19 @@ final class BrowserModel: ObservableObject {
         var seen = existing
         var added = 0, skipped = 0
         for entry in BookmarkHTML.parse(html).prefix(20_000) {
+            guard !seen.contains(entry.url) else { skipped += 1; continue }
+            if (try? core.addBookmark(url: entry.url, title: entry.title, folder: entry.folder)) != nil { seen.insert(entry.url); added += 1 } else { skipped += 1 }
+        }
+        refreshBookmarkState()
+        return (added, skipped)
+    }
+
+    /// The same import in small batches that let the window breathe between them.
+    func importBookmarks(entries: [BookmarkHTML.Entry]) async -> (added: Int, skipped: Int) {
+        var seen = Set(((try? core.listBookmarks(query: "")) ?? []).map(\.url))
+        var added = 0, skipped = 0
+        for (index, entry) in entries.prefix(20_000).enumerated() {
+            if index % 200 == 199 { await Task.yield() }
             guard !seen.contains(entry.url) else { skipped += 1; continue }
             if (try? core.addBookmark(url: entry.url, title: entry.title, folder: entry.folder)) != nil { seen.insert(entry.url); added += 1 } else { skipped += 1 }
         }

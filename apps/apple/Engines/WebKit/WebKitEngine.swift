@@ -1145,7 +1145,7 @@ final class WebKitDownloads: NSObject, WKDownloadDelegate {
     nonisolated func download(_ download: WKDownload, decideDestinationUsing response: URLResponse,
                               suggestedFilename: String) async -> URL? {
         await MainActor.run {
-            let started = coordinator.begin(suggestedName: suggestedFilename, sourceHost: download.originalRequest?.url?.host, cancel: { download.cancel { _ in } })
+            let started = coordinator.begin(suggestedName: suggestedFilename, sourceHost: download.originalRequest?.url?.host, cancel: { download.cancel { _ in } }, suspend: { done in download.cancel { data in done(data) } })
             let key = ObjectIdentifier(download)
             ids[key] = started.id
             observers[key] = download.progress.observe(\.fractionCompleted) { [weak self] p, _ in
