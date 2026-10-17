@@ -56,6 +56,13 @@ class H(http.server.BaseHTTPRequestHandler):
             return self.send(200, f"<title>Tall</title><body style='margin:0'>{rows}</body>")
         if path == "/amp-page":
             return self.send(200, f'<html amp><head><title>AMP copy</title><link rel="canonical" href="http://127.0.0.1:{PORT}/full-page"></head><body>amp</body></html>')
+        if path == "/silence.wav":
+            import struct
+            n = 16000
+            data = b"RIFF" + struct.pack("<I", 36 + n * 2) + b"WAVEfmt " + struct.pack("<IHHIIHH", 16, 1, 1, 8000, 16000, 2, 16) + b"data" + struct.pack("<I", n * 2) + b"\x00" * (n * 2)
+            return self.send(200, data, "audio/wav")
+        if path == "/autoplay":
+            return self.send(200, "<title>Autoplay</title><body style='font:28px sans-serif'><video id=v muted autoplay playsinline loop src='/silence.wav' width=200></video><audio id=a autoplay loop src='/silence.wav'></audio><p id=out>waiting</p><script>setTimeout(function(){document.getElementById('out').textContent='video paused='+document.getElementById('v').paused+' audio paused='+document.getElementById('a').paused},3500)</script></body>")
         if path == "/tinted":
             return self.send(200, "<title>Tinted</title><body style=\"margin:0;background:#1d4ed8;color:white;font:20px sans-serif\">a page with a blue background and no theme colour</body>")
         if path == "/tinted-light":

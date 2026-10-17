@@ -83,7 +83,7 @@ struct SplitViewMenuItems: View {
     @EnvironmentObject var model: BrowserModel
 
     private var others: [TabController] {
-        model.visibleTabs.filter { $0.id != model.activeID && $0.id != model.splitTabID && $0.id != model.thirdSplitTabID && !$0.isBlank && $0.isPrivate == model.activeIsPrivate }
+        model.visibleTabs.filter { $0.id != model.activeID && $0.id != model.splitTabID && $0.id != model.thirdSplitTabID && $0.id != model.fourthSplitTabID && !$0.isBlank && $0.isPrivate == model.activeIsPrivate }
     }
 
     var body: some View {
@@ -94,10 +94,10 @@ struct SplitViewMenuItems: View {
             }
         }
         Button("New Tab Beside This One") { model.splitTabID == nil ? model.openSplitNewTab() : model.addThirdPanelNewTab() }
-            .disabled(model.thirdSplitTabID != nil)
+            .disabled(model.fourthSplitTabID != nil)
         if model.splitTabID != nil {
             Divider()
-            if model.thirdSplitTab != nil { Button("Remove the Third Panel") { model.removeThirdPanel() } }
+            if model.thirdSplitTab != nil { Button("Remove the Last Panel") { model.removeThirdPanel() } }
             Button(model.splitOrientation == .sideBySide ? "Stack the Panels" : "Put the Panels Side by Side") {
                 model.splitOrientation = model.splitOrientation == .sideBySide ? .stacked : .sideBySide
             }

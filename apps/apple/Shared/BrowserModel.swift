@@ -197,8 +197,9 @@ final class BrowserModel: ObservableObject {
     @Published var blockVideoAds = false { didSet { saveSetting("video_ads", blockVideoAds ? "1" : "0"); pushWebPolicy() } }
     @Published var tabTree = false { didSet { saveSetting("tab_tree", tabTree ? "1" : "0"); if tabTree { arrangeAsTree() } } }
     @Published var splitTabID: UInt64? { didSet { if splitTabID == nil { thirdSplitTabID = nil } } }
-    /// A third panel beside the split pair; only ever set while `splitTabID` is.
-    @Published var thirdSplitTabID: UInt64?
+    /// A third and a fourth panel; each is only ever set while the one before it is.
+    @Published var thirdSplitTabID: UInt64? { didSet { if thirdSplitTabID == nil { fourthSplitTabID = nil } } }
+    @Published var fourthSplitTabID: UInt64?
     @Published var splitOrientation: SplitOrientation = .sideBySide { didSet { saveSetting("split_orientation", splitOrientation.rawValue) } }
     @Published var addressBarPosition: AddressBarPosition = .bottom { didSet { saveSetting("address_bar", addressBarPosition.rawValue) } }
     @Published var showContinue = true { didSet { saveSetting("show_continue", showContinue ? "1" : "0") } }
@@ -803,6 +804,11 @@ final class BrowserModel: ObservableObject {
         case "sidebar-right-rail": layoutPreset = .sidebar; sidebarPosition = .right; sidebarRail = true
         case "classic-page":
             active?.load(URL(string: base + "/page")!)
+        case "split3", "split4":
+            active?.load(URL(string: base + "/p/One")!)
+            let more = (state == "split4" ? ["Two", "Three", "Four"] : ["Two", "Three"]).map { openTab(url: URL(string: base + "/p/" + $0), isPrivate: false, select: false) }
+            openSplit(with: more[0])
+            for tab in more.dropFirst() { addThirdPanel(with: tab) }
         case "split":
             let other = openTab(url: nil, isPrivate: false, select: false)
             openSplit(with: other)
@@ -1294,12 +1300,13 @@ final class BrowserModel: ObservableObject {
 
     var splitTab: TabController? { tabs.first { $0.id == splitTabID } }
     var thirdSplitTab: TabController? { splitTabID == nil ? nil : tabs.first { $0.id == thirdSplitTabID } }
+    var fourthSplitTab: TabController? { thirdSplitTab == nil ? nil : tabs.first { $0.id == fourthSplitTabID } }
 
-    /// The tabs showing in panels, in order, each once: the active tab, then the second and third panels.
+    /// The tabs showing in panels, in order, each once: the active tab, then the second, third and fourth panels.
     var splitPanels: [TabController] {
         guard let active else { return [] }
         var out = [active]
-        for tab in [splitTab, thirdSplitTab] { if let tab, !out.contains(where: { $0.id == tab.id }) { out.append(tab) } }
+        for tab in [splitTab, thirdSplitTab, fourthSplitTab] { if let tab, !out.contains(where: { $0.id == tab.id }) { out.append(tab) } }
         return out
     }
 
@@ -1321,15 +1328,15 @@ final class BrowserModel: ObservableObject {
         splitTabID = tab.id
     }
 
-    /// Adds a third panel to an open split. A fourth is not offered: three pages still leave each one wide enough to read.
+    /// Adds another panel to an open split: a third, then a fourth (two by two). A fifth replaces the fourth; four pages still leave each one wide enough to read.
     func addThirdPanel(with tab: TabController) {
         guard splitTabID != nil else { openSplit(with: tab); return }
-        guard tab.id != activeID, tab.id != splitTabID, tab.isPrivate == activeIsPrivate else {
+        guard !splitPanels.contains(where: { $0.id == tab.id }), tab.isPrivate == activeIsPrivate else {
             notice = tab.isPrivate != activeIsPrivate ? "Private and normal tabs can’t share a split view." : nil
             return
         }
         tab.ensureLoaded()
-        thirdSplitTabID = tab.id
+        if thirdSplitTabID == nil { thirdSplitTabID = tab.id } else { fourthSplitTabID = tab.id }
     }
 
     func addThirdPanelNewTab() {
@@ -1337,23 +1344,32 @@ final class BrowserModel: ObservableObject {
         let current = activeID
         let tab = openTab(url: nil, isPrivate: activeIsPrivate, select: false)
         if let current { activeID = current }
-        thirdSplitTabID = tab.id
+        if thirdSplitTabID == nil { thirdSplitTabID = tab.id } else { fourthSplitTabID = tab.id }
     }
 
-    func removeThirdPanel() { thirdSplitTabID = nil }
+    /// Takes away the last panel (the fourth, or else the third).
+    func removeThirdPanel() { if fourthSplitTabID != nil { fourthSplitTabID = nil } else { thirdSplitTabID = nil } }
 
     func closeSplit() { splitTabID = nil }
 
-    /// A tab that was in a panel is gone: closing the second panel promotes the third; closing the third leaves the pair.
+    /// A tab that was in a panel is gone: the panels after it move up one place.
     func forgetSplitPanel(_ id: UInt64) {
-        if splitTabID == id { splitTabID = thirdSplitTabID; thirdSplitTabID = nil }
-        else if thirdSplitTabID == id { thirdSplitTabID = nil }
+        var rest = [splitTabID, thirdSplitTabID, fourthSplitTabID].compactMap { $0 }
+        guard let index = rest.firstIndex(of: id) else { return }
+        rest.remove(at: index)
+        splitTabID = rest.first
+        thirdSplitTabID = rest.count > 1 ? rest[1] : nil
+        fourthSplitTabID = rest.count > 2 ? rest[2] : nil
     }
 
     /// Makes another panel the active one and puts the active tab in its place. With no argument, swaps with the second panel.
     func swapSplit(with other: UInt64? = nil) {
         guard let current = activeID, let target = other ?? splitTabID, target != current else { return }
-        if target == thirdSplitTabID {
+        if target == fourthSplitTabID {
+            fourthSplitTabID = current
+            select(target)
+            fourthSplitTabID = current
+        } else if target == thirdSplitTabID {
             thirdSplitTabID = current
             select(target)
             thirdSplitTabID = current
@@ -2278,8 +2294,8 @@ extension BrowserModel {
         all.append(.init(id: "split-new", title: "Split View: New Tab on the Side", subtitle: "", symbol: "rectangle.split.2x1", shortcut: "") { [self] in openSplitNewTab() })
         if splitTabID != nil {
             all.append(.init(id: "split-close", title: "Close Split View", subtitle: "", symbol: "rectangle", shortcut: "") { [self] in closeSplit() })
-            if thirdSplitTabID == nil { all.append(.init(id: "split-third", title: "Split View: Add a Third Panel", subtitle: "A new tab beside the other two", symbol: "rectangle.split.3x1", shortcut: "") { [self] in addThirdPanelNewTab() }) }
-            else { all.append(.init(id: "split-third-close", title: "Split View: Remove the Third Panel", subtitle: "", symbol: "rectangle.split.2x1", shortcut: "") { [self] in removeThirdPanel() }) }
+            if fourthSplitTabID == nil { all.append(.init(id: "split-third", title: "Split View: Add a Panel", subtitle: "A new tab, up to four in a grid", symbol: "rectangle.split.3x1", shortcut: "") { [self] in addThirdPanelNewTab() }) }
+            if thirdSplitTabID != nil { all.append(.init(id: "split-third-close", title: "Split View: Remove the Last Panel", subtitle: "", symbol: "rectangle.split.2x1", shortcut: "") { [self] in removeThirdPanel() }) }
             all.append(.init(id: "split-swap", title: "Swap Split Panels", subtitle: "", symbol: "arrow.left.arrow.right", shortcut: "") { [self] in swapSplit() })
         }
         for ws in workspaces where ws.name != activeWorkspace {

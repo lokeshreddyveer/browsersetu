@@ -67,8 +67,8 @@ struct TabMenuItems: View {
         }
         #if os(macOS)
         if tab.id != model.activeID {
-            if model.splitTabID != nil, tab.id != model.splitTabID, tab.id != model.thirdSplitTabID {
-                Button("Add to Split View as a Third Panel") { model.addThirdPanel(with: tab) }
+            if model.splitTabID != nil, tab.id != model.splitTabID, tab.id != model.thirdSplitTabID, tab.id != model.fourthSplitTabID {
+                Button("Add to Split View as a Panel") { model.addThirdPanel(with: tab) }
                 Button("Replace the Second Panel") { model.openSplit(with: tab) }
             } else { Button("Open in Split View") { model.openSplit(with: tab) } }
         }

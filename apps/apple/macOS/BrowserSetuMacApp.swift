@@ -194,9 +194,8 @@ struct BrowserCommands: Commands {
         }
         CommandMenu("Split View") {
             Button("New Tab in Split View") { model.openSplitNewTab() }
-            Button(model.thirdSplitTabID == nil ? "Add a Third Panel" : "Remove the Third Panel") {
-                if model.thirdSplitTabID == nil { model.addThirdPanelNewTab() } else { model.removeThirdPanel() }
-            }
+            Button("Add a Panel") { model.addThirdPanelNewTab() }.disabled(model.splitTabID == nil || model.fourthSplitTabID != nil)
+            Button("Remove the Last Panel") { model.removeThirdPanel() }.disabled(model.thirdSplitTabID == nil)
             Button("Close Split View") { model.closeSplit() }.disabled(model.splitTabID == nil)
             Button("Swap Panels") { model.swapSplit() }.disabled(model.splitTabID == nil)
             Button("Change Direction") { model.splitOrientation = model.splitOrientation == .sideBySide ? .stacked : .sideBySide }

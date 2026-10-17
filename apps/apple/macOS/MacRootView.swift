@@ -376,15 +376,10 @@ struct ContentPanels: View {
     var body: some View {
         let panels = model.splitPanels
         if panels.count > 1, panels.first?.id == active.id {
-            Group {
-                if model.splitOrientation == .sideBySide {
-                    HSplitView { ForEach(panels) { tab in panel(tab, focused: tab.id == active.id, count: panels.count) } }
-                } else {
-                    VSplitView { ForEach(panels) { tab in panel(tab, focused: tab.id == active.id, count: panels.count) } }
-                }
+            SplitLayout(count: panels.count, horizontal: model.splitOrientation == .sideBySide) { index in
+                panel(panels[index], focused: panels[index].id == active.id, count: panels.count)
             }
             .overlay(alignment: .topTrailing) { SplitControls().padding(8) }
-            .motion(.easeOut(duration: 0.2), value: panels.map(\.id))
         } else {
             PageArea(tab: active).id(active.id).transition(.opacity)
         }
@@ -395,8 +390,102 @@ struct ContentPanels: View {
             .overlay(RoundedRectangle(cornerRadius: 2).stroke(focused ? Theme.accent : Color.clear, lineWidth: 2).allowsHitTesting(false))
             .contentShape(Rectangle())
             .simultaneousGesture(TapGesture().onEnded { if !focused { model.swapSplit(with: tab.id) } })
-            .accessibilityLabel(focused ? "Active panel" : (count > 2 ? "Side panel \(tab.id == model.thirdSplitTabID ? 3 : 2) of \(count)" : "Side panel"))
+            .accessibilityLabel(focused ? "Active panel" : (count > 2 ? "Panel \(model.splitPanels.firstIndex { $0.id == tab.id }.map { $0 + 1 } ?? 2) of \(count)" : "Side panel"))
             .transition(.opacity)
+    }
+}
+
+/// The panels of a split view, laid out the way the count suggests: two share the window equally, three are one tall page and two stacked beside it, four are a grid of two by two.
+/// Every share starts exactly equal; the divider between two panels can be dragged, and a double click on a divider puts the shares back. A page never gets less than a sixth.
+struct SplitLayout<Panel: View>: View {
+    let count: Int
+    /// Side by side (the groups are columns) or stacked (the groups are rows).
+    let horizontal: Bool
+    @ViewBuilder let panel: (Int) -> Panel
+    @State private var outer: [CGFloat] = []
+    @State private var inner: [[CGFloat]] = []
+    @State private var outerStart: [CGFloat]?
+    @State private var innerStart: [CGFloat]?
+    private let minimum: CGFloat = 1.0 / 6
+    private let gap: CGFloat = 1
+
+    /// Which panels share a column (or a row). Two: one each. Three: the first alone, the other two together. Four: two and two.
+    static func groups(count: Int) -> [[Int]] {
+        switch count {
+        case 3: [[0], [1, 2]]
+        case 4: [[0, 2], [1, 3]]
+        default: (0..<max(count, 1)).map { [$0] }
+        }
+    }
+
+    private var groups: [[Int]] { Self.groups(count: count) }
+    private func equal(_ n: Int) -> [CGFloat] { Array(repeating: 1 / CGFloat(max(n, 1)), count: n) }
+    private var outerShares: [CGFloat] { outer.count == groups.count ? outer : equal(groups.count) }
+    private func innerShares(_ g: Int) -> [CGFloat] { inner.indices.contains(g) && inner[g].count == groups[g].count ? inner[g] : equal(groups[g].count) }
+
+    var body: some View {
+        GeometryReader { geo in
+            let along = horizontal ? geo.size.width : geo.size.height
+            let across = horizontal ? geo.size.height : geo.size.width
+            let outerTotal = max(1, along - gap * CGFloat(groups.count - 1))
+            let outerLayout = horizontal ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
+            let innerLayout = horizontal ? AnyLayout(VStackLayout(spacing: 0)) : AnyLayout(HStackLayout(spacing: 0))
+            outerLayout {
+                ForEach(Array(groups.enumerated()), id: \.offset) { g, members in
+                    let innerTotal = max(1, across - gap * CGFloat(members.count - 1))
+                    let size = outerShares[g] * outerTotal
+                    innerLayout {
+                        ForEach(Array(members.enumerated()), id: \.element) { m, index in
+                            panel(index)
+                                .frame(width: horizontal ? nil : innerShares(g)[m] * innerTotal, height: horizontal ? innerShares(g)[m] * innerTotal : nil)
+                            if m < members.count - 1 { divider(vertical: horizontal, total: innerTotal) { delta in dragInner(group: g, at: m, by: delta) } onEnd: { innerStart = nil } }
+                        }
+                    }
+                    .frame(width: horizontal ? size : nil, height: horizontal ? nil : size)
+                    if g < groups.count - 1 { divider(vertical: !horizontal, total: outerTotal) { delta in dragOuter(at: g, by: delta) } onEnd: { outerStart = nil } }
+                }
+            }
+        }
+        .onChange(of: count) { _, _ in reset() }
+        .onChange(of: horizontal) { _, _ in reset() }
+    }
+
+    private func reset() { animated(.easeOut(duration: 0.2)) { outer = []; inner = [] } }
+
+    private func dragOuter(at g: Int, by delta: CGFloat) {
+        let start = outerStart ?? outerShares
+        outerStart = start
+        let pair = start[g] + start[g + 1]
+        let first = min(max(start[g] + delta, minimum), pair - minimum)
+        var updated = start; updated[g] = first; updated[g + 1] = pair - first
+        outer = updated
+    }
+
+    private func dragInner(group g: Int, at m: Int, by delta: CGFloat) {
+        let start = innerStart ?? innerShares(g)
+        innerStart = start
+        let pair = start[m] + start[m + 1]
+        let first = min(max(start[m] + delta, minimum), pair - minimum)
+        var updated = start; updated[m] = first; updated[m + 1] = pair - first
+        var all = inner.count == groups.count ? inner : groups.map { equal($0.count) }
+        all[g] = updated
+        inner = all
+    }
+
+    /// A hairline with a wider strip to grab. `vertical` means the line runs top to bottom (it separates side-by-side panels).
+    private func divider(vertical: Bool, total: CGFloat, drag: @escaping (CGFloat) -> Void, onEnd: @escaping () -> Void) -> some View {
+        Rectangle().fill(Color.primary.opacity(0.12))
+            .frame(width: vertical ? gap : nil, height: vertical ? nil : gap)
+            .overlay {
+                Color.clear.frame(width: vertical ? 9 : nil, height: vertical ? nil : 9).contentShape(Rectangle())
+                    .onHover { inside in if inside { (vertical ? NSCursor.resizeLeftRight : NSCursor.resizeUpDown).push() } else { NSCursor.pop() } }
+                    .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                        .onChanged { value in drag((vertical ? value.translation.width : value.translation.height) / total) }
+                        .onEnded { _ in onEnd() })
+                    .onTapGesture(count: 2) { reset() }
+            }
+            .accessibilityLabel("Panel divider")
+            .accessibilityHint("Drag to resize. Double-click to make the panels equal.")
     }
 }
 
@@ -407,10 +496,11 @@ struct SplitControls: View {
             Button { model.splitOrientation = model.splitOrientation == .sideBySide ? .stacked : .sideBySide } label: {
                 Image(systemName: model.splitOrientation == .sideBySide ? "rectangle.split.1x2" : "rectangle.split.2x1")
             }.help("Change Split Direction")
-            if model.thirdSplitTab == nil {
-                Button { model.addThirdPanelNewTab() } label: { Image(systemName: "rectangle.split.3x1").accessibilityLabel("Add a third panel") }.help("Add a Third Panel")
-            } else {
-                Button { model.removeThirdPanel() } label: { Image(systemName: "rectangle.split.2x1").accessibilityLabel("Remove the third panel") }.help("Remove the Third Panel")
+            if model.fourthSplitTabID == nil {
+                Button { model.addThirdPanelNewTab() } label: { Image(systemName: "rectangle.split.2x2").accessibilityLabel("Add a panel") }.help("Add a Panel (up to four)")
+            }
+            if model.thirdSplitTab != nil {
+                Button { model.removeThirdPanel() } label: { Image(systemName: "rectangle.badge.minus").accessibilityLabel("Remove the last panel") }.help("Remove the Last Panel")
             }
             Button { model.swapSplit() } label: { Image(systemName: "arrow.left.arrow.right").accessibilityLabel("Swap panels") }.help("Swap Panels")
             Button { model.closeSplit() } label: { Image(systemName: "xmark").accessibilityLabel("Close split view") }.help("Close Split View")

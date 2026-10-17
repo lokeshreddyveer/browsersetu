@@ -117,7 +117,7 @@ final class TabLifecycle {
         if event != .timer { MemoryTrim.run(model: model, aggressive: event == .critical) }
         let candidates = model.tabs.map { tab in
             TabCandidate(id: tab.id, lastActive: tab.lastActive, pinned: tab.pinned, isPrivate: tab.isPrivate,
-                         isActive: tab.id == model.activeID || tab.id == model.splitTabID || tab.id == model.thirdSplitTabID,
+                         isActive: tab.id == model.activeID || tab.id == model.splitTabID || tab.id == model.thirdSplitTabID || tab.id == model.fourthSplitTabID,
                          loaded: tab.hasLoadedPage, discarded: tab.isDiscarded, exempt: model.neverSleeps(host: tab.url?.host))
         }
         var released: [UInt64] = []
