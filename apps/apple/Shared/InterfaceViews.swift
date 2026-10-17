@@ -66,6 +66,15 @@ struct TabMenuItems: View {
         }
         #if os(macOS)
         if tab.id != model.activeID { Button("Open in Split View") { model.openSplit(with: tab) } }
+        Menu("Move to Window") {
+            Button("New Window") { model.moveTabToNewWindow(tab.id) }.disabled(model.tabs.count < 2 && model.isSecondary)
+            if !model.otherWindows.isEmpty {
+                Divider()
+                ForEach(Array(model.otherWindows.enumerated()), id: \.offset) { index, other in
+                    Button("\(index + 1). \(other.title)") { model.moveTab(tab.id, to: other.model) }
+                }
+            }
+        }
         #endif
         if !tab.isPrivate && !model.workspaces.isEmpty {
             Menu("Move to Workspace") {

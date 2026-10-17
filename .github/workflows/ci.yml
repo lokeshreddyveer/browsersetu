@@ -40,6 +40,11 @@ jobs:
       - run: cd apps/apple && xcodegen generate
       - name: Build macOS
         run: cd apps/apple && xcodebuild -scheme BrowserSetuMac -destination 'platform=macOS' CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= CODE_SIGN_ENTITLEMENTS=CI/BrowserSetuMacCI.entitlements build
+      - name: Start the local test server the integration tests use
+        run: |
+          python3 scripts/testserver.py > testserver.log 2>&1 &
+          sleep 2
+          curl -sf http://127.0.0.1:18765/_reset >/dev/null
       - name: macOS unit tests
         run: cd apps/apple && xcodebuild -scheme BrowserSetuMac -destination 'platform=macOS' CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= CODE_SIGN_ENTITLEMENTS=CI/BrowserSetuMacCI.entitlements test -only-testing:BrowserSetuMacTests
       - name: Build the downloadable Mac build (with the updater)

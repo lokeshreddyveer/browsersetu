@@ -128,8 +128,10 @@ extension BrowserModel {
     }
 
     func saveTabMeta() {
-        let live = Set(tabs.map(\.id))
-        let kept = tabMeta.filter { live.contains($0.key) }
+        // Every window's tabs are written together: one window must not erase another's names and colours.
+        let live = Set(windows.allTabs.map(\.id))
+        var kept: [UInt64: TabMeta] = [:]
+        for window in windows.all { for (id, meta) in window.tabMeta where live.contains(id) { kept[id] = meta } }
         saveSetting("tab_meta", encodedMap(Dictionary(uniqueKeysWithValues: kept.map { (String($0.key), $0.value) })))
     }
 

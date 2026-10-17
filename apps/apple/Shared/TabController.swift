@@ -9,6 +9,9 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
     /// Weak on purpose: the engine can report an event for a tab after its model is gone (a model that was released
     /// while a page was still loading). An `unowned` reference would crash there; a weak one just ignores the event.
     private weak var owner: BrowserModel?
+
+    /// The tab now belongs to another window.
+    func reassign(to model: BrowserModel) { owner = model }
     private(set) var engine: TabEngine!
 
     @Published var title: String
