@@ -21,6 +21,9 @@ final class Workbench: ObservableObject {
     @Published var lastWorkflowMessage: String?
     private var scheduler: Task<Void, Never>?
 
+    // Site rules
+    @Published var siteRules: [SiteOpenRule] = []
+
     // Files
     @Published var downloadRules: [DownloadRule] = []
     @Published var duplicates: [DuplicateFiles.Group] = []
@@ -43,6 +46,7 @@ final class Workbench: ObservableObject {
         workflows = BrowserModel.decodeMap(get("workflows"), as: [Workflow].self)["list"] ?? []
         grants = BrowserModel.decodeMap(get("script_grants"), as: ScriptGrants.self)["grants"] ?? ScriptGrants()
         schedule = BrowserModel.decodeMap(get("scheduled_checks"), as: [ScheduledCheck].self)["list"] ?? []
+        siteRules = BrowserModel.decodeMap(get("site_open_rules"), as: [SiteOpenRule].self)["list"] ?? []
         downloadRules = BrowserModel.decodeMap(get("download_rules"), as: [DownloadRule].self)["list"] ?? []
         model.downloads.rules = downloadRules
         extensionProfiles = BrowserModel.decodeMap(get("extension_profiles"), as: [String].self)
@@ -231,6 +235,19 @@ final class Workbench: ObservableObject {
             model.closeTab(id: tab.id, force: true)
         }
         saveMap("scheduled_checks", "list", schedule)
+    }
+
+    // MARK: Site rules
+
+    func setSiteRules(_ list: [SiteOpenRule]) { siteRules = list; saveMap("site_open_rules", "list", list) }
+
+    @discardableResult
+    func addSiteRule(host: String, action: SiteOpenRule.Action) -> Bool {
+        guard let model, let clean = SiteOpenRule.cleanHost(host) else { return false }
+        let rule = SiteOpenRule(host: clean, action: action)
+        guard SiteOpenRules.canAdd(rule, to: siteRules, containers: model.containers, groups: model.groupNames, workspaces: model.workspaces.map(\.name)) else { return false }
+        setSiteRules(siteRules + [rule])
+        return true
     }
 
     // MARK: Files
