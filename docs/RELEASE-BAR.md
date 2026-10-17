@@ -5,7 +5,7 @@ BrowserSetu is called **production grade** only when every gate below has passed
 
 Updated 17 October 2026.
 
-## 1. The App Store build (Build 3 and later)
+## 1. The App Store build (Build 3 and later) - DEFERRED: App Store submission is not being done now; TestFlight builds for the owner's own devices continue
 - [ ] Apple / TestFlight validation passes (record Apple's processing result).
 - [ ] App Store privacy answers match the real search, iCloud and sync data flows (`docs/privacy/DATA-FLOW.md`); the empty collected-data list is confirmed against Apple's current definitions.
 - [ ] Encryption export-compliance code recorded (`ITSEncryptionExportComplianceCode`) with the submitted documentation.

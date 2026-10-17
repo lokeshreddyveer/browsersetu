@@ -1,0 +1,52 @@
+<html><head><meta charset="utf-8"><style>body{font-family:Helvetica,Arial,sans-serif;font-size:11pt;line-height:1.35;margin:40px}h1{font-size:16pt}h2{font-size:12.5pt;margin-top:18px}h3{font-size:11.5pt;margin-top:12px}li{margin:3px 0}p{margin:6px 0}</style></head><body>
+<h1>BROWSER SETU - APP ENCRYPTION DOCUMENTATION</h1>
+<p>Prepared 17 October 2026 for App Store Connect (App Encryption Documentation). This describes version 0.2.0 of the iPhone/iPad app (bundle ID com.browsersetu.ios) and the Mac app (bundle ID com.browsersetu.mac).</p>
+<h2>1. THE PRODUCT</h2>
+<p>Browser Setu is a consumer web browser for iPhone, iPad and Mac. It displays web pages with Apple&#x27;s WebKit, stores bookmarks, history and settings on the user&#x27;s own device, and can optionally keep those items in step between the user&#x27;s own devices. It is published by Lokesh Reddy Veerabhadra and is sold or given away to the general public through the App Store, with no custom configuration, no customer-specific features and no server operated by the publisher.</p>
+<h2>2. WHERE ENCRYPTION IS USED</h2>
+<p>All cryptography in the app is performed by Apple&#x27;s own libraries (Apple CryptoKit, Apple CommonCrypto, the Security framework and the Network framework). The app contains no cryptographic code of its own, no implementation of any algorithm, and no proprietary or non-standard algorithm.</p>
+<h3>2.1 Web traffic (HTTPS / TLS) - provided by the operating system</h3>
+<p>Pages are loaded by Apple&#x27;s WebKit, which uses the operating system&#x27;s TLS. The app does not change, replace or add to the algorithms. This use is the operating system&#x27;s, not the app&#x27;s.</p>
+<h3>2.2 Credentials at rest - provided by the operating system</h3>
+<p>Saved sign-ins and the sync passphrase are stored in the Apple Keychain (accessible only when the device is unlocked, not synced or exported). The Keychain&#x27;s encryption is the operating system&#x27;s.</p>
+<h3>2.3 Sealed backups and sync snapshots - standard algorithms, used by the app (in addition to the operating system)</h3>
+<p>When the user makes a backup file, or turns on iCloud sync, the data (bookmarks, settings, and for sync optionally open-tab addresses) is encrypted on the device before it is saved or uploaded:</p>
+<ul>
+<li>Encryption: AES-256-GCM (Apple CryptoKit), 96-bit random nonce, 128-bit authentication tag; the file header is authenticated as additional data.</li>
+<li>Key: a 256-bit key derived from a passphrase chosen by the user, using PBKDF2 with HMAC-SHA-256 (Apple CommonCrypto), a random 16-byte salt and 600,000 iterations.</li>
+<li>Purpose: protecting the confidentiality and integrity of the user&#x27;s own data in a file or in the user&#x27;s own iCloud. The publisher cannot read it: the passphrase never leaves the device.</li>
+<li>The keys and algorithms cannot be changed by the user or by any third party.</li>
+</ul>
+<h3>2.4 Pairing two of the user&#x27;s own devices on the same network - standard algorithms, used by the app</h3>
+<p>To send links or files between the user&#x27;s own devices, the app opens a TLS 1.2 connection using Apple&#x27;s Network framework with the standard pre-shared-key cipher suite TLS_PSK_WITH_AES_128_GCM_SHA256. The pre-shared key is derived with HKDF-SHA-256 from a one-time code of 100 random bits that the user reads from one device and types on the other. The code expires after five minutes and the session ends after five failed attempts. No server is involved.</p>
+<h3>2.5 Hashing (not encryption)</h3>
+<p>SHA-256 (Apple CryptoKit) is used to check that a downloaded extension package or a saved page has not changed, and to make short fingerprints. No secret keys are involved.</p>
+<h3>2.6 What is NOT encrypted by the app</h3>
+<p>The browser&#x27;s local database (SQLite) is not encrypted by the app; it relies on the operating system&#x27;s file protection and the app sandbox.</p>
+<h2>3. WHAT THE APP DOES NOT DO</h2>
+<ul>
+<li>It does not use proprietary or non-standard encryption algorithms.</li>
+<li>It does not provide a cryptographic API, library or tool to other programs. Web pages and web extensions only get the encryption already built into WebKit.</li>
+<li>It is not designed or marketed for information security, VPN, network infrastructure, or for the primary purpose of encrypting data.</li>
+<li>It does not allow the user to change encryption algorithms or key lengths.</li>
+<li>It does not communicate with any server operated by the publisher.</li>
+</ul>
+<h2>4. THE PUBLISHER&#x27;S CLASSIFICATION (to be confirmed by the publisher)</h2>
+<ul>
+<li>Encryption functionality: standard, publicly specified algorithms (AES, HMAC-SHA-256, PBKDF2, HKDF, TLS) accessed through Apple&#x27;s libraries, with symmetric keys longer than 64 bits (AES-256, AES-128), used to protect the user&#x27;s own data and local connections.</li>
+<li>Primary function: web browsing. Encryption is an ancillary function, not the primary function.</li>
+<li>Distribution: mass market, general public, through the App Store.</li>
+<li>Classification offered for review: mass-market encryption item, Export Control Classification Number 5D992.c, authorization type &quot;mass market&quot; (no licence required for most destinations), subject to the self-classification report that applies to such items.</li>
+<p>This is the publisher&#x27;s own assessment. Export classification is a legal determination and should be confirmed with an export adviser before reliance.</p>
+</ul>
+<p>5. SELF-CLASSIFICATION REPORT FIELDS (for the annual report that applies to mass-market encryption items) Check the current form and requirements at the US Bureau of Industry and Security before filing; the field names below describe what is reported:</p>
+<p style="margin-left:18px">Product name:               Browser Setu</p>
+<p style="margin-left:18px">Versions covered:           0.2.0 (iPhone/iPad), 0.2.0 (Mac)</p>
+<p style="margin-left:18px">Manufacturer / submitter:   Lokesh Reddy Veerabhadra (address and contact details to be added by the publisher)</p>
+<p style="margin-left:18px">Export classification:      5D992.c (mass market)</p>
+<p style="margin-left:18px">Authorization type:         mass market, standard algorithms through Apple&#x27;s libraries</p>
+<p style="margin-left:18px">Item type:                  consumer application (web browser)</p>
+<p style="margin-left:18px">Encryption:                 AES-GCM, PBKDF2-HMAC-SHA256, HKDF-SHA256, TLS 1.2 PSK with AES-128-GCM, through Apple CryptoKit, CommonCrypto, Security and Network</p>
+<h2>6. AFTER APPLE REVIEWS THIS</h2>
+<p>When App Store Connect shows the documentation as accepted and gives an export compliance code, add it to the apps&#x27; Info.plist as ITSEncryptionExportComplianceCode, and set ITSAppUsesNonExemptEncryption to match the outcome Apple confirms. Keep Apple&#x27;s reply with the release records.</p>
+</body></html>
