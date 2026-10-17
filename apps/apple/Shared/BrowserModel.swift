@@ -49,7 +49,7 @@ final class BrowserModel: ObservableObject {
     @Published var mediaFindings: [MediaPageFinding]?
     @Published var mediaChecking = false
     @Published var pageExtract: PageExtract?
-    @Published var rememberReadingPosition = true { didSet { saveSetting("remember_reading", rememberReadingPosition ? "1" : "0") } }
+    @Published var rememberReadingPosition = false { didSet { saveSetting("remember_reading", rememberReadingPosition ? "1" : "0") } }
     @Published var keepFormDrafts = false { didSet { saveSetting("keep_form_drafts", keepFormDrafts ? "1" : "0") } }
     @Published var readingPositions: [String: ReadingPosition] = [:] { didSet { saveSetting("reading_positions", encodedMap(readingPositions)) } }
     @Published var formDrafts: [String: FormDraft] = [:] { didSet { saveSetting("form_drafts", encodedMap(formDrafts)) } }
@@ -1644,7 +1644,8 @@ final class BrowserModel: ObservableObject {
         darkSites = Set(Self.decodeMap(get("dark_sites"), as: Bool.self).filter(\.value).keys)
         lowPowerSavesMemory = get("low_power_memory") != "0"
         clearOnQuit = ClearOnQuit(rawValue: get("clear_on_quit") ?? "") ?? .never
-        rememberReadingPosition = get("remember_reading") != "0"
+        // Off unless you turn it on: the page scrolling by itself a moment after it opens surprised people.
+        rememberReadingPosition = get("remember_reading") == "1"
         keepFormDrafts = get("keep_form_drafts") == "1"
         readingPositions = Self.decodeMap(get("reading_positions"), as: ReadingPosition.self)
         formDrafts = Self.decodeMap(get("form_drafts"), as: FormDraft.self)

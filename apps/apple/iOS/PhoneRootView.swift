@@ -31,7 +31,8 @@ struct PhoneRootView: View {
     /// Room kept clear of the page for the whole dock, measured from the home-indicator edge (the page already stops there): the dock's height and a small gap.
     /// It must not read the window's own safe area while laying out: that made the whole screen come up blank.
     private var pageReservedBottom: CGFloat {
-        guard showsDock, !landscape, !dockOnItsOwnStrip, !dockCompact, !model.floatingAddressVisible else { return 0 }
+        // Kept the same when the dock folds into its pill: the page changing size while you scroll made its content jump.
+        guard showsDock, !landscape, !dockOnItsOwnStrip, !model.floatingAddressVisible else { return 0 }
         return PhoneChrome.height + PhoneChrome.dockLift + 8
     }
 
@@ -873,14 +874,21 @@ final class KeyboardLift: ObservableObject {
     deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
 }
 
-/// The strip behind the clock, in the page's own colour. A view of its own, so it follows the tab's colour as the page reports it.
+/// The strip behind the clock, in the page's own colour, as long as the clock stays readable on it. The clock is white on a dark phone and black on a light one, so a page colour
+/// too close to that is replaced by the plain dark or light the phone is using.
 private struct PageTopStrip: View {
     @ObservedObject var tab: TabController
+    @Environment(\.colorScheme) private var scheme
+    private var chosen: Color? {
+        guard !tab.isBlank, let tint = tab.tint else { return nil }
+        let luminance = 0.2126 * tint.red + 0.7152 * tint.green + 0.0722 * tint.blue
+        if scheme == .dark, luminance > 0.55 { return Color.black }       // white clock: needs a dark strip
+        if scheme == .light, luminance < 0.45 { return Color.white }      // black clock: needs a light strip
+        return Color(red: tint.red, green: tint.green, blue: tint.blue)
+    }
     var body: some View {
         Group {
-            if !tab.isBlank, let tint = tab.tint {
-                Color(red: tint.red, green: tint.green, blue: tint.blue).transition(.opacity)
-            }
+            if let chosen { chosen.transition(.opacity) }
         }
         .ignoresSafeArea(edges: .top)
         .animation(.easeInOut(duration: 0.25), value: tab.tint)
