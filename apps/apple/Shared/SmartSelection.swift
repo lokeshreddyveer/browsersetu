@@ -39,7 +39,7 @@ enum UnitConverter {
         .init(names: ["km/h", "kph", "kmh"], dimension: UnitSpeed.kilometersPerHour, targets: [(UnitSpeed.milesPerHour, "mph")]),
     ]
 
-    private static let pattern = try! NSRegularExpression(pattern: #"(-?\d{1,3}(?:,\d{3})*(?:\.\d+)?|-?\d+(?:\.\d+)?)\s?(°\s?[CcFf]|[A-Za-z]+(?:/[A-Za-z]+)?)"#)
+    private static let pattern = NSRegularExpression.fixed(#"(-?\d{1,3}(?:,\d{3})*(?:\.\d+)?|-?\d+(?:\.\d+)?)\s?(°\s?[CcFf]|[A-Za-z]+(?:/[A-Za-z]+)?)"#)
 
     static func conversions(in text: String) -> [UnitConversion] {
         let range = NSRange(text.startIndex..., in: text)
@@ -163,3 +163,12 @@ struct DictionaryView: UIViewControllerRepresentable {
     func updateUIViewController(_ controller: UIReferenceLibraryViewController, context: Context) {}
 }
 #endif
+
+extension NSRegularExpression {
+    /// A pattern written in the source. If it ever stops compiling, this matches nothing instead of crashing the app.
+    static func fixed(_ pattern: String) -> NSRegularExpression {
+        if let regex = try? NSRegularExpression(pattern: pattern) { return regex }
+        assertionFailure("invalid built-in pattern: \(pattern)")
+        return (try? NSRegularExpression(pattern: "(?!)")) ?? NSRegularExpression()
+    }
+}

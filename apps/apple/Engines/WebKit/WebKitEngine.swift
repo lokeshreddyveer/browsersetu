@@ -1570,7 +1570,7 @@ final class LoginMessageHandler: NSObject, WKScriptMessageHandler {
             switch kind {
             case "focus":
                 tab.loginFrame = frame
-                events.engineLoginFieldFocused(origin: (body["origin"] as? String).flatMap(WebLoginOrigin.normalized))
+                events.engineLoginFieldFocused(origin: (body["origin"] as? String).flatMap(WebLoginOrigin.normalized), usernameOnly: (body["mode"] as? String) == "user")
             case "typed":
                 if let found = LoginRules.capture(body) { events.engineLoginTyped(origin: found.origin, user: found.user, password: found.password) }
             case "submit":

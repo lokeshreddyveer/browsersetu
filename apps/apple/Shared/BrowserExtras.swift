@@ -313,7 +313,7 @@ extension BrowserModel {
     // MARK: Tab stacks
 
     func stackKey(_ tab: TabController) -> String? {
-        guard tabStacks, !tab.pinned, !tab.isBlank, !tab.isSettingsPage, let host = tab.url?.host else { return nil }
+        guard tabStacks, !tab.pinned, !tab.isBlank, !tab.isInternalPage, let host = tab.url?.host else { return nil }
         return TabOrganizing.siteName(forHost: host)
     }
 

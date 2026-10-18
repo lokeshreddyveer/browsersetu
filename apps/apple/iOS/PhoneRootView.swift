@@ -12,11 +12,12 @@ struct PhoneRootView: View {
     /// An iPhone is always the phone layout. Its size class is "regular" in landscape on the larger models, which used to bring up the iPad sidebar.
     private var isPhone: Bool { UIDevice.current.userInterfaceIdiom == .phone }
     private var compactWidth: Bool { isPhone || sizeClass == .compact }
-    private var showsSidebar: Bool { !isPhone && sizeClass == .regular && model.sidebarVisible }
+    /// On a narrow iPad (upright) the sidebar steps aside while a panel is docked, so the page keeps room.
+    private var showsSidebar: Bool { !isPhone && sizeClass == .regular && model.sidebarVisible && !(model.dockedPanel != nil && UIScreen.main.bounds.width < 1000) }
     /// While a page is read, the address bar and toolbar slide away and the page runs edge to edge.
-    private var barsHidden: Bool { compactWidth && model.chromeCollapsed && model.canCollapseChrome }
+    private var barsHidden: Bool { model.chromeCollapsed && model.canCollapseChrome }
     /// The Floating layout on iPhone: no bars at all, only the dock at the bottom and the search button at the top right.
-    private var floatingMode: Bool { compactWidth && model.topBarHidden }
+    private var floatingMode: Bool { model.topBarHidden }
     /// Either way the bars are out of the picture and the dock stands in for them.
     private var showsDock: Bool { barsHidden || floatingMode }
     /// While a page is read the dock is only a small pill; scrolling back, or a tap on it, opens it again.
@@ -45,7 +46,11 @@ struct PhoneRootView: View {
             HStack(spacing: 0) {
                 if showsSidebar { IPadSidebar().transition(.move(edge: .leading).combined(with: .opacity)); Divider() }
                 mainColumn
+                if let docked = model.dockedPanel, !isPhone {
+                    DockedPanelView(sheet: docked).transition(.move(edge: .trailing).combined(with: .opacity))
+                }
             }
+            .motion(.easeOut(duration: 0.22), value: model.dockedPanel)
             if model.overviewVisible {
                 TabOverview().transition(.opacity)
             }
@@ -198,11 +203,24 @@ struct PhoneAddressArea: View {
     @EnvironmentObject var model: BrowserModel
     @ObservedObject var tab: TabController
 
+    @Environment(\.horizontalSizeClass) private var sizeClass
+
     var body: some View {
-        VStack(spacing: 8) {
-            PhoneAddressBar(tab: tab, address: model.addressBar)
-                .modifier(TabSwipe(allowsOverview: !model.addressBar.isEditing))
-            if !model.addressBar.isEditing { PhoneToolbar(tab: tab).transition(.opacity.combined(with: .move(edge: .bottom))) }
+        Group {
+            if sizeClass == .regular && UIDevice.current.userInterfaceIdiom == .pad {
+                // A wide screen has room for everything on one line: the controls, then the address field.
+                HStack(spacing: 14) {
+                    if !model.addressBar.isEditing { PhoneToolbar(tab: tab).frame(width: 400).transition(.opacity) }
+                    PhoneAddressBar(tab: tab, address: model.addressBar)
+                        .modifier(TabSwipe(allowsOverview: !model.addressBar.isEditing))
+                }
+            } else {
+                VStack(spacing: 8) {
+                    PhoneAddressBar(tab: tab, address: model.addressBar)
+                        .modifier(TabSwipe(allowsOverview: !model.addressBar.isEditing))
+                    if !model.addressBar.isEditing { PhoneToolbar(tab: tab).transition(.opacity.combined(with: .move(edge: .bottom))) }
+                }
+            }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
         .themedBar(fallback: .bar)
@@ -274,7 +292,14 @@ struct PhoneAddressBar: View {
             }
         }
         .onChange(of: address.text) { _, _ in if address.isEditing { address.refresh(model: model) } }
-        .onChange(of: model.omniboxFocusTick) { _, _ in address.text = ""; focused = true }
+        .onChange(of: model.omniboxFocusTick) { _, _ in
+            address.text = ""; focused = true
+            // ⌘K from a keyboard: the search opens already in command mode.
+            if let prefill = model.pendingAddressPrefill {
+                model.pendingAddressPrefill = nil
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { address.text = prefill; address.refresh(model: model) }
+            }
+        }
     }
 
     private func sync() { address.text = tab.isBlank ? "" : displayHost(tab.url) }
@@ -404,7 +429,7 @@ private struct GlassBackground<S: InsettableShape>: ViewModifier {
 }
 
 private extension View {
-    func glassCapsule() -> some View { modifier(GlassBackground(shape: Capsule(style: .continuous))) }
+    func phoneGlassCapsule() -> some View { modifier(GlassBackground(shape: Capsule(style: .continuous))) }
 }
 
 /// The dock folded away while a page is read: one small glass pill with the site. A tap opens the dock again.
@@ -435,7 +460,7 @@ struct PhoneCompactPill: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .glassCapsule()
+        .phoneGlassCapsule()
         .overlay(alignment: .bottom) { LoadingBar(tab: tab, height: 2).id(tab.id).padding(.horizontal, 14).padding(.bottom, 2) }
         .accessibilityLabel("\(label). Show the toolbar")
         .accessibilityIdentifier("compact-pill")
@@ -501,7 +526,7 @@ struct PhoneDock: View {
         .motion(.spring(response: 0.3, dampingFraction: 0.85), value: tab.canGoForward)
         .padding(.horizontal, 2)
         .frame(height: PhoneChrome.height)
-        .glassCapsule()
+        .phoneGlassCapsule()
     }
 }
 
@@ -569,7 +594,7 @@ struct PhoneAddressPill: View {
             }
         }
         .frame(height: PhoneChrome.height)
-        .glassCapsule()
+        .phoneGlassCapsule()
         .overlay(alignment: .bottom) { LoadingBar(tab: tab, height: 2).id(tab.id).padding(.horizontal, 20).padding(.bottom, 3) }
     }
 

@@ -357,3 +357,27 @@ struct AddressBarButtonsSection: View {
         animated { model.addressBarItems = (model.addressBarItems.contains(.siteInfo) ? [.siteInfo] : []) + rest }
     }
 }
+
+
+/// Where Bookmarks, History and Downloads open: beside the page, or as a floating sheet over it.
+struct DockedPanelsSection: View {
+    @EnvironmentObject var model: BrowserModel
+
+    var body: some View {
+        Section {
+            Picker("Open Bookmarks, History and Downloads", selection: Binding(get: { model.panelMode }, set: { value in
+                animated(.easeOut(duration: 0.2)) {
+                    model.panelMode = value
+                    if value != .dock { model.dockedPanel = nil }
+                    if value != .float { model.floatingPanel = nil }
+                }
+            })) {
+                ForEach(PanelMode.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            Text(model.panelMode == .dock ? "The page shrinks to make room, so you can read both. Drag the edge between them to resize."
+                 : model.panelMode == .tab ? "Each panel is a tab in your tab list, best for long lists." : "A card over the page that closes when you click away.")
+                .font(.footnote).foregroundStyle(.secondary)
+        } header: { Text("Library panels") }
+    }
+}

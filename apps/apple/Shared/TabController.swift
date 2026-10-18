@@ -87,10 +87,21 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
     static let settingsURL = URL(string: "browsersetu://settings")!
     var isSettingsPage: Bool { url == Self.settingsURL }
 
+    /// A library panel (Bookmarks, History, Downloads) living in a tab, drawn by the window like Settings.
+    static func panelURL(_ sheet: Sheet) -> URL? {
+        switch sheet { case .bookmarks, .history, .downloads: URL(string: "browsersetu://panel/\(sheet.rawValue)"); default: nil }
+    }
+    var panelSheet: Sheet? {
+        guard let url, url.scheme == "browsersetu", url.host == "panel" else { return nil }
+        return Sheet(rawValue: url.lastPathComponent)
+    }
+    var isInternalPage: Bool { isSettingsPage || panelSheet != nil }
+
     func load(_ target: URL) {
-        if target == Self.settingsURL {
+        if target == Self.settingsURL || (target.scheme == "browsersetu" && target.host == "panel") {
             pendingURL = nil; showingError = false; isLoading = false
-            url = target; title = "Settings"
+            url = target
+            switch panelSheet { case .bookmarks?: title = "Bookmarks"; case .history?: title = "History"; case .downloads?: title = "Downloads"; default: title = "Settings" }
             return
         }
         if !autoRetrying { retryAttempt = 0 }
@@ -149,7 +160,7 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
         // An error page is local content; reloading it would just show the error again.
         if showingError, let target = failedURL ?? url { load(target) }
         else if engine.currentURL == nil, let url { load(url) }
-        else if isSettingsPage { return }
+        else if isInternalPage { return }
         else { engine.reload() }
     }
 
@@ -310,7 +321,7 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
         typedLogin = PendingLogin(origin: origin, user: user, password: password)
     }
 
-    func engineLoginFieldFocused(origin: String?) { if !isPrivate { owner?.offerToFillLogin(in: self, frameOrigin: origin) } }
+    func engineLoginFieldFocused(origin: String?, usernameOnly: Bool) { if !isPrivate { owner?.offerToFillLogin(in: self, frameOrigin: origin, usernameOnly: usernameOnly) } }
     func engineLoginSubmitted(origin: String, user: String, password: String) { owner?.loginSubmitted(origin: origin, user: user, password: password, in: self) }
 
     func engineVimKey(_ key: String) -> Bool {
@@ -364,7 +375,7 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
     func applySiteStyle() { engine.setSiteStyle(owner?.siteStyle(forHost: url?.host)) }
 
     func applyPageActions() {
-        guard !isSettingsPage else { return }
+        guard !isInternalPage else { return }
         engine.runPageScript(PowerScripts.pageActions, arguments: ["css": PageAction.css(for: pageActions) ?? NSNull()])
     }
 

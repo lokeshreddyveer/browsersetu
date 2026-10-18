@@ -116,6 +116,8 @@ struct PanelRow<Leading: View, Trailing: View>: View {
     let title: String
     var detail: String?
     var tags: [String] = []
+    /// One line, title then host, for long lists such as History.
+    var compact = false
     var action: (() -> Void)?
     @ViewBuilder var leading: Leading
     @ViewBuilder var trailing: Trailing
@@ -125,6 +127,15 @@ struct PanelRow<Leading: View, Trailing: View>: View {
         Button { action?() } label: {
             HStack(spacing: 12) {
                 leading
+                if compact {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) {
+                            Text(title).font(.system(size: 13, weight: .medium)).foregroundStyle(.primary).lineLimit(1).fixedSize()
+                            if let detail { Text(detail).font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(1).fixedSize() }
+                        }
+                        Text(title).font(.system(size: 13, weight: .medium)).foregroundStyle(.primary).lineLimit(1).truncationMode(.tail)
+                    }
+                } else {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title).font(.system(size: 13.5, weight: .medium)).foregroundStyle(.primary).lineLimit(1).truncationMode(.tail)
                     HStack(spacing: 6) {
@@ -135,10 +146,11 @@ struct PanelRow<Leading: View, Trailing: View>: View {
                         }
                     }
                 }
+                }
                 Spacer(minLength: 8)
                 trailing
             }
-            .padding(.horizontal, 12).padding(.vertical, 9)
+            .padding(.horizontal, 12).padding(.vertical, compact ? 5 : 9)
             .background(Color.primary.opacity(hovering ? 0.06 : 0))
             .contentShape(Rectangle())
         }
@@ -179,10 +191,48 @@ struct PanelEmpty: View {
 /// The scrolling body every panel shares: sections with room between them and at the foot.
 struct PanelBody<Content: View>: View {
     @ViewBuilder var content: Content
+    @Environment(\.panelFitsContent) private var fits
+    @State private var contentHeight: CGFloat?
+
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 18) { content }.padding(.vertical, 8).padding(.bottom, 20)
+                .background(GeometryReader { geo in Color.clear.preference(key: PanelContentHeight.self, value: geo.size.height) })
         }
         .scrollIndicators(.hidden)
+        .onPreferenceChange(PanelContentHeight.self) { contentHeight = $0 }
+        // In a floating card the list is only as tall as its rows, so no empty area is left under them.
+        .frame(maxHeight: fits ? (contentHeight ?? .infinity) : .infinity)
     }
+}
+
+private struct PanelContentHeight: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
+private struct PanelFitsContentKey: EnvironmentKey { static let defaultValue = false }
+extension EnvironmentValues {
+    var panelFitsContent: Bool {
+        get { self[PanelFitsContentKey.self] }
+        set { self[PanelFitsContentKey.self] = newValue }
+    }
+}
+
+/// Keeps a heavy view invisible for the first moments, until its layout has settled, then fades it in. Without it the rows show
+/// loose in the air while the cards and groups around them are still being laid out.
+struct SettlesBeforeShowing: ViewModifier {
+    @State private var ready = false
+    func body(content: Content) -> some View {
+        content
+            .opacity(ready ? 1 : 0)
+            .task {
+                try? await Task.sleep(for: .milliseconds(70))
+                withAnimation(.easeOut(duration: 0.16)) { ready = true }
+            }
+    }
+}
+
+extension View {
+    func settlesBeforeShowing() -> some View { modifier(SettlesBeforeShowing()) }
 }

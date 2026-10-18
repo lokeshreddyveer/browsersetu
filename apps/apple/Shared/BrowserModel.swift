@@ -7,6 +7,13 @@ import Combine
 import SetuPrivacyCore
 import SwiftUI
 
+/// Where Bookmarks, History and Downloads open.
+enum PanelMode: String, CaseIterable, Identifiable {
+    case dock, tab, float
+    var id: String { rawValue }
+    var title: String { switch self { case .dock: "Beside the page"; case .tab: "As a tab"; case .float: "As a floating card" } }
+}
+
 enum Sheet: String, Identifiable {
     case bookmarks, history, downloads, pdfEditor, settings, layout, research, sitePrivacy, workbench, findAll, sessions, timeline, dashboard, readingList, note, qr, style, pageTools, selection, shareTabs, shopping, repair, devices, pageSearch, resources
     var id: String { rawValue }
@@ -44,7 +51,39 @@ final class BrowserModel: ObservableObject {
     @Published var activeID: UInt64?
     @Published private(set) var profileName: String
     @Published private(set) var profiles: [String] = []
-    @Published var sheet: Sheet?
+    @Published var sheet: Sheet? {
+        didSet {
+            // Bookmarks, History and Downloads open beside the page on the Mac and the iPad when the person chose to dock them.
+            if let opened = sheet, Self.dockable.contains(opened), Self.supportsDock {
+                sheet = nil
+                #if os(iOS)
+                let mode = PanelMode.dock   // the iPad has the dock only; tab and card modes are the Mac's
+                #else
+                let mode = panelMode
+                #endif
+                switch mode {
+                case .dock: dockedPanel = (dockedPanel == opened) ? nil : opened
+                case .tab: showPanelTab(opened)
+                case .float: floatingPanel = (floatingPanel == opened) ? nil : opened
+                }
+            }
+        }
+    }
+    static var supportsDock: Bool {
+        #if os(macOS)
+        true
+        #else
+        UIDevice.current.userInterfaceIdiom == .pad
+        #endif
+    }
+    static let dockable: [Sheet] = [.bookmarks, .history, .downloads]
+    /// The library panel showing beside the page, if any.
+    @Published var dockedPanel: Sheet?
+    /// The same panels as a card over the page, when they are not docked.
+    @Published var floatingPanel: Sheet?
+    @Published var panelMode: PanelMode = .dock { didSet { saveSetting("panel_mode", panelMode.rawValue) } }
+    var panelsDocked: Bool { get { panelMode == .dock } set { panelMode = newValue ? .dock : .float } }
+    @Published var dockWidth: Double = 380 { didSet { saveSetting("dock_width", String(Int(dockWidth))) } }
     @Published var mediaReport: MediaCapabilityReport?
     @Published var mediaFindings: [MediaPageFinding]?
     @Published var mediaChecking = false
@@ -242,7 +281,15 @@ final class BrowserModel: ObservableObject {
     @Published var thirdSplitTabID: UInt64? { didSet { if thirdSplitTabID == nil { fourthSplitTabID = nil } } }
     @Published var fourthSplitTabID: UInt64?
     @Published var splitOrientation: SplitOrientation = .sideBySide { didSet { saveSetting("split_orientation", splitOrientation.rawValue) } }
-    @Published var addressBarPosition: AddressBarPosition = .bottom { didSet { saveSetting("address_bar", addressBarPosition.rawValue) } }
+    /// A phone keeps the bar under the thumb; an iPad is held wide, so the bar goes where the eye is, at the top.
+    static var defaultAddressBarPosition: AddressBarPosition {
+        #if os(iOS)
+        UIDevice.current.userInterfaceIdiom == .pad ? .top : .bottom
+        #else
+        .bottom
+        #endif
+    }
+    @Published var addressBarPosition: AddressBarPosition = BrowserModel.defaultAddressBarPosition { didSet { saveSetting("address_bar", addressBarPosition.rawValue) } }
     @Published var showContinue = true { didSet { saveSetting("show_continue", showContinue ? "1" : "0") } }
     @Published var showFavorites = true { didSet { saveSetting("show_favorites", showFavorites ? "1" : "0") } }
     @Published var showFrequent = true { didSet { saveSetting("show_frequent", showFrequent ? "1" : "0") } }
@@ -416,7 +463,14 @@ final class BrowserModel: ObservableObject {
     static let chromeSettleTime: TimeInterval = 0.6
 
     /// Only a top toolbar can fold away: the sidebar layout keeps everything in the sidebar.
-    var canCollapseChrome: Bool { collapseOnScroll && !focusMode && !singleToolbar && !topBarHidden && effectiveTabLayout != .sidebar && !autoHidesToolbar }
+    var canCollapseChrome: Bool {
+        #if os(iOS)
+        // The iPad's sidebar holds only the tabs, so the address bar and toolbar can still fold away over the page.
+        collapseOnScroll && !focusMode && !singleToolbar && !topBarHidden && !autoHidesToolbar
+        #else
+        collapseOnScroll && !focusMode && !singleToolbar && !topBarHidden && effectiveTabLayout != .sidebar && !autoHidesToolbar
+        #endif
+    }
 
     /// On the iPhone the bottom dock shrinks into a small pill while a page is read, and opens again when scrolling back.
     var canCollapseDock: Bool {
@@ -953,6 +1007,12 @@ final class BrowserModel: ObservableObject {
 
     @discardableResult
     /// Opens Settings as a tab, or brings the one already open to the front.
+    func showPanelTab(_ sheet: Sheet) {
+        guard let url = TabController.panelURL(sheet) else { return }
+        if let existing = tabs.first(where: { $0.url == url }) { select(existing.id); return }
+        openTab(url: url, isPrivate: false)
+    }
+
     func showSettingsTab() {
         if let existing = tabs.first(where: \.isSettingsPage) { select(existing.id); return }
         openTab(url: TabController.settingsURL, isPrivate: false)
@@ -1895,6 +1955,8 @@ final class BrowserModel: ObservableObject {
         ExternalApps.remember = { [weak self] host, answer in self?.setAppLinkSite(host, to: answer) }
         overviewStyle = OverviewStyle(rawValue: get("overview_style") ?? "") ?? .grid
         settingsInTab = get("settings_in_tab") == "1"
+        panelMode = PanelMode(rawValue: get("panel_mode") ?? "") ?? (get("panels_docked") == "0" ? .float : .dock)
+        dockWidth = min(560, max(300, Double(get("dock_width") ?? "") ?? 380))
         loadExtraSettings(get)
         overviewGrouped = get("overview_grouped") == "1"
         overviewSort = OverviewSort(rawValue: get("overview_sort") ?? "") ?? .manual
@@ -1937,7 +1999,7 @@ final class BrowserModel: ObservableObject {
         case "0": sidebarPinChoice = false; sidebarAutoHide = true; sidebarVisible = false
         default: sidebarPinChoice = nil
         }
-        addressBarPosition = AddressBarPosition(rawValue: get("address_bar") ?? "") ?? .bottom
+        addressBarPosition = AddressBarPosition(rawValue: get("address_bar") ?? "") ?? Self.defaultAddressBarPosition
         showFavorites = get("show_favorites") != "0"
         showContinue = get("show_continue") != "0"
         showFrequent = get("show_frequent") != "0"

@@ -10,7 +10,9 @@ struct TabFavicon: View {
 
     var body: some View {
         ZStack {
-            if tab.isSettingsPage {
+            if let panel = tab.panelSheet {
+                Image(systemName: panel == .bookmarks ? "book.fill" : panel == .history ? "clock.fill" : "arrow.down.circle.fill").font(.system(size: size * 0.8)).foregroundStyle(Theme.accent)
+            } else if tab.isSettingsPage {
                 Image(systemName: "gearshape.fill").font(.system(size: size * 0.8)).foregroundStyle(Theme.accent)
             } else if tab.isLoading {
                 ProgressView().controlSize(.mini).scaleEffect(0.8)
@@ -102,7 +104,7 @@ private struct TabInteractions: ViewModifier {
             // Resting the pointer on a tab shows a preview card after a short delay; moving away or pressing hides it.
             .onHover { inside in
                 hoverTask?.cancel()
-                guard inside, model.hoverPreviews, !tab.isSettingsPage else { showPreview = false; return }
+                guard inside, model.hoverPreviews, !tab.isInternalPage else { showPreview = false; return }
                 hoverTask = Task { @MainActor in
                     try? await Task.sleep(for: .milliseconds(Int(model.hoverDelay * 1000)))
                     if !Task.isCancelled { showPreview = true }

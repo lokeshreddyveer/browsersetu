@@ -8,6 +8,8 @@ struct BookmarksPanel: View {
     @EnvironmentObject var model: BrowserModel
     @State private var query = ""
     @State private var items: [BookmarkItem] = []
+    /// False until the first read, so the lists do not flash empty and then animate in.
+    @State private var loaded = false
     @State private var filter: Filter = .all
     @State private var allCount = 0
 
@@ -45,7 +47,7 @@ struct BookmarksPanel: View {
         VStack(spacing: 0) {
             PanelHeader(symbol: "book", title: "Bookmarks", count: allCount, query: $query, prompt: "Search bookmarks and tags") { EmptyView() }
             PanelChips(choices: Filter.allCases, selection: $filter, title: { $0.title }, count: { count(for: $0) })
-            if shown.isEmpty {
+            if loaded && shown.isEmpty {
                 PanelBody { PanelEmpty(symbol: "book", title: query.isEmpty ? "No bookmarks here" : "Nothing matches", detail: query.isEmpty ? "Press the star in the address bar, or ⌘D, to keep a page." : "Try a title, an address or a #tag.") }
             } else {
                 PanelBody {
@@ -105,7 +107,7 @@ struct BookmarksPanel: View {
             let have = Set(found.map(\.url))
             found += ((try? model.core.listBookmarks(query: "")) ?? []).filter { !have.contains($0.url) && model.tags(forBookmark: $0.url).contains { $0.contains(wanted) } }
         }
-        animated(.easeOut(duration: 0.18)) { items = found }
+        if loaded { animated(.easeOut(duration: 0.18)) { items = found } } else { items = found; loaded = true }
         if query.isEmpty { allCount = found.count } else { allCount = (try? model.core.listBookmarks(query: ""))?.count ?? found.count }
     }
 
@@ -139,6 +141,8 @@ struct HistoryPanel: View {
     @EnvironmentObject var model: BrowserModel
     @State private var query = ""
     @State private var items: [HistoryItem] = []
+    /// False until the first read, so the lists do not flash empty and then animate in.
+    @State private var loaded = false
     @State private var range: Range = .all
     @State private var confirmClear = false
 
@@ -186,7 +190,7 @@ struct HistoryPanel: View {
                     .menuStyle(.borderlessButton).fixedSize().disabled(items.isEmpty)
             }
             PanelChips(choices: Range.allCases, selection: $range, title: { $0.title }, count: { r in items.filter { inRange($0, r) }.count })
-            if shown.isEmpty {
+            if loaded && shown.isEmpty {
                 PanelBody { PanelEmpty(symbol: "clock", title: query.isEmpty ? "No history" : "Nothing matches", detail: query.isEmpty ? "Pages you visit appear here, newest first. Private tabs are never listed." : "Try fewer words, or widen the range above.") }
             } else {
                 PanelBody {
@@ -207,8 +211,8 @@ struct HistoryPanel: View {
 
     private func row(_ h: HistoryItem) -> some View {
         let time = Date(timeIntervalSince1970: TimeInterval(h.lastVisit)).formatted(date: .omitted, time: .shortened)
-        return PanelRow(title: h.title.isEmpty ? h.url : h.title, detail: displayHost(URL(string: h.url)), action: { model.open(urlString: h.url) }) {
-            SiteTile(url: h.url, title: h.title, size: 30)
+        return PanelRow(title: h.title.isEmpty ? h.url : h.title, detail: displayHost(URL(string: h.url)), compact: true, action: { model.open(urlString: h.url) }) {
+            SiteTile(url: h.url, title: h.title, size: 20)
         } trailing: {
             HStack(spacing: 8) {
                 Text(time).font(.system(size: 11.5)).foregroundStyle(.tertiary).monospacedDigit()
@@ -224,7 +228,7 @@ struct HistoryPanel: View {
 
     private func reload() {
         let found = (query.isEmpty ? try? model.core.recentHistory(limit: 400) : try? model.core.searchHistory(query: query, limit: 400)) ?? []
-        animated(.easeOut(duration: 0.18)) { items = found }
+        if loaded { animated(.easeOut(duration: 0.18)) { items = found } } else { items = found; loaded = true }
     }
 
     private func remove(_ h: HistoryItem) { try? model.core.deleteHistoryEntry(url: h.url); reload() }
@@ -242,6 +246,8 @@ struct DownloadsPanel: View {
     @ObservedObject var coordinator: DownloadCoordinator
     @State private var query = ""
     @State private var items: [DownloadItem] = []
+    /// False until the first read, so the lists do not flash empty and then animate in.
+    @State private var loaded = false
     @State private var kind: Kind = .all
 
     enum Kind: String, CaseIterable, Identifiable {
@@ -286,7 +292,7 @@ struct DownloadsPanel: View {
                     .buttonStyle(.borderless).disabled(items.isEmpty)
             }
             PanelChips(choices: Kind.allCases, selection: $kind, title: { $0.title }, count: { k in k == .all ? items.count : items.filter { Kind.of($0.filename) == k }.count })
-            if !busy && shown.isEmpty {
+            if loaded && !busy && shown.isEmpty {
                 PanelBody { PanelEmpty(symbol: "arrow.down.circle", title: query.isEmpty && kind == .all ? "No downloads" : "Nothing matches", detail: "Files you download appear here, with progress while they come in.") }
             } else {
                 PanelBody {
@@ -382,5 +388,8 @@ struct DownloadsPanel: View {
         }
     }
 
-    private func reload() { animated(.easeOut(duration: 0.18)) { items = (try? model.core.listDownloads(limit: 200)) ?? [] } }
+    private func reload() {
+        let found = (try? model.core.listDownloads(limit: 200)) ?? []
+        if loaded { animated(.easeOut(duration: 0.18)) { items = found } } else { items = found; loaded = true }
+    }
 }

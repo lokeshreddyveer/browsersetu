@@ -275,29 +275,39 @@ struct MainColumn: View {
         ZStack(alignment: .top) {
             VStack(spacing: 0) {
                 if let barInset { TopBar(leadingInset: barInset) }
-                VStack(spacing: 0) {
-                    RecoveryBanner()
-                    if model.findVisible { FindBar().transition(.move(edge: .top).combined(with: .opacity)) }
-                    if let tab = model.active {
-                        ContentPanels(active: tab)
-                            .overlay(alignment: .top) { LoadingBar(tab: tab).id(tab.id) }
-                            // A card at the foot of the page, clear of every toolbar layout.
-                            .overlay(alignment: .bottom) { WebStoreBanner().padding(.bottom, 16).motion(.easeOut(duration: 0.2), value: model.storePageExtensionID) }
-                    } else {
-                        Color.platformBackground
+                HStack(spacing: 0) {
+                    VStack(spacing: 0) {
+                        RecoveryBanner()
+                        if model.findVisible { FindBar().transition(.move(edge: .top).combined(with: .opacity)) }
+                        if let tab = model.active {
+                            ContentPanels(active: tab)
+                                .overlay(alignment: .top) { LoadingBar(tab: tab).id(tab.id) }
+                                // A card at the foot of the page, clear of every toolbar layout.
+                                .overlay(alignment: .bottom) { WebStoreBanner().padding(.bottom, 16).motion(.easeOut(duration: 0.2), value: model.storePageExtensionID) }
+                        } else {
+                            Color.platformBackground
+                        }
+                    }
+                    if let docked = model.dockedPanel {
+                        DockedPanelView(sheet: docked).transition(.move(edge: .trailing).combined(with: .opacity))
                     }
                 }
+                .motion(.easeOut(duration: 0.22), value: model.dockedPanel)
                 .modifier(PageCard(enabled: !model.focusMode, leading: cardLeading, trailing: cardTrailing,
                                    top: barInset == nil ? WindowInset.gap : 0))
             }
             if let id = model.openPanelID, let panel = model.webPanels.first(where: { $0.id == id }), let tab = model.tabs.first(where: { $0.id == model.panelTabID }) {
                 WebPanelView(panel: panel, tab: tab).transition(.move(edge: .trailing).combined(with: .opacity)).zIndex(2)
             }
+            if let floating = model.floatingPanel {
+                FloatingPanelView(sheet: floating).transition(.opacity).zIndex(5)
+            }
             if model.overviewVisible { TabOverview().transition(.opacity.combined(with: .scale(scale: 0.98))).zIndex(3) }
             if model.showSetup { SetupAssistantView().transition(.opacity).zIndex(10) }
             if model.paletteVisible { CommandPalette().transition(.opacity).zIndex(4) }
         }
         .motion(.easeOut(duration: 0.16), value: model.overviewVisible)
+        .motion(.spring(response: 0.34, dampingFraction: 0.88), value: model.floatingPanel)
         .motion(.spring(response: 0.32, dampingFraction: 0.9), value: model.findVisible)
         .motion(.easeOut(duration: 0.14), value: model.activeID)
         .motion(.easeOut(duration: 0.12), value: model.paletteVisible)
@@ -586,7 +596,8 @@ struct PageArea: View {
     var body: some View {
         ZStack {
             EngineViewHost(view: tab.hostView)
-            if tab.isSettingsPage { MacSettingsView(inline: true).background(Color.platformBackground).transition(.opacity) }
+            if tab.isSettingsPage { MacSettingsView(inline: true).settlesBeforeShowing().background(Color.platformBackground).transition(.opacity) }
+            else if let panel = tab.panelSheet { PanelTabView(sheet: panel, tab: tab).background(Color.platformBackground).transition(.opacity) }
             else if tab.isBlank { StartPageView(isPrivate: tab.isPrivate).contextMenu { if !tab.isPrivate { StartPageContextMenu() } } }
         }
         .overlay(alignment: .bottomTrailing) { if model.workbench.showSizeHUD { SizeHUD() } }
@@ -754,5 +765,98 @@ struct WebPanelView: View {
         .shadow(color: .black.opacity(0.28), radius: 16, x: -4, y: 4)
         .padding(10)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+    }
+}
+
+
+/// Bookmarks, History or Downloads as a card over a dimmed page: our own surface, not the system's sheet. Click outside or press Esc to close.
+struct FloatingPanelView: View {
+    @EnvironmentObject var model: BrowserModel
+    let sheet: Sheet
+    @State private var shown = false
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(shown ? 0.38 : 0).ignoresSafeArea().contentShape(Rectangle())
+                .onTapGesture { close() }
+            VStack(spacing: 0) {
+                HStack(spacing: 8) {
+                    Spacer()
+                    pill("sidebar.right", "Dock beside the page") {
+                        animated(.easeOut(duration: 0.2)) { model.panelMode = .dock; model.floatingPanel = nil; model.sheet = sheet }
+                    }
+                    pill("xmark", "Close") { close() }.keyboardShortcut(.cancelAction)
+                }
+                .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 2)
+                NavigationStack {
+                    Group {
+                        switch sheet {
+                        case .bookmarks: BookmarksPanel()
+                        case .history: HistoryPanel()
+                        case .downloads: DownloadsPanel(coordinator: model.downloads)
+                        default: EmptyView()
+                        }
+                    }
+                    .tint(Theme.accent)
+                }
+                .settlesBeforeShowing()
+            }
+            .themedSurface()
+            .frame(width: 580).frame(maxHeight: 600)
+            .fixedSize(horizontal: false, vertical: true)
+            .environment(\.panelFitsContent, true)
+            .themedFill(in: RoundedRectangle(cornerRadius: 22, style: .continuous), fallback: .regularMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.5))
+            .shadow(color: .black.opacity(0.4), radius: 40, y: 18)
+            .scaleEffect(shown ? 1 : 0.96).opacity(shown ? 1 : 0)
+            .padding(.vertical, 56).padding(.horizontal, 24)
+        }
+        .onAppear { withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) { shown = true } }
+    }
+
+    private func close() {
+        withAnimation(.easeOut(duration: 0.16)) { shown = false }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) { model.floatingPanel = nil }
+    }
+
+    private func pill(_ symbol: String, _ label: String, action: @escaping () -> Void) -> some View {
+        PanelPill(symbol: symbol, label: label, action: action)
+    }
+}
+
+
+/// A library panel filling a browser tab, with the same header buttons as the other modes.
+struct PanelTabView: View {
+    @EnvironmentObject var model: BrowserModel
+    let sheet: Sheet
+    @ObservedObject var tab: TabController
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Spacer()
+                PanelPill(symbol: "sidebar.right", label: "Open beside the page from now on") {
+                    animated(.easeOut(duration: 0.2)) { model.panelMode = .dock; model.closeTab(id: tab.id, force: true); model.sheet = sheet }
+                }
+                PanelPill(symbol: "xmark", label: "Close") { model.closeTab(id: tab.id, force: true) }.keyboardShortcut(.cancelAction)
+            }
+            .padding(.horizontal, 20).padding(.top, 14)
+            NavigationStack {
+                Group {
+                    switch sheet {
+                    case .bookmarks: BookmarksPanel()
+                    case .history: HistoryPanel()
+                    case .downloads: DownloadsPanel(coordinator: model.downloads)
+                    default: EmptyView()
+                    }
+                }
+                .tint(Theme.accent)
+            }
+            .settlesBeforeShowing()
+            .frame(maxWidth: 760)
+            .frame(maxWidth: .infinity)
+        }
+        .themedSurface()
     }
 }

@@ -136,7 +136,23 @@ enum LoginScripts {
           post({ kind: 'typed', origin: r.origin, user: r.user, password: r.password });
         }, 700);
       }, true);
-      document.addEventListener('focusin', (e) => { if (e.target && e.target.type === 'password') post({ kind: 'focus', origin: location.origin }); }, true);
+      // A field that looks like a user name (or an email, or a phone number): the first step of a sign-in that asks for the name alone, or the name in a form that also has a password.
+      const userish = (e) => {
+        const kind = (e.getAttribute('type') || '').toLowerCase();
+        if (!['text', 'email', 'tel', ''].includes(kind)) return false;
+        const hay = [e.autocomplete, e.name, e.id, e.placeholder, e.getAttribute('aria-label')].join(' ').toLowerCase();
+        if (/search|query/.test(hay) && !/user|mail|login|account/.test(hay)) return false;
+        return /user|login|email|e-mail|phone|mobile|account|identifier|signin|sign-in|name/.test(hay);
+      };
+      document.addEventListener('focusin', (e) => {
+        const t = e.target; if (!t || t.tagName !== 'INPUT') return;
+        if (t.type === 'password') { post({ kind: 'focus', origin: location.origin, mode: 'both' }); return; }
+        // Only an empty field: one that already has a name in it is never filled over.
+        if (userish(t) && !t.value) {
+          const hasPassword = [...document.querySelectorAll('input[type=password]')].some(visible);
+          post({ kind: 'focus', origin: location.origin, mode: hasPassword ? 'both' : 'user' });
+        }
+      }, true);
     })();
     """
 
@@ -161,19 +177,26 @@ enum LoginScripts {
     const visible = (e) => { const r = e.getBoundingClientRect(); const s = getComputedStyle(e); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && !e.disabled && !e.readOnly; };
     if (location.origin !== origin) return false;
     const pw = [...document.querySelectorAll('input[type=password]')].find(visible);
-    if (!pw) return false;
-    const scope = pw.form || document;
-    const users = [...scope.querySelectorAll('input')].filter(e => visible(e) && e !== pw && ['text', 'email', 'tel', ''].includes((e.getAttribute('type') || '').toLowerCase()));
-    const before = users.filter(e => (e.compareDocumentPosition(pw) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0);
-    const userField = before.length ? before[before.length - 1] : users[0];
     const set = (el, value) => {
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
       setter.call(el, value);
       el.dispatchEvent(new Event('input', { bubbles: true }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
     };
+    if (!pw) {
+      // The first step of a sign-in that asks for the name alone: only the name is filled in, in the first empty field that takes one.
+      if (!user) return false;
+      const field = [...document.querySelectorAll('input')].find(e => visible(e) && !e.value && ['text', 'email', 'tel', ''].includes((e.getAttribute('type') || '').toLowerCase()));
+      if (!field) return false;
+      set(field, user);
+      return true;
+    }
+    const scope = pw.form || document;
+    const users = [...scope.querySelectorAll('input')].filter(e => visible(e) && e !== pw && ['text', 'email', 'tel', ''].includes((e.getAttribute('type') || '').toLowerCase()));
+    const before = users.filter(e => (e.compareDocumentPosition(pw) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0);
+    const userField = before.length ? before[before.length - 1] : users[0];
     if (userField) set(userField, user);
-    set(pw, password);
+    if (password) set(pw, password);
     return true;
     """
 }
