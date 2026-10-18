@@ -66,6 +66,7 @@ extension BrowserModel {
     /// Keeps one tab of each page (the one in front, a pinned or locked one, or the first) and closes the rest.
     @discardableResult
     func closeDuplicateTabs() -> Int {
+        if duplicateGroups().reduce(0, { $0 + $1.count - 1 }) > 5 { takeCheckpoint(reason: "Before closing duplicates", force: true) }
         var closed = 0
         for group in duplicateGroups() {
             let keep = group.first { $0.id == activeID } ?? group.first { $0.pinned || lockedTabIDs.contains($0.id) } ?? group[0]
@@ -89,16 +90,17 @@ extension BrowserModel {
     // MARK: Saved sessions
 
     /// Saves the tabs of this workspace (normal tabs only: private tabs are never written down).
-    func saveSession(named name: String) {
+    /// With `group`, saves only that group's tabs (and the groups inside it) as a collection.
+    func saveSession(named name: String, group: String? = nil) {
         let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let list = tabs.filter { !$0.isPrivate && !$0.isBlank && $0.workspace == activeWorkspace }
+        let list = tabs.filter { tab in !tab.isPrivate && !tab.isBlank && tab.workspace == activeWorkspace && (group.map { GroupPath.isInside(tab.group, of: $0) } ?? true) }
         guard !clean.isEmpty, clean.count <= 60, !list.isEmpty else { notice = "There are no tabs to save in this workspace."; return }
         var session = SavedSession(name: clean, tabs: list.compactMap { tab in
             tab.url.map { SavedSession.Tab(url: $0.absoluteString, title: tab.displayTitle, pinned: tab.pinned) }
         })
-        session.layout = layoutSnapshot()
+        session.layout = group == nil ? layoutSnapshot() : nil
         session.workspace = activeWorkspace
-        if let left = active?.url?.absoluteString, let right = splitTab?.url?.absoluteString { session.split = [left, right] }
+        if group == nil, let left = active?.url?.absoluteString, let right = splitTab?.url?.absoluteString { session.split = [left, right] }
         setSavedSessions(Array(([session] + savedSessions).prefix(50)))
         notice = "Saved “\(clean)” with \(session.tabs.count) tab\(session.tabs.count == 1 ? "" : "s")."
         // How far down each loaded page was is read afterwards, so saving is never held up by a page.

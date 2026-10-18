@@ -288,6 +288,8 @@ struct DownloadsPanel: View {
     var body: some View {
         VStack(spacing: 0) {
             PanelHeader(symbol: "arrow.down.circle", title: "Downloads", count: items.count + coordinator.active.count, query: $query, prompt: "Search downloads") {
+                Button { copyToPasteboard(coordinator.diagnostics); model.notice = "Download diagnostics copied." } label: { Label("Copy Download Diagnostics", systemImage: "stethoscope") }
+                    .buttonStyle(.borderless)
                 Button(role: .destructive) { try? model.core.clearDownloads(); coordinator.clearCompleted(); reload() } label: { Label("Clear Completed", systemImage: "trash") }
                     .buttonStyle(.borderless).disabled(items.isEmpty)
             }
@@ -357,7 +359,7 @@ struct DownloadsPanel: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(d.filename).font(.system(size: 13.5, weight: .medium)).lineLimit(1).truncationMode(.middle)
                 ProgressView(value: d.fraction).tint(Theme.accent)
-                Text("\(Int(d.fraction * 100))%").font(.system(size: 11.5)).foregroundStyle(.secondary).monospacedDigit()
+                Text(d.detail.isEmpty ? "\(Int(d.fraction * 100))%" : "\(Int(d.fraction * 100))% · \(d.detail)").font(.system(size: 11.5)).foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
             }
             Button("Cancel") { coordinator.cancel(d.id) }.buttonStyle(.borderless).font(.system(size: 12))
         }

@@ -4,13 +4,15 @@ import SwiftUI
 /// How eagerly inactive tabs give their memory back. A discarded tab keeps its address, title, back/forward list
 /// and scroll position; only the page's web process is released, and it reloads when the tab is selected again.
 enum MemoryMode: String, CaseIterable, Identifiable {
-    case balanced, saver, performance
+    case balanced, saver, performance, battery, custom
     var id: String { rawValue }
     var title: String {
         switch self {
         case .balanced: "Balanced"
         case .saver: "Memory Saver"
         case .performance: "Performance"
+        case .battery: "Battery Saver"
+        case .custom: "Custom"
         }
     }
     var summary: String {
@@ -18,11 +20,23 @@ enum MemoryMode: String, CaseIterable, Identifiable {
         case .balanced: "Keeps your recent tabs. Releases older inactive ones when the system is low on memory."
         case .saver: "Also releases tabs you have not looked at for ten minutes, even when memory is fine."
         case .performance: "Keeps almost every tab live. Only releases tabs when the system is critically short of memory."
+        case .battery: "Releases tabs not looked at for five minutes, keeps only the two most recent live, and checks for sound and scheduled pages less often."
+        case .custom: "Your own limits: how many recent tabs stay live and how long a tab can sit idle before it is released."
         }
     }
 }
 
 enum MemoryEvent { case timer, warning, critical }
+
+/// The limits behind the Custom profile.
+struct CustomMemoryPolicy: Equatable {
+    /// Most recently used tabs that are never released.
+    var keepRecent = 5
+    /// Minutes a tab must sit unused before the timer releases it.
+    var idleMinutes = 15
+    static let keepChoices = [1, 2, 3, 5, 8, 12, 20]
+    static let idleChoices = [2, 5, 10, 15, 30, 60, 120]
+}
 
 /// What the policy needs to know about a tab. Kept separate from `TabController` so the policy is pure.
 struct TabCandidate: Equatable {
@@ -41,8 +55,8 @@ enum TabLifecyclePolicy {
     /// Tabs to release, oldest first.
     /// Never chosen: the selected tab, private tabs (their page state could not come back), pinned tabs when asked to
     /// keep them, tabs with nothing loaded, and the most recently used tabs of the mode's budget.
-    static func victims(_ tabs: [TabCandidate], mode: MemoryMode, event: MemoryEvent, now: Date, keepPinned: Bool) -> [UInt64] {
-        guard let rule = rule(mode: mode, event: event) else { return [] }
+    static func victims(_ tabs: [TabCandidate], mode: MemoryMode, event: MemoryEvent, now: Date, keepPinned: Bool, custom: CustomMemoryPolicy = CustomMemoryPolicy()) -> [UInt64] {
+        guard let rule = rule(mode: mode, event: event, custom: custom) else { return [] }
         let live = tabs.filter { $0.loaded && !$0.discarded }
         let protected = Set(live.sorted { $0.lastActive > $1.lastActive }.prefix(rule.keepRecent).map(\.id))
         return live
@@ -52,8 +66,14 @@ enum TabLifecyclePolicy {
             .map(\.id)
     }
 
-    private static func rule(mode: MemoryMode, event: MemoryEvent) -> (keepRecent: Int, minIdle: TimeInterval)? {
+    static func rule(mode: MemoryMode, event: MemoryEvent, custom: CustomMemoryPolicy = CustomMemoryPolicy()) -> (keepRecent: Int, minIdle: TimeInterval)? {
         switch (mode, event) {
+        case (.battery, .timer): (2, 300)
+        case (.battery, .warning): (2, 60)
+        case (.battery, .critical): (1, 10)
+        case (.custom, .timer): (custom.keepRecent, TimeInterval(custom.idleMinutes) * 60)
+        case (.custom, .warning): (custom.keepRecent, max(30, TimeInterval(custom.idleMinutes) * 30))
+        case (.custom, .critical): (max(1, custom.keepRecent / 2), 10)
         case (.balanced, .warning): (5, 120)
         case (.balanced, .critical): (2, 30)
         case (.saver, .timer): (3, 600)
@@ -81,6 +101,7 @@ final class TabLifecycle {
         source.setEventHandler { [weak self, weak source] in
             guard let self, let source else { return }
             let event: MemoryEvent = source.data.contains(.critical) ? .critical : .warning
+            MainActor.assumeIsolated { ReliabilityStats.shared.noteMemory(critical: event == .critical) }
             _ = MainActor.assumeIsolated { Task { await self.run(event) } }
         }
         source.resume()
@@ -114,14 +135,15 @@ final class TabLifecycle {
     @discardableResult
     func run(_ event: MemoryEvent, now: Date = Date()) async -> [UInt64] {
         guard let model else { return [] }
+        model.governor.refresh()
         if event != .timer { MemoryTrim.run(model: model, aggressive: event == .critical) }
         let candidates = model.tabs.map { tab in
             TabCandidate(id: tab.id, lastActive: tab.lastActive, pinned: tab.pinned, isPrivate: tab.isPrivate,
                          isActive: tab.id == model.activeID || tab.id == model.splitTabID || tab.id == model.thirdSplitTabID || tab.id == model.fourthSplitTabID,
-                         loaded: tab.hasLoadedPage, discarded: tab.isDiscarded, exempt: model.neverSleeps(host: tab.url?.host))
+                         loaded: tab.hasLoadedPage, discarded: tab.isDiscarded, exempt: model.neverSleeps(host: tab.url?.host) || tab.playingAudio)
         }
         var released: [UInt64] = []
-        for id in TabLifecyclePolicy.victims(candidates, mode: model.effectiveMemoryMode, event: event, now: now, keepPinned: model.keepPinnedTabs) {
+        for id in TabLifecyclePolicy.victims(candidates, mode: model.effectiveMemoryMode, event: event, now: now, keepPinned: model.keepPinnedTabs, custom: model.customMemory) {
             guard let tab = model.tabs.first(where: { $0.id == id }), id != model.activeID else { continue }
             if await tab.engine.isBusy() { continue }
             // The tab may have been selected while we were asking.

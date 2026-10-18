@@ -42,7 +42,9 @@ struct SidebarLayoutPanel: View {
             Spacer(minLength: 0)
             if showsAddress, let tab = model.active {
                 ChromeButton(symbol: "chevron.left", help: "Back", identifier: "back-button") { tab.goBack() }.disabled(!tab.canGoBack)
+                    .contextMenu { NavHistoryItems(tab: tab, back: true) }
                 ChromeButton(symbol: "chevron.right", help: "Forward", identifier: "forward-button") { tab.goForward() }.disabled(!tab.canGoForward)
+                    .contextMenu { NavHistoryItems(tab: tab, back: false) }
                 ChromeButton(symbol: tab.isLoading ? "xmark" : "arrow.clockwise", help: tab.isLoading ? "Stop" : "Reload", identifier: "reload-button") {
                     tab.isLoading ? tab.stop() : tab.reload()
                 }
@@ -302,7 +304,7 @@ struct SidebarPinnedTile: View {
             .motion(.easeOut(duration: 0.14), value: hovering)
             .motion(.easeOut(duration: 0.16), value: selected)
             .onHover { hovering = $0 }
-            .help(tab.displayTitle)
+            .modifier(TabTooltip(title: tab.displayTitle))
             .tabInteractions(tab)
     }
 }
@@ -350,7 +352,7 @@ struct SidebarTabRow: View {
         .motion(.easeOut(duration: 0.18), value: selected)
         .onHover { hovering = $0 }
         .transition(.move(edge: .leading).combined(with: .opacity))
-        .help(tab.displayTitle)
+        .modifier(TabTooltip(title: tab.displayTitle))
         .tabInteractions(tab)
         // A middle click closes the tab, as in every other browser.
         .overlay(MiddleClickCatcher { if !tab.isLocked { model.closeTab(id: tab.id) } })

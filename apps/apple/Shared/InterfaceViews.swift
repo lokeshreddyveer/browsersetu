@@ -60,6 +60,30 @@ struct TabMenuItems: View {
         SendTabMenu(tab: tab)
         Button(tab.isLocked ? "Unlock Tab" : "Lock Tab") { model.toggleLock(tab) }
         Button("Duplicate Tab") { model.duplicateTab(tab) }.disabled(tab.isBlank)
+        if tab.playingAudio || tab.muted {
+            Button(tab.muted ? "Unmute Tab" : "Mute Tab") { tab.setMuted(!tab.muted) }
+        }
+        if !tab.isPrivate && !tab.isBlank && model.profiles.count > 1, let url = tab.url {
+            Menu("Open in Profile") {
+                ForEach(model.profiles.filter { $0 != model.profileName }, id: \.self) { name in
+                    Button(name) { model.openInProfile(url, profile: name) }
+                }
+            }
+        }
+        if !tab.isPrivate && !tab.isBlank {
+            Menu("Snooze Tab") {
+                ForEach(SnoozeChoice.allCases) { choice in
+                    Button(choice.title) { model.snooze(tab, until: choice.date()) }
+                }
+            }
+            Menu("Schedule This Page") {
+                ForEach(ScheduleRepeat.allCases) { r in
+                    Button(r == .once ? "Tomorrow Morning" : r.title + " at 9:00") {
+                        if let url = tab.url { model.schedule(url: url, title: tab.displayTitle, at: SnoozeChoice.tomorrow.date(), repeats: r) }
+                    }
+                }
+            }
+        }
         Button("Put Tab to Sleep") { Task { await model.hibernate(tab) } }
             .disabled(tab.id == model.activeID || tab.isDiscarded || tab.isPrivate || tab.isBlank)
         if model.duplicateCount(of: tab) > 0 {
@@ -276,12 +300,15 @@ struct TabListRow: View {
             if let selection, selection.active { selection.toggle(tab.id) } else { model.select(tab.id); model.hideOverview() }
         }
         .contextMenu { TabMenuItems(tab: tab) }
-        // Press and hold, then drag onto another tab to put the dragged one in front of it.
+        #if os(macOS)
+        // Press and hold, then drag onto another tab to put the dragged one in front of it. On a phone or iPad the drag lift competes with
+        // tapping and swiping, so a tab there is moved from its menu instead.
         .draggable(String(tab.id))
         .dropDestination(for: String.self) { items, _ in
             guard let raw = items.first, let dragged = UInt64(raw), dragged != tab.id else { return false }
             return model.acceptDroppedTab(dragged, before: tab.id)
         }
+        #endif
         #if os(iOS)
         .modifier(SwipeToClose(tab: tab))
         #endif
@@ -314,6 +341,7 @@ struct TabCard: View {
                 if tab.pinned { Image(systemName: "pin.fill").font(.caption2).foregroundStyle(.secondary) }
                 Text(tab.displayTitle).font(.callout).lineLimit(1)
                 Spacer(minLength: 0)
+                AudioBadge(tab: tab)
             }
             .padding(.horizontal, 10).padding(.vertical, 8)
         }
@@ -331,12 +359,15 @@ struct TabCard: View {
             model.hideOverview()
         }
         .contextMenu { TabMenuItems(tab: tab) }
-        // Press and hold, then drag onto another tab to put the dragged one in front of it.
+        #if os(macOS)
+        // Press and hold, then drag onto another tab to put the dragged one in front of it. On a phone or iPad the drag lift competes with
+        // tapping and swiping, so a tab there is moved from its menu instead.
         .draggable(String(tab.id))
         .dropDestination(for: String.self) { items, _ in
             guard let raw = items.first, let dragged = UInt64(raw), dragged != tab.id else { return false }
             return model.acceptDroppedTab(dragged, before: tab.id)
         }
+        #endif
         #if os(iOS)
         .modifier(SwipeToClose(tab: tab))
         #endif

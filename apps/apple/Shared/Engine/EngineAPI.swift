@@ -59,6 +59,8 @@ protocol TabEngineEvents: AnyObject {
     func engineOpenPopup(configuration: AnyObject) -> TabEngine?
     /// A script asked for a new window with no click or key press behind it, and it was not opened.
     func engineBlockedPopup(url: URL?)
+    /// A page bounced through many different sites before settling.
+    func engineSuspiciousRedirect(sites: [String])
     /// Whether this site may open windows without a click (the person allowed it, or blocking is off).
     func enginePopupsAllowedWithoutGesture() -> Bool
     /// A choice from the page's link menu.
@@ -83,7 +85,20 @@ protocol TabEngineEvents: AnyObject {
     var enginePrivate: Bool { get }
 }
 
+/// One page in a tab's back or forward list. `offset` is how far from the page in front: -1 is the one before, 1 the one after.
+struct NavEntry: Identifiable, Equatable {
+    let offset: Int
+    let title: String
+    let url: URL?
+    var id: Int { offset }
+    /// What to show: the page's title, or its address when it has none.
+    var label: String { title.isEmpty ? (url?.host ?? url?.absoluteString ?? "Untitled") : title }
+}
+
 extension TabEngine {
+    func navigationEntries() -> (back: [NavEntry], forward: [NavEntry]) { ([], []) }
+    func navigate(toOffset offset: Int) {}
+
     func readableContent() async -> ReadableArticle? { nil }
     func pageDiagnostics() async -> [String: Any]? { nil }
     func pickElement() async -> [String: Any]? { nil }
@@ -102,6 +117,17 @@ extension TabEngine {
     func controlVideo(index: Int, action: String, value: Double) async {}
     func fillCouponField(_ code: String) async -> Bool { false }
     func scrollFraction() async -> Double? { nil }
+    func audioPlaying() async -> Bool { false }
+    func saveScrollState() async {}
+    func restoreScrollState() {}
+    func respondsWithin(_ seconds: Double) async -> Bool { true }
+    func devLog() async -> DevLog? { nil }
+    func pageSource() async -> String? { nil }
+    func userAgentString() async -> String? { nil }
+    func loadLocalFile(_ url: URL) {}
+    func setScrollFraction(_ fraction: Double) async {}
+    func pageNetwork() async -> PageNetworkReport { PageNetworkReport() }
+    func setMuted(_ on: Bool) async {}
     func scrollTo(fraction: Double) async {}
     func formDraftFields() async -> [[String: Any]]? { nil }
     func restoreFormDraft(_ fields: [[String: Any]]) async -> Int { 0 }
@@ -111,6 +137,7 @@ extension TabEngine {
     func showHTML(_ html: String, baseURL: URL?) {}
     func presentNativeFind() {}
     func pagePDF() async -> Data? { nil }
+    func blockedAttempts() async -> Int { 0 }
     func selectedText() async -> String? { nil }
     func pageText() async -> String? { nil }
     func screenshot(fullPage: Bool) async -> Data? { nil }
@@ -138,6 +165,7 @@ extension TabEngineEvents {
     func engineLoginTyped(origin: String, user: String, password: String) {}
     func engineOpenPopup(configuration: AnyObject) -> TabEngine? { nil }
     func engineBlockedPopup(url: URL?) {}
+    func engineSuspiciousRedirect(sites: [String]) {}
     func enginePopupsAllowedWithoutGesture() -> Bool { false }
     func engineLinkAction(_ url: URL, _ action: LinkAction) {}
     func engineVimKey(_ key: String) -> Bool { false }
@@ -178,6 +206,24 @@ protocol TabEngine: AnyObject {
     func fillCouponField(_ code: String) async -> Bool
     /// How far down the page you are (0 to 1), and going back there; long unsent text in the page's text boxes, and putting it back into empty ones.
     func scrollFraction() async -> Double?
+    /// True when a player on the page is running with sound the person could hear. Muting silences every player on the page and keeps new ones silent.
+    func audioPlaying() async -> Bool
+    /// Remembers where the page and its inner scrolling areas (a chat's message list) are scrolled, and puts them back after a tab switch if the page lost its place.
+    func saveScrollState() async
+    func restoreScrollState()
+    /// False when the page does not answer a trivial script within the time (a hung page). Engines that cannot tell say true.
+    func respondsWithin(_ seconds: Double) async -> Bool
+    /// The page's console, WebSocket and failed-resource log, when developer capture is on. Nil when nothing was captured.
+    func devLog() async -> DevLog?
+    /// The page as it is now (after scripts ran), the browser's user-agent string, and a local file such as a saved web archive.
+    func pageSource() async -> String?
+    func userAgentString() async -> String?
+    func loadLocalFile(_ url: URL)
+    /// Scrolls the page to this share of its height (0 top, 1 bottom), for linked split panels.
+    func setScrollFraction(_ fraction: Double) async
+    /// Requests the content rules refused and the other sites the page loaded from, read from the page itself.
+    func pageNetwork() async -> PageNetworkReport
+    func setMuted(_ on: Bool) async
     func scrollTo(fraction: Double) async
     func formDraftFields() async -> [[String: Any]]?
     func restoreFormDraft(_ fields: [[String: Any]]) async -> Int
@@ -208,6 +254,12 @@ protocol TabEngine: AnyObject {
     func presentNativeFind()
     /// The whole page as a PDF, or as a picture (just what is on screen, or the entire page top to bottom). nil when not possible.
     func pagePDF() async -> Data?
+    /// The pages behind and ahead of this one in the tab, nearest first (at most fifteen each way).
+    func navigationEntries() -> (back: [NavEntry], forward: [NavEntry])
+    /// Goes to the page that many steps back (negative) or forward (positive).
+    func navigate(toOffset offset: Int)
+    /// How many loads on the page in front were refused so far (picture, script or frame attempts the rules stopped). An estimate.
+    func blockedAttempts() async -> Int
     /// What is selected on the page, and the page's plain text (capped), for highlights and translation.
     func selectedText() async -> String?
     /// What the page and its connection look like from a security point of view: certificate chain, parts loaded without encryption, redirects.
@@ -309,7 +361,7 @@ struct GestureOptions: Equatable {
 }
 
 /// What the page's link menu can do with a link beyond opening it in place.
-enum LinkAction { case newTab, backgroundTab, privateTab, split }
+enum LinkAction { case newTab, backgroundTab, privateTab, split, otherPane }
 
 extension BrowserEngine {
     func makePopupTab(configuration: AnyObject, events: TabEngineEvents) -> TabEngine? { nil }

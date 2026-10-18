@@ -11,6 +11,29 @@ struct DetectedVideo: Identifiable, Equatable {
     var rate: Double
     var protected: Bool
     var isVideo: Bool
+    var volume = 1.0
+    var muted = false
+    var width = 0
+    var height = 0
+    var droppedFrames = 0
+    var totalFrames = 0
+    /// What the page says is playing (its media session), else the page title.
+    var nowPlaying = ""
+    var tracks: [(label: String, showing: Bool)] = []
+    var canAirPlay = false
+
+    static func == (a: DetectedVideo, b: DetectedVideo) -> Bool {
+        a.id == b.id && a.source == b.source && a.time == b.time && a.paused == b.paused && a.rate == b.rate && a.muted == b.muted && a.height == b.height
+            && a.tracks.map(\.label) == b.tracks.map(\.label) && a.tracks.map(\.showing) == b.tracks.map(\.showing)
+    }
+
+    /// "1920 × 1080 · 2 of 3200 frames dropped", or nil when the player has shown nothing yet.
+    var qualityText: String? {
+        guard width > 0, height > 0 else { return nil }
+        var text = "\(width) × \(height)"
+        if totalFrames > 0 { text += " · \(droppedFrames) of \(totalFrames) frames dropped" }
+        return text
+    }
 
     init(index: Int, raw: [String: Any]) {
         id = index
@@ -21,6 +44,17 @@ struct DetectedVideo: Identifiable, Equatable {
         rate = (raw["rate"] as? NSNumber)?.doubleValue ?? 1
         protected = (raw["hasMediaKeys"] as? NSNumber)?.boolValue ?? false
         isVideo = (raw["tag"] as? String) != "audio"
+        volume = (raw["volume"] as? NSNumber)?.doubleValue ?? 1
+        muted = (raw["muted"] as? NSNumber)?.boolValue ?? false
+        width = (raw["width"] as? NSNumber)?.intValue ?? 0
+        height = (raw["height"] as? NSNumber)?.intValue ?? 0
+        droppedFrames = (raw["dropped"] as? NSNumber)?.intValue ?? 0
+        totalFrames = (raw["frames"] as? NSNumber)?.intValue ?? 0
+        let title = (raw["sessionTitle"] as? String) ?? ""
+        let artist = (raw["sessionArtist"] as? String) ?? ""
+        nowPlaying = title.isEmpty ? ((raw["pageTitle"] as? String) ?? "") : (artist.isEmpty ? title : "\(title) · \(artist)")
+        tracks = ((raw["tracks"] as? [[String: Any]]) ?? []).map { (($0["label"] as? String) ?? "Track", ($0["mode"] as? String) == "showing") }
+        canAirPlay = (raw["canAirPlay"] as? NSNumber)?.boolValue ?? false
     }
 
     var title: String { (isVideo ? "Video" : "Audio") + (duration.isFinite && duration > 0 ? " · " + Self.clock(duration) : " · live") }
@@ -31,7 +65,7 @@ struct DetectedVideo: Identifiable, Equatable {
     }
 }
 
-enum VideoAction: String { case play, pause, speed, pictureInPicture, fullscreen, seek }
+enum VideoAction: String { case play, pause, speed, pictureInPicture, fullscreen, seek, mute, volume, airplay, subtitle }
 
 struct VideoToolsView: View {
     @EnvironmentObject var model: BrowserModel
@@ -40,11 +74,15 @@ struct VideoToolsView: View {
 
     var body: some View {
         Group {
-            if loaded && videos.isEmpty {
+            if loaded && videos.isEmpty && model.playingElsewhere.isEmpty && model.mediaHistory.isEmpty {
                 ContentUnavailableView("No Video Found", systemImage: "play.slash", description: Text("No video or audio player was found on this page."))
             } else {
-                List(videos) { video in
+                List {
+                MediaOverviewSections()
+                ForEach(videos) { video in
                     VStack(alignment: .leading, spacing: 8) {
+                        if !video.nowPlaying.isEmpty { Text(video.nowPlaying).font(.callout).lineLimit(2) }
+                        if let quality = video.qualityText { Text(quality).font(.caption).foregroundStyle(.secondary) }
                         HStack {
                             Image(systemName: video.isVideo ? "play.rectangle" : "waveform").foregroundStyle(.secondary)
                             Text(video.title).fontWeight(.medium)
@@ -57,15 +95,26 @@ struct VideoToolsView: View {
                             Menu("Speed \(video.rate.formatted())×") {
                                 ForEach([0.5, 0.75, 1, 1.25, 1.5, 2], id: \.self) { rate in Button("\(rate.formatted())×") { run(video, .speed, rate) } }
                             }
+                            Button(video.muted ? "Unmute" : "Mute") { run(video, .mute, video.muted ? 0 : 1) }
                             if video.isVideo {
                                 Button("Pop Out") { run(video, .pictureInPicture) }.disabled(video.protected)
                                 Button("Full Screen") { run(video, .fullscreen) }
                             }
+                            if !video.tracks.isEmpty {
+                                Menu("Subtitles") {
+                                    Button("Off") { run(video, .subtitle, -1) }
+                                    ForEach(Array(video.tracks.enumerated()), id: \.offset) { i, t in
+                                        Button { run(video, .subtitle, Double(i)) } label: { if t.showing { Label(t.label, systemImage: "checkmark") } else { Text(t.label) } }
+                                    }
+                                }
+                            }
+                            if video.canAirPlay { Button("Output…") { run(video, .airplay) } }
                         }
                         .buttonStyle(.bordered).controlSize(.small)
                         if video.protected { Text("Pop Out is off for protected video. The site does not allow it.").font(.caption).foregroundStyle(.secondary) }
                     }
                     .padding(.vertical, 4)
+                }
                 }
             }
         }

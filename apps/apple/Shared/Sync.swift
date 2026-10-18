@@ -12,7 +12,7 @@ enum SyncRules {
         "blur_private_switcher", "permission_expiry", "homepage", "favorites_order", "site_js_off", "never_sleep_sites", "de_amp", "user_themes", "start_tile", "theme_custom", "block_autoplay", "autoplay_exceptions",
         // Rules and per-site choices (the "site rules" group in sync settings).
         "site_open_rules", "site_delete_rules", "site_user_agents", "containers", "split_templates", "workflows", "fingerprint_noise", "fingerprint_exceptions",
-        "block_webrtc", "webrtc_exceptions", "video_ads", "autoplay_exceptions",
+        "block_webrtc", "webrtc_exceptions", "video_ads", "cookie_banners", "video_speeds", "autoplay_exceptions",
         // Newer browsing features: pop-ups, chains, panels, the theme schedule, menus, previews, stacks, address bar sources.
         "block_popups", "popup_allowed_hosts", "youtube_rules_auto", "command_chains", "web_panels", "theme_schedule", "hidden_menu_items", "hover_previews", "hover_delay", "tab_stacks", "address_sources", "tab_tree",
         // What the start page shows.

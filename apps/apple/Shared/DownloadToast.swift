@@ -65,7 +65,7 @@ struct DownloadToast: View {
             .frame(width: 30, height: 30)
             VStack(alignment: .leading, spacing: 2) {
                 Text(items.count == 1 ? items[0].filename : "\(items.count) downloads").font(.callout.weight(.medium)).lineLimit(1)
-                Text("Downloading… \(Int((average * 100).rounded()))%").font(.caption).foregroundStyle(.secondary)
+                Text(items.count == 1 && !items[0].detail.isEmpty ? items[0].detail : "Downloading… \(Int((average * 100).rounded()))%").font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 8)
             Button("Show") { model.sheet = .downloads }.buttonStyle(.borderless)

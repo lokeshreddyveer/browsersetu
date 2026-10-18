@@ -52,12 +52,33 @@ struct DownloadFileActions: View {
             Button { preview = url } label: { Image(systemName: "eye") }.help("Preview")
             if url.pathExtension.lowercased() == "pdf" { Button { model.editPDF(at: url) } label: { Image(systemName: "pencil.and.signature") }.help("Edit or sign this PDF") }
             ShareLink(item: url) { Image(systemName: "square.and.arrow.up") }.help("Share")
+            Menu {
+                Button("Copy SHA-256") { checksum { copyToPasteboard($0); model.notice = "SHA-256 copied." } }
+                Button("Verify Checksum…") { verify() }
+            } label: { Image(systemName: "checkmark.seal") }.menuStyle(.borderlessButton).fixedSize().help("Checksum")
             #if os(macOS)
             Button { revealInSystem(url) } label: { Image(systemName: "magnifyingglass") }.help("Show in Finder")
             #endif
         }
         .buttonStyle(.borderless)
         .quickLookPreview($preview)
+    }
+
+    private func checksum(_ done: @escaping @MainActor (String) -> Void) {
+        let file = url
+        Task {
+            let hash = await Task.detached { try? FileChecksum.sha256(of: file) }.value
+            if let hash { done(hash) } else { model.notice = "Could not read that file." }
+        }
+    }
+
+    private func verify() {
+        Task { @MainActor in
+            guard let expected = await Dialogs.promptText(title: "Verify Checksum", message: "Paste the SHA-256 the website published for \(url.lastPathComponent).", placeholder: "SHA-256"), !expected.isEmpty else { return }
+            checksum { actual in
+                model.notice = FileChecksum.matches(expected, actual) ? "Checksum matches. The file is what the site published." : "Checksum does NOT match. Do not open this file."
+            }
+        }
     }
 }
 

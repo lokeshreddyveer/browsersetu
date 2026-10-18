@@ -21,6 +21,9 @@ struct StartPageView: View {
     @State private var addingFavorite = false
     @State private var newURL = ""
     @State private var newName = ""
+    #if os(iOS)
+    @StateObject private var voice = VoiceSearch()
+    #endif
 
     /// The Customize size choice scales the greeting and the search box as well as the site tiles.
     private var startScale: CGFloat { model.startTile.points / 52 }
@@ -28,14 +31,17 @@ struct StartPageView: View {
     private var accent: Color { isPrivate ? Theme.privateAccent : Theme.accent }
 
     #if os(macOS)
-    private let contentWidth: CGFloat = 720
+    private var contentWidth: CGFloat { 720 * model.startWidth.factor }
     #else
-    private let contentWidth: CGFloat = 640
+    private var contentWidth: CGFloat { 640 * model.startWidth.factor }
     #endif
 
     var body: some View {
         GeometryReader { geo in
             ScrollView {
+                if model.newTabMode == .blank && !isPrivate {
+                    Color.clear.frame(height: geo.size.height).accessibilityHidden(true)
+                } else {
                 VStack(spacing: 0) {
                     Spacer(minLength: 28)
                     VStack(spacing: 30) {
@@ -68,6 +74,7 @@ struct StartPageView: View {
                 .frame(maxWidth: contentWidth)
                 .padding(.horizontal, 24).padding(.vertical, 18)
                 .frame(maxWidth: .infinity, minHeight: geo.size.height)
+                }
             }
             // One screen when it fits; it scrolls (and never clips) on a small phone, in landscape, or with large text.
             .scrollBounceBehavior(.basedOnSize)
@@ -89,14 +96,15 @@ struct StartPageView: View {
     private var greeting: some View {
         let hour = Calendar.current.component(.hour, from: Date())
         let word = switch hour { case 5..<12: "Good morning"; case 12..<17: "Good afternoon"; case 17..<22: "Good evening"; default: "Good night" }
-        let title = isPrivate ? "Private Browsing" : (model.showGreeting ? word : "Browser Setu")
+        let custom = model.startTitle.trimmingCharacters(in: .whitespaces)
+        let title = isPrivate ? "Private Browsing" : (!custom.isEmpty ? custom : (model.showGreeting ? word : "Browser Setu"))
         return VStack(spacing: 6) {
             if !isPrivate, model.showGreeting {
                 Text(Date().formatted(.dateTime.weekday(.wide).day().month(.wide)))
                     .font(.system(size: 12, weight: .semibold)).tracking(0.9).textCase(.uppercase).foregroundStyle(accent.opacity(0.9))
             }
             Text(title)
-                .font(.system(size: 34 * startScale, weight: .semibold, design: .rounded)).foregroundStyle(.primary.opacity(0.92))
+                .font(.system(size: 34 * startScale, weight: .semibold, design: model.startFont.design)).foregroundStyle(.primary.opacity(0.92))
                 .minimumScaleFactor(0.7).lineLimit(1)
                 .accessibilityAddTraits(.isHeader)
         }
@@ -110,6 +118,7 @@ struct StartPageView: View {
         #if os(macOS)
         StartSearchField()
         #else
+        HStack(spacing: 8) {
         Button { model.openSearchPanel() } label: {
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass").font(.system(size: 17 * startScale, weight: .medium)).foregroundStyle(accent)
@@ -118,12 +127,16 @@ struct StartPageView: View {
                 EngineBadge()
             }
             .padding(.horizontal, 18).frame(height: 56)
-            .startField(radius: 28)
+            .startField(radius: model.startSearchStyle.radius)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Search or enter address")
         .accessibilityIdentifier("start-search")
+        VoiceButton(voice: voice, round: true)
+        }
+        .onAppear { voice.onFinish = { words in model.navigate(input: words) } }
+        .onChange(of: voice.problem) { _, message in if let message { model.notice = message; voice.problem = nil } }
         // While a search is being typed, the one real field is the only field.
         .opacity(model.floatingAddressVisible ? 0 : 1)
         .motion(.easeOut(duration: 0.18), value: model.floatingAddressVisible)
@@ -146,6 +159,15 @@ struct StartPageView: View {
     private var background: some View {
         Group {
             if isPrivate { Color.platformBackground }
+            else if model.startBackground == .image {
+                if let data = model.startImageData, let image = Image(platformData: data) {
+                    Color.clear.overlay(image.resizable().scaledToFill().blur(radius: model.startImageBlur).overlay(Color.black.opacity(model.startImageDim))).clipped()
+                } else if scheme == .dark { Color(red: 0.047, green: 0.059, blue: 0.090) } else { Color.platformBackground }
+            }
+            else if model.startBackground == .color { StartColor.color(model.startColorA) }
+            else if model.startBackground == .blend {
+                LinearGradient(colors: [StartColor.color(model.startColorA), StartColor.color(model.startColorB, fallback: StartColor.defaultB)], startPoint: .top, endPoint: .bottom)
+            }
             else if model.startBackground == .plain {
                 // Plain: one flat colour, no glow, decoration or photo.
                 if model.themeIsActive { model.activeTheme.top.color } else if scheme == .dark { Color(red: 0.047, green: 0.059, blue: 0.090) } else { Color.platformBackground }
@@ -316,6 +338,9 @@ private struct FavoritesGrid: View {
     private var tileSize: CGFloat { model.startTile.points }
     private let capacity = 12
     @State private var showAll = false
+    @State private var editing: BookmarkItem?
+    @State private var editURL = ""
+    @State private var editName = ""
     private let columns = [GridItem(.adaptive(minimum: 84, maximum: 110), spacing: 12, alignment: .top)]
 
     var body: some View {
@@ -335,6 +360,12 @@ private struct FavoritesGrid: View {
             }
         }
         .motion(.easeOut(duration: 0.2), value: all.map(\.url))
+        .alert("Edit Favorite", isPresented: Binding(get: { editing != nil }, set: { if !$0 { editing = nil } })) {
+            TextField("Website address", text: $editURL)
+            TextField("Name", text: $editName)
+            Button("Save") { if let old = editing?.url { model.editFavorite(old, address: editURL, name: editName) }; editing = nil }
+            Button("Cancel", role: .cancel) { editing = nil }
+        }
     }
 
     private func tile(_ favorite: BookmarkItem) -> some View {
@@ -359,6 +390,7 @@ private struct FavoritesGrid: View {
         }
         .contextMenu {
             Button("Open in New Tab") { model.open(urlString: favorite.url, newTab: true) }
+            Button("Edit…") { editURL = favorite.url; editName = favorite.title; editing = favorite }
             Button("Remove from Favorites", role: .destructive) { model.removeFavorite(favorite.url) }
         }
         .accessibilityLabel(favorite.title.isEmpty ? displayHost(URL(string: favorite.url)) : favorite.title)
@@ -650,6 +682,7 @@ private struct StartSearchField: View {
     @StateObject private var address = AddressBarController()
     @FocusState private var focused: Bool
     @State private var overList = false
+    @StateObject private var voice = VoiceSearch()
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
@@ -673,9 +706,13 @@ private struct StartSearchField: View {
             } else {
                 EngineBadge()
             }
+            VoiceButton(voice: voice)
         }
         .padding(.horizontal, 18).frame(height: 56)
-        .startField(radius: 28, focused: focused)
+        .startField(radius: model.startSearchStyle.radius, focused: focused)
+        .onAppear { voice.onFinish = { words in address.text = words; submit() } }
+        .onChange(of: voice.transcript) { _, heard in if voice.listening { address.text = heard } }
+        .onChange(of: voice.problem) { _, message in if let message { model.notice = message; voice.problem = nil } }
         .motion(.easeOut(duration: 0.18), value: focused)
         .contentShape(Rectangle())
         .onTapGesture { focused = true }

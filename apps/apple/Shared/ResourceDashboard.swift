@@ -13,6 +13,7 @@ struct ResourceDashboardView: View {
 
     var body: some View {
         List {
+            GovernorSection(governor: model.governor)
             Section {
                 HStack { Label("Memory used by Browser Setu", systemImage: "memorychip"); Spacer(); Text(Self.format(memory)).monospacedDigit().foregroundStyle(.secondary) }
                 HStack { Label("Tabs awake", systemImage: "bolt.fill"); Spacer(); Text("\(awake.count)").foregroundStyle(.secondary) }
@@ -60,4 +61,44 @@ struct ResourceDashboardView: View {
     }
 
     static func format(_ bytes: UInt64) -> String { ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .memory) }
+}
+
+
+/// The profile in force and why, plus power, network, this app's CPU and the timing history.
+struct GovernorSection: View {
+    @EnvironmentObject var model: BrowserModel
+    @ObservedObject var governor: ResourceGovernor
+    @State private var freeMemory: UInt64 = availableSystemMemory()
+    private let pulse = Timer.publish(every: 3, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        Section {
+            let now = governor.effective
+            LabeledContent("Profile", value: now.mode.title + (now.reason.map { " (\($0))" } ?? ""))
+            LabeledContent("Free memory on this device", value: ResourceDashboardView.format(freeMemory))
+            LabeledContent("Power", value: powerText)
+            LabeledContent("Connection", value: NetworkConditions.shared.summary)
+            LabeledContent("This app's processor use", value: "\(Int(governor.process.cpu * 100))% now, \(Int(governor.process.average * 100))% average")
+            LabeledContent("Energy impact (estimate)", value: GovernorRules.energyLabel(averageCPU: governor.process.average))
+            if let start = PerfLog.compare("startup-first-page", in: model.perfLog) {
+                LabeledContent("Start to first page", value: "\(Int(start.latest)) ms, usually \(Int(start.typical)) ms\(start.regression ? ". Slower than usual." : "")")
+            }
+            Button { MemoryTrim.run(model: model, aggressive: true); Task { await model.lifecycleRun() } } label: { Label("Free Memory Now", systemImage: "wind") }
+        } header: {
+            Text("Resource Governor")
+        } footer: {
+            Text("The governor picks which idle tabs may sleep from free memory, memory pressure, power, heat, sound, pinned and locked tabs, and recent use. Processor use and energy cover this app only: web pages run in separate system processes that cannot be measured or limited from here.")
+        }
+        .onReceive(pulse) { _ in governor.refresh(); freeMemory = availableSystemMemory() }
+        .onAppear { governor.refresh() }
+    }
+
+    private var powerText: String {
+        let p = governor.power
+        var parts = [p.onBattery ? "On battery" : "Plugged in"]
+        if let level = p.level { parts.append("\(Int(level * 100))%") }
+        if p.lowPowerMode { parts.append("Low Power Mode") }
+        if p.thermal == .serious || p.thermal == .critical { parts.append("hot") }
+        return parts.joined(separator: ", ")
+    }
 }

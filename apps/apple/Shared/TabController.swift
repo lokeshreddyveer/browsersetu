@@ -31,9 +31,16 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
     @Published var typedLogin: PendingLogin?
     @Published var group: String
     @Published var pinned: Bool
+    /// Sound is coming from a player on the page; refreshed every few seconds by the window.
+    @Published private(set) var playingAudio = false
+    /// The person muted this tab. Held again after each page load.
+    @Published private(set) var muted = false
     @Published var workspace: String
     /// The filters in use on this page (grayscale, invert…); kept for the tab, re-applied after each load.
     @Published var pageActions: Set<PageAction> = []
+    /// Refused loads on this page so far (an estimate), and how many of them are already in the running totals.
+    @Published private(set) var blockedOnPage = 0
+    private var blockedRecorded = 0
     /// PNG of the page as last seen, for tab overview cards.
     @Published var snapshot: Data?
 
@@ -179,6 +186,9 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
 
     /// Set while this tab shows a saved reading-list article (so highlights go to the right one).
     var readingItemID: UUID?
+    var allowedLocalFile: URL?
+    /// The article on show in reader view or from the reading list, kept so a change of style can draw it again.
+    var readerContent: (article: ReadableArticle, highlights: [String], base: URL?)?
 
     var isLocked: Bool { owner?.lockedTabIDs.contains(id) ?? false }
 
@@ -230,6 +240,7 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
         }
         readerOrigin = page
         isReading = true
+        readerContent = (article, [], page)
         engine.showHTML(ReaderHTML.page(for: article), baseURL: page)
     }
 
@@ -255,7 +266,7 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
     /// The picture shown in the tab overview. A blank tab has nothing to show, and one taken moments ago is still right, so quick
     /// switching between tabs does not ask the web engine for a picture each time.
     func captureSnapshot() async {
-        guard !isBlank, !isDiscarded, Date().timeIntervalSince(lastSnapshotAt) > 2 else { return }
+        guard !isBlank, !isDiscarded, Date().timeIntervalSince(lastSnapshotAt) > 2, owner?.governor.allowsThumbnails ?? true else { return }
         lastSnapshotAt = Date()
         if let data = await engine.snapshot() { snapshot = data }
     }
@@ -285,6 +296,8 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
     func engineLoadingChanged(isLoading: Bool, canGoBack: Bool, canGoForward: Bool) {
         // A new page starts at its top, so the toolbar comes back with it.
         if isLoading, !self.isLoading, owner?.activeID == id { owner?.expandChrome() }
+        // A new page begins: take what the old one had refused, then start counting again.
+        if isLoading, !self.isLoading { Task { await refreshBlocked(); blockedRecorded = 0; blockedOnPage = 0 } }
         self.isLoading = isLoading
         self.canGoBack = canGoBack
         self.canGoForward = canGoForward
@@ -298,7 +311,8 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
     }
 
     func engineMouseGesturesEnabled() -> Bool { owner?.mouseGestures == true }
-    func engineScriptsAllowed(for url: URL) -> Bool { javaScriptOn && owner?.scriptsAllowed(forHost: url.host) != false }
+    // A saved page from this device never runs scripts.
+    func engineScriptsAllowed(for url: URL) -> Bool { !url.isFileURL && javaScriptOn && owner?.scriptsAllowed(forHost: url.host) != false }
     func engineMouseGesture(_ sequence: String, finished: Bool) { if owner?.activeID == id { owner?.mouseGestureProgress(sequence, finished: finished) } }
 
     func engineWantsLoginCapture() -> Bool { !isPrivate && owner?.saveLoginsEnabled == true }
@@ -309,6 +323,7 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
         case .newTab: model.openTab(url: url, isPrivate: isPrivate, opener: self, container: container)
         case .backgroundTab: model.openTab(url: url, isPrivate: isPrivate, select: false, opener: self, container: container)
         case .privateTab: model.openTab(url: url, isPrivate: true)
+        case .otherPane: model.openInOtherPane(url, from: self)
         case .split:
             let tab = model.openTab(url: url, isPrivate: isPrivate, select: false, opener: self, container: container)
             if model.splitTabID == nil { model.openSplit(with: tab) } else { model.addThirdPanel(with: tab) }
@@ -356,7 +371,22 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
         }
     }
 
+    func refreshAudio() async {
+        guard !isDiscarded, !isBlank else { if playingAudio { playingAudio = false }; return }
+        let now = await engine.audioPlaying()
+        if now != playingAudio {
+            playingAudio = now
+            if now { owner?.noteMediaStarted(self) }
+        }
+    }
+
+    func setMuted(_ on: Bool) {
+        muted = on
+        Task { await engine.setMuted(on); await refreshAudio() }
+    }
+
     func engineDidFinishLoading() {
+        if muted { Task { await engine.setMuted(true) } }
         if !showingError { owner?.didFinishLoading(self) }
         refreshIdentity()
         engine.setGestures(owner?.gestureOptions ?? GestureOptions())
@@ -369,6 +399,18 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
         // Break mode holds for pages that finish loading while it is on.
         if owner?.breakActive == true { engine.runPageScript(PowerScripts.pause, arguments: [:]) }
         if !isPrivate { owner?.offerToFillLogin(in: self) }
+        // Ads and trackers keep asking after the page has loaded, so the count is read twice more.
+        for delay in [1.5, 6.0] { Task { try? await Task.sleep(for: .seconds(delay)); await refreshBlocked() } }
+    }
+
+    /// Reads how many loads the rules refused on this page and adds the new ones to the totals.
+    func refreshBlocked() async {
+        guard !isInternalPage, !isBlank else { return }
+        let count = await engine.blockedAttempts()
+        guard count > blockedRecorded else { return }
+        owner?.recordBlocked(count - blockedRecorded, host: url?.host, privateTab: isPrivate)
+        blockedRecorded = count
+        blockedOnPage = count
     }
 
     /// The page's own style sheet from Settings (per website), if the user wrote one.
@@ -407,6 +449,7 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
         showingError = true
         failedURL = failed ?? url
         let problem = NetworkProblem(description: description)
+        ReliabilityStats.shared.noteFailedNavigation(String(describing: problem))
         engine.showErrorPage(title: problem.title, detail: problem.detail(raw: description), baseURL: failedURL)
         if problem.retriesAutomatically, retryAttempt < 6 {
             retryAttempt += 1
@@ -429,6 +472,7 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
     }
 
     func engineProcessCrashed() {
+        ReliabilityStats.shared.noteTabCrash()
         // Renderer crash: only this tab is affected; reload on demand.
         showingError = true
         failedURL = url
@@ -454,6 +498,8 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
            model?.extensionCenter.owns(url: target) == true {
             return .allow
         }
+        // The one saved page the person just chose to open from the Saved Pages list.
+        if mainFrame, target.isFileURL, let allowed = allowedLocalFile, target.standardizedFileURL == allowed.standardizedFileURL { allowedLocalFile = nil; return .allow }
         let decision = NavigationPolicy.decide(url: target, mainFrame: mainFrame)
         switch decision {
         case .allow: break
@@ -504,6 +550,7 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
         // Pop-ups without a user gesture are dropped; the rest open as tabs and still pass policy.
         guard userInitiated else {
             model.notice = "A pop-up was blocked."
+        model.recordSecurity(kind: "popup", site: self.url?.host ?? "", detail: "Blocked a pop-up" + (url?.host.map { " to \($0)" } ?? ""), isPrivate: isPrivate)
             return
         }
         model.openTab(url: target, isPrivate: isPrivate, opener: self, container: model.tabMeta[id]?.container, scratch: model.tabMeta[id]?.scratch == true)
@@ -536,6 +583,12 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
             try? await Task.sleep(for: .seconds(10))
             if self?.blockedPopup == shown { self?.blockedPopup = nil }
         }
+    }
+
+    func engineSuspiciousRedirect(sites: [String]) {
+        guard let model = owner else { return }
+        model.notice = "This page passed through \(sites.count) different sites to get here."
+        model.recordSecurity(kind: "redirect", site: sites.last ?? "", detail: "Redirected through " + sites.joined(separator: " → "), isPrivate: isPrivate)
     }
 
     func enginePopupsAllowedWithoutGesture() -> Bool { owner?.popupsAllowed(forHost: url?.host) ?? false }

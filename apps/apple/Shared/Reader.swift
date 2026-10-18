@@ -71,7 +71,7 @@ enum ReaderHTML {
         return out + escape(String(text[cursor...]))
     }
 
-    static func page(for article: ReadableArticle, highlights: [String] = []) -> String {
+    static func page(for article: ReadableArticle, highlights: [String] = [], style: ReaderStyle = .current) -> String {
         var body = ""
         var inList = false
         func closeList() { if inList { body += "</ul>\n"; inList = false } }
@@ -100,17 +100,7 @@ enum ReaderHTML {
         <meta name="color-scheme" content="light dark">
         <title>\(escape(article.title))</title>
         <style>
-        :root { color-scheme: light dark; }
-        body { margin: 0; background: Canvas; color: CanvasText; font: 19px/1.65 -apple-system, "New York", Georgia, serif; }
-        main { max-width: 680px; margin: 0 auto; padding: 56px 24px 96px; }
-        .site { font: 600 13px -apple-system, sans-serif; letter-spacing: .06em; text-transform: uppercase; opacity: .55; margin-bottom: 8px; }
-        h1 { font: 700 34px/1.2 -apple-system, sans-serif; margin: 0 0 28px; }
-        h2, h3 { font-family: -apple-system, sans-serif; line-height: 1.3; margin: 34px 0 10px; }
-        p, li { margin: 0 0 1.05em; }
-        blockquote { margin: 1.4em 0; padding-left: 18px; border-left: 3px solid color-mix(in srgb, CanvasText 25%, transparent); opacity: .85; }
-        pre { overflow-x: auto; padding: 14px; border-radius: 10px; background: color-mix(in srgb, CanvasText 8%, transparent); font-size: 15px; }
-        mark { background: rgba(255, 214, 10, .45); color: inherit; padding: 0 .1em; border-radius: 3px; }
-        figure { margin: 1.6em 0; } img { max-width: 100%; height: auto; border-radius: 10px; }
+        \(style.css)
         </style></head>
         <body><main>
         <div class="site">\(escape(article.site))</div>

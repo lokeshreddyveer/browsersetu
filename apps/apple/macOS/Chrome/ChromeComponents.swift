@@ -222,7 +222,8 @@ struct ShieldPill: View {
         .onChange(of: showPopover) { _, shown in holdChrome(shown) }
         .onDisappear { if showPopover { holdChrome(false) } }
         .popover(isPresented: $showPopover, arrowEdge: .bottom) {
-            PrivacyPopover(privacy: privacy, host: host) { showPopover = false }
+            PrivacyPopover(privacy: privacy, host: host, dismiss: { showPopover = false }, blocked: model.blockedStats, blockedOnPage: model.active?.blockedOnPage ?? 0, onRepair: { model.sheet = .repair }, onHistory: { model.privacySheet = .history }, onSite: { model.privacySheet = .site })
+                .environmentObject(model)
         }
         #if DEBUG
         .onChange(of: model.privacyPopoverRequested) { _, requested in if requested { showPopover = true } }
@@ -387,6 +388,7 @@ struct MacOmnibox: View {
                 focusTick: floating ? model.floatingFocusTick : model.omniboxFocusTick,
                 focusOnMount: floating,
                 address: address,
+                completionSites: { model.completionSites() },
                 onTextChange: { _ in address.refresh(model: model) },
                 onSubmit: { text in
                     if let picked = address.selectedSuggestion {
@@ -695,9 +697,11 @@ struct NavigationButtons: View {
 
     var body: some View {
         ChromeButton(symbol: "chevron.left", help: "Back", identifier: "back-button") { tab.goBack() }.disabled(!tab.canGoBack)
+            .contextMenu { NavHistoryItems(tab: tab, back: true) }
         // Forward only shows when there is somewhere to go forward to, as in Safari.
         if showForward && tab.canGoForward {
             ChromeButton(symbol: "chevron.right", help: "Forward", identifier: "forward-button") { tab.goForward() }
+                .contextMenu { NavHistoryItems(tab: tab, back: false) }
                 .transition(.scale(scale: 0.6).combined(with: .opacity))
         }
         if (alwaysReload || model.shows(.reload)) && !hideReload {

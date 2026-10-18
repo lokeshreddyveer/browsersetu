@@ -56,7 +56,8 @@ struct ShieldButton: View {
         .onChange(of: model.privacyPopoverRequested) { _, requested in if requested { showPopover = true } }
         #endif
         .popover(isPresented: $showPopover, arrowEdge: .bottom) {
-            PrivacyPopover(privacy: privacy, host: host) { showPopover = false }
+            PrivacyPopover(privacy: privacy, host: host, dismiss: { showPopover = false }, blocked: model.blockedStats, blockedOnPage: model.active?.blockedOnPage ?? 0, onRepair: { model.sheet = .repair }, onHistory: { model.privacySheet = .history }, onSite: { model.privacySheet = .site })
+                .environmentObject(model)
         }
     }
 }
@@ -69,6 +70,18 @@ struct PrivacyPopover: View {
     @ObservedObject var privacy: PrivacyController
     let host: String?
     var dismiss: () -> Void = {}
+    /// What the rules have refused, by time, and on the page in front. An estimate; nil hides the block.
+    var blocked: BlockedStats?
+    var blockedOnPage = 0
+    /// Opens the page-repair sheet, when the caller can.
+    var onRepair: (() -> Void)?
+    /// Opens the protection history sheet.
+    var onHistory: (() -> Void)?
+    /// Opens the sheet of switches for this one site.
+    var onSite: (() -> Void)?
+    /// Shows the list of protections that are on. Needs the browser's settings in the environment.
+    var showsProtections = true
+    @AppStorage("blockedCardChoice") private var blockedChoice = "today"
     @Namespace private var highlight
 
     private var state: ProtectionState { privacy.state(forHost: host) }
@@ -109,7 +122,12 @@ struct PrivacyPopover: View {
         VStack(alignment: .leading, spacing: 18) {
             header
             levelPicker
-            if cleanHost != nil, privacy.configuration.isEnabled { siteSwitch }
+            if cleanHost != nil, privacy.configuration.isEnabled {
+                if let pause = privacy.pause(forHost: host) { pausedRow(pause) } else { siteSwitch }
+                if siteOn || privacy.pause(forHost: host) != nil { HStack { if siteOn { troubleMenu }; Spacer(); siteButton } }
+            }
+            if let blocked, privacy.configuration.isEnabled { blockedCard(blocked) }
+            if showsProtections { ProtectionsList(privacy: privacy) }
             listsStatus
             Text("Powered by VayuSetu")
                 .font(.system(size: 10.5, weight: .medium)).foregroundStyle(.white.opacity(0.32)).frame(maxWidth: .infinity)
@@ -197,6 +215,85 @@ struct PrivacyPopover: View {
         }
         .padding(.horizontal, 14).padding(.vertical, 10)
         .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.white.opacity(0.07)))
+    }
+
+    private func pausedRow(_ pause: SitePause) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "pause.circle.fill").font(.system(size: 14)).foregroundStyle(.orange).frame(width: 20)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Blocking paused here").font(.system(size: 13.5)).foregroundStyle(.white)
+                Text(pause.summary()).font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.5))
+            }
+            Spacer()
+            Button("Resume") { privacy.resume(host: host) }
+                .buttonStyle(.plain).font(.system(size: 12.5, weight: .semibold)).foregroundStyle(Theme.accent)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.orange.opacity(0.14)))
+    }
+
+    private var siteButton: some View {
+        Button { dismiss(); onSite?() } label: {
+            HStack(spacing: 4) { Text("This site…").font(.system(size: 12.5)); Image(systemName: "slider.horizontal.3").font(.system(size: 10)) }
+                .foregroundStyle(.white.opacity(0.6))
+        }
+        .buttonStyle(.plain).padding(.horizontal, 4).padding(.top, -8)
+    }
+
+    /// The way out when a page breaks: pause blocking for a while, or open the repair tools.
+    private var troubleMenu: some View {
+        Menu {
+            ForEach(PauseLength.allCases) { length in Button(length.title) { privacy.pause(host: host, length: length) } }
+            if let onRepair {
+                Divider()
+                Button("Repair This Page…") { dismiss(); onRepair() }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Text("Site not working?").font(.system(size: 12.5))
+                Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold))
+            }
+            .foregroundStyle(.white.opacity(0.6))
+        }
+        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+        .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 4).padding(.top, -8)
+    }
+
+    /// One row in the style of "Protect this site": the shield, the word Blocked, and on the right the number with a menu that
+    /// chooses what it covers (today, the last day, week, month, year, all time, or this page).
+    private func blockedCard(_ stats: BlockedStats) -> some View {
+        let choice = BlockedChoice(rawValue: blockedChoice) ?? .range(.today)
+        let count: Int = {
+            switch choice {
+            case .page: return blockedOnPage
+            case .range(let range): return stats.total(range)
+            }
+        }()
+        return HStack(spacing: 10) {
+            Image(systemName: "shield.lefthalf.filled").font(.system(size: 13)).foregroundStyle(.white.opacity(0.5)).frame(width: 20)
+            Text("Blocked").font(.system(size: 13.5)).foregroundStyle(.white)
+            Spacer()
+            Menu {
+                Picker("Show", selection: $blockedChoice) {
+                    ForEach(BlockedChoice.allCases, id: \.rawValue) { Text($0.title).tag($0.rawValue) }
+                }
+                if let onHistory {
+                    Divider()
+                    Button("Protection History…") { dismiss(); onHistory() }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Text(count.formatted()).font(.system(size: 13.5, weight: .semibold)).foregroundStyle(.white).monospacedDigit()
+                    Text(choice.title).font(.system(size: 12)).foregroundStyle(.white.opacity(0.5))
+                    Image(systemName: "chevron.up.chevron.down").font(.system(size: 8, weight: .bold)).foregroundStyle(.white.opacity(0.5))
+                }
+            }
+            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.white.opacity(0.07)))
+        .help("An estimate: WebKit does not report blocks. Kept on this device, never counted in private tabs.")
+        .motion(.easeOut(duration: 0.15), value: blockedChoice)
     }
 
     private var listsStatus: some View {
@@ -299,6 +396,8 @@ struct PrivacySheetView: View {
                 case .exceptions: SiteExceptionsView(privacy: privacy)
                 case .diagnostics: PrivacyDiagnosticsView(privacy: privacy)
                 case .info: PrivacyInfoView()
+                case .history: ProtectionHistoryView()
+                case .site: SiteControlsView(privacy: privacy)
                 }
             }
             .navigationTitle(title)
@@ -316,6 +415,8 @@ struct PrivacySheetView: View {
         case .exceptions: "Website Exceptions"
         case .diagnostics: "Protection Diagnostics"
         case .info: "Privacy Information"
+        case .history: "Protection History"
+        case .site: "This Site"
         }
     }
 }
@@ -368,9 +469,29 @@ struct CustomRulesView: View {
     @State private var domain = ""
     @State private var action: FilterAction = .block
     @State private var error: String?
+    @State private var importing = false
+    @State private var importNote: String?
 
     var body: some View {
         List {
+            Section {
+                Button("Import a List…") { importing = true }
+                if let importNote { Text(importNote).font(.caption).foregroundStyle(.secondary) }
+            } footer: {
+                Text("Reads a hosts file, an Adblock-style list or one domain per line, and blocks each whole domain. Rules for paths, page elements and exceptions are skipped.")
+            }
+            .fileImporter(isPresented: $importing, allowedContentTypes: [.plainText, .text, .data]) { result in
+                guard case .success(let url) = result else { return }
+                let scoped = url.startAccessingSecurityScopedResource()
+                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                guard let text = try? String(contentsOf: url, encoding: .utf8) else { importNote = "That file could not be read as text."; return }
+                let parsed = FilterImport.domains(from: text)
+                var added = 0
+                try? privacy.change { cfg in
+                    for d in parsed.domains where (try? cfg.addUserRule(domain: d, action: .block)) != nil { added += 1 }
+                }
+                importNote = "Added \(added) of \(parsed.domains.count) domains\(parsed.skipped > 0 ? ", skipped \(parsed.skipped) rules that are not whole domains" : "")."
+            }
             Section {
                 HStack {
                     TextField("example.com", text: $domain).autocorrectionDisabled()
@@ -520,5 +641,84 @@ struct PrivacyInfoView: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+
+/// What the blocked-count card in the shield popover shows.
+enum BlockedChoice: Hashable {
+    case page
+    case range(BlockedStats.Range)
+
+    static var allCases: [BlockedChoice] { [.page] + BlockedStats.Range.allCases.map { .range($0) } }
+    var rawValue: String { switch self { case .page: "page"; case .range(let r): r.rawValue } }
+    init?(rawValue: String) {
+        if rawValue == "page" { self = .page; return }
+        guard let range = BlockedStats.Range(rawValue: rawValue) else { return nil }
+        self = .range(range)
+    }
+    var title: String { switch self { case .page: "This page"; case .range(let r): r.title } }
+}
+
+
+/// What is protecting you, in one short list: each switch with its state. Tapping one flips it. Only settings the app already has.
+struct ProtectionsList: View {
+    @EnvironmentObject var model: BrowserModel
+    @ObservedObject var privacy: PrivacyController
+    @State private var open = false
+
+    private struct Item: Identifiable { let id: String; let title: String; let isOn: Bool; let set: ((Bool) -> Void)? }
+
+    private var items: [Item] {
+        [
+            Item(id: "ads", title: "Ads", isOn: privacy.configuration.adBlocking, set: { privacy.setAdBlocking($0) }),
+            Item(id: "trackers", title: "Trackers", isOn: privacy.configuration.antiTracking, set: { privacy.setAntiTracking($0) }),
+            Item(id: "cookies", title: "Cookie banners", isOn: model.hideCookieBanners, set: { model.hideCookieBanners = $0 }),
+            Item(id: "popups", title: "Pop-ups", isOn: model.blockPopups, set: { model.blockPopups = $0 }),
+            Item(id: "youtube", title: "YouTube ads", isOn: model.blockVideoAds, set: { model.blockVideoAds = $0 }),
+            Item(id: "autoplay", title: "Autoplay", isOn: model.blockAutoplay, set: { model.blockAutoplay = $0 }),
+            Item(id: "links", title: "Tracking in links", isOn: model.stripTrackingParameters, set: { model.stripTrackingParameters = $0 }),
+            Item(id: "amp", title: "AMP pages", isOn: model.deAMP, set: { model.deAMP = $0 }),
+            Item(id: "fingerprint", title: "Fingerprinting", isOn: model.randomizeFingerprint, set: { model.randomizeFingerprint = $0 }),
+            Item(id: "warning", title: "Dangerous-site warning", isOn: true, set: nil),
+            Item(id: "https", title: "Upgrade to HTTPS", isOn: true, set: nil),
+        ]
+    }
+
+    var body: some View {
+        let on = items.filter(\.isOn).count
+        VStack(spacing: 0) {
+            Button { animated(.easeOut(duration: 0.2)) { open.toggle() } } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "checklist").font(.system(size: 13)).foregroundStyle(.white.opacity(0.5)).frame(width: 20)
+                    Text("Protections").font(.system(size: 13.5)).foregroundStyle(.white)
+                    Spacer()
+                    Text("\(on) of \(items.count) on").font(.system(size: 12)).foregroundStyle(.white.opacity(0.5))
+                    Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold)).foregroundStyle(.white.opacity(0.5))
+                        .rotationEffect(.degrees(open ? 180 : 0))
+                }
+                .padding(.horizontal, 14).padding(.vertical, 10).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if open {
+                VStack(spacing: 0) {
+                    ForEach(items) { item in
+                        HStack {
+                            Text(item.title).font(.system(size: 12.5)).foregroundStyle(.white.opacity(item.isOn ? 0.9 : 0.5))
+                            Spacer()
+                            if let set = item.set {
+                                Toggle("", isOn: Binding(get: { item.isOn }, set: set)).labelsHidden().toggleStyle(.switch).controlSize(.mini).tint(Theme.accent)
+                            } else {
+                                Text("Always on").font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.4))
+                            }
+                        }
+                        .padding(.horizontal, 14).frame(height: 28)
+                    }
+                }
+                .padding(.bottom, 8).transition(.opacity)
+            }
+        }
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.white.opacity(0.07)))
+        .accessibilityElement(children: .contain)
     }
 }

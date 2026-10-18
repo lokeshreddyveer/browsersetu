@@ -16,6 +16,18 @@ enum UserScriptInstaller {
         if policy.blockAutoplay {
             controller.addUserScript(WKUserScript(source: PageScripts.noAutoplay(exceptions: policy.autoplayExceptions), injectionTime: .atDocumentStart, forMainFrameOnly: false))
         }
+        if policy.devCapture {
+            controller.addUserScript(WKUserScript(source: DevCaptureScript.source, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page))
+        }
+        if policy.referrerSameSiteOnly {
+            controller.addUserScript(WKUserScript(source: ReferrerMode.script, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .defaultClient))
+        }
+        if policy.cookieBanners {
+            controller.addUserScript(WKUserScript(source: CookieBanners.script, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .defaultClient))
+        }
+        if !policy.videoSpeeds.isEmpty {
+            controller.addUserScript(WKUserScript(source: VideoControls.rememberedSpeedScript(policy.videoSpeeds), injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .defaultClient))
+        }
         if policy.deAMP {
             controller.addUserScript(WKUserScript(source: PageScripts.deAMP, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: .defaultClient))
         }
@@ -70,6 +82,7 @@ enum UserScriptInstaller {
     /// tabs, the sign-in watcher. They must be added after the old scripts are cleared, or they never reach a page.
     static func addBrowserScripts(to controller: WKUserContentController, signInWatcher: Bool) {
         controller.addUserScript(WKUserScript(source: GestureScript.script, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .defaultClient))
+        controller.addUserScript(WKUserScript(source: BlockedCounter.script, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .defaultClient))
         controller.addUserScript(WKUserScript(source: LinkHover.script, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .defaultClient))
         if signInWatcher {
             controller.addUserScript(WKUserScript(source: LoginScripts.watcher, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .defaultClient))

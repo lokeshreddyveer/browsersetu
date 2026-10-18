@@ -16,6 +16,8 @@ final class Workbench: ObservableObject {
 
     // Automation
     @Published var workflows: [Workflow] = []
+    @Published var workflowHistory: [WorkflowRun] = []
+    @Published var startupWorkflow: String?
     @Published var grants = ScriptGrants()
     @Published var schedule: [ScheduledCheck] = []
     @Published var lastWorkflowMessage: String?
@@ -48,6 +50,8 @@ final class Workbench: ObservableObject {
         keymap = get("vim_keymap").map(VimKeymap.decode) ?? .standard
         machine.keymap = keymap
         workflows = BrowserModel.decodeMap(get("workflows"), as: [Workflow].self)["list"] ?? []
+        workflowHistory = BrowserModel.decodeMap(get("workflow_history"), as: [WorkflowRun].self)["list"] ?? []
+        startupWorkflow = get("startup_workflow").flatMap { $0.isEmpty ? nil : $0 }
         grants = BrowserModel.decodeMap(get("script_grants"), as: ScriptGrants.self)["grants"] ?? ScriptGrants()
         schedule = BrowserModel.decodeMap(get("scheduled_checks"), as: [ScheduledCheck].self)["list"] ?? []
         siteRules = BrowserModel.decodeMap(get("site_open_rules"), as: [SiteOpenRule].self)["list"] ?? []
@@ -122,6 +126,16 @@ final class Workbench: ObservableObject {
         for file in model.downloads.completed.prefix(200) {
             entries.append(SearchEntry(kind: .download, title: file.lastPathComponent, detail: file.deletingLastPathComponent().lastPathComponent, url: nil, key: file.path))
         }
+        for item in model.readingList {
+            entries.append(SearchEntry(kind: .reading, title: item.title, detail: item.site + (item.hasOfflineCopy ? " · offline" : "") + (item.highlights.isEmpty ? "" : " · " + item.highlights.joined(separator: " ")), url: item.url, key: item.id.uuidString))
+        }
+        for closed in model.closedTabs {
+            entries.append(SearchEntry(kind: .closed, title: closed.title, detail: closed.url.host ?? "", url: closed.url.absoluteString, key: closed.url.absoluteString))
+        }
+        for session in model.savedSessions {
+            let sites = session.tabs.map { $0.title }.joined(separator: " · ")
+            entries.append(SearchEntry(kind: .session, title: session.name, detail: "\(session.tabs.count) tabs · " + sites, url: nil, key: session.id.uuidString))
+        }
         for collection in model.research.collections {
             for item in collection.items {
                 entries.append(SearchEntry(kind: .research, title: item.title, detail: collection.name + (item.text.map { " · " + $0 } ?? ""), url: item.url, key: item.id.uuidString))
@@ -141,7 +155,9 @@ final class Workbench: ObservableObject {
         model.sheet = nil
         switch entry.kind {
         case .tab: if let id = UInt64(entry.key) { model.select(id) }
-        case .bookmark, .history, .research, .note:
+        case .reading: if let id = UUID(uuidString: entry.key), let item = model.readingList.first(where: { $0.id == id }) { model.openReadingItem(item) }
+        case .session: if let id = UUID(uuidString: entry.key), let session = model.savedSessions.first(where: { $0.id == id }) { model.openSession(session) }
+        case .bookmark, .history, .closed, .research, .note:
             if let raw = entry.url, let url = URL(string: raw) { _ = model.openTab(url: url, isPrivate: false) }
         case .download:
             #if os(macOS)
@@ -164,8 +180,12 @@ final class Workbench: ObservableObject {
     }
 
     /// Runs the steps one after another. Each step is one of a fixed set; none of them runs code.
-    func run(_ workflow: Workflow) {
+    func setStartupWorkflow(_ id: String?) { startupWorkflow = id; save("startup_workflow", id ?? "") }
+
+    func run(_ workflow: Workflow, source: String = "by you") {
         guard let model else { return }
+        workflowHistory = Array(([WorkflowRun(name: workflow.name, steps: workflow.steps.count, source: source)] + workflowHistory).prefix(50))
+        saveMap("workflow_history", "list", workflowHistory)
         Task { @MainActor in
             for step in workflow.steps {
                 switch step.kind {
@@ -325,7 +345,7 @@ final class Workbench: ObservableObject {
         save(data, name: "\(host) \(fullPage ? "full page" : "view").png")
     }
 
-    private func save(_ data: Data, name: String) {
+    func save(_ data: Data, name: String) {
         let url = DownloadCoordinator.directory.appendingPathComponent(DownloadRouting.uniqueName(name) { FileManager.default.fileExists(atPath: DownloadCoordinator.directory.appendingPathComponent($0).path) })
         do { try data.write(to: url, options: .atomic); model?.notice = "Saved \(url.lastPathComponent) to Downloads." }
         catch { model?.notice = "Could not save the file." }

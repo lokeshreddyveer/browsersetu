@@ -152,8 +152,10 @@ struct FloatingPillContent: View {
     var body: some View {
         HStack(spacing: 0) {
             PillControl(symbol: "chevron.left", label: "Back", enabled: tab.canGoBack) { tab.goBack() }
+                .contextMenu { NavHistoryItems(tab: tab, back: true) }
             if tab.canGoForward {
                 PillControl(symbol: "chevron.right", label: "Forward", enabled: true) { tab.goForward() }
+                    .contextMenu { NavHistoryItems(tab: tab, back: false) }
                     .transition(.scale(scale: 0.6).combined(with: .opacity))
             }
             siteButton

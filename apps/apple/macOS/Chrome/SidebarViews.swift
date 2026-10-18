@@ -468,6 +468,7 @@ struct TabSearchPanel: View {
 
 struct VerticalTabsList: View {
     @EnvironmentObject var model: BrowserModel
+    @State private var groupQuery = ""
 
     var body: some View {
         let tabs = model.visibleTabs
@@ -515,15 +516,32 @@ struct VerticalTabsList: View {
 
     private var groups: some View {
         VStack(alignment: .leading, spacing: 1) {
-            groupRow("All Tabs", group: "")
-            ForEach(model.groupNames, id: \.self) { groupRow($0, group: $0) }
+            if model.groupNames.count >= 6 {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass").font(.system(size: 10)).foregroundStyle(.secondary)
+                    TextField("Find Group", text: $groupQuery).textFieldStyle(.plain).font(.system(size: 12))
+                    if !groupQuery.isEmpty { Button { groupQuery = "" } label: { Image(systemName: "xmark.circle.fill").font(.system(size: 10)).foregroundStyle(.secondary) }.buttonStyle(.plain) }
+                }
+                .padding(.horizontal, 9).frame(height: 24)
+                .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.fieldFill))
+                .padding(.bottom, 3)
+            }
+            if groupQuery.isEmpty { groupRow("All Tabs", group: "") }
+            ForEach(GroupPath.visible(model.groupNames, collapsed: model.collapsedGroups, query: groupQuery), id: \.self) { groupRow(GroupPath.leaf($0), group: $0) }
         }
         .padding(.bottom, 8)
+        .animation(.easeOut(duration: 0.16), value: model.collapsedGroups)
     }
 
     private func groupRow(_ title: String, group: String) -> some View {
         Button { model.selectGroup(group) } label: {
             HStack(spacing: 8) {
+                if GroupPath.depth(group) > 0 { Color.clear.frame(width: CGFloat(GroupPath.depth(group)) * 12, height: 1) }
+                if !group.isEmpty, GroupPath.hasChildren(group, in: model.groupNames) {
+                    Image(systemName: "chevron.right").font(.system(size: 8, weight: .bold)).foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(model.collapsedGroups.contains(group) ? 0 : 90)).frame(width: 10, height: 16).contentShape(Rectangle())
+                        .onTapGesture { if model.collapsedGroups.contains(group) { model.collapsedGroups.remove(group) } else { model.collapsedGroups.insert(group) } }
+                }
                 Image(systemName: group.isEmpty ? "square.on.square" : "folder.fill").font(.system(size: 11)).frame(width: 16)
                     .foregroundStyle(group.isEmpty ? Color.secondary : (model.groupColor(group)?.color ?? Color.secondary))
                 Text(title).font(.system(size: 12)).foregroundStyle(model.activeGroup == group ? Color.primary : Color.secondary)
@@ -546,8 +564,28 @@ struct VerticalTabsList: View {
                     Divider()
                     Button("No Colour") { model.setGroupColor(group, nil) }
                 }
+                Button("New Subgroup…") { newSubgroup(under: group) }
                 Button("Rename…") { renameGroup(group) }
+                Button("Save Group as Session…") { saveGroupSession(group) }
                 Button("Delete Group", role: .destructive) { model.deleteGroup(group) }
+            }
+        }
+    }
+
+    private func newSubgroup(under group: String) {
+        let model = model
+        Task { @MainActor in
+            if let name = await Dialogs.promptText(title: "New Subgroup", message: "Name a group inside “\(GroupPath.leaf(group))”.", placeholder: ""), !name.isEmpty {
+                model.createSubgroup(under: group, named: name)
+            }
+        }
+    }
+
+    private func saveGroupSession(_ group: String) {
+        let model = model
+        Task { @MainActor in
+            if let name = await Dialogs.promptText(title: "Save Group as Session", message: "Name this session.", placeholder: GroupPath.leaf(group)), !name.isEmpty {
+                model.saveSession(named: name, group: group)
             }
         }
     }
@@ -1075,7 +1113,7 @@ struct RailTab: View {
             .accessibilityAddTraits(selected ? .isSelected : [])
             .accessibilityIdentifier("tab-chip")
             .contextMenu { TabMenuItems(tab: tab) }
-            .help(tab.displayTitle)
+            .modifier(TabTooltip(title: tab.displayTitle))
             .accessibilityLabel(tab.displayTitle)
     }
 }

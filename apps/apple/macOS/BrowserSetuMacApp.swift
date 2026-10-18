@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct BrowserSetuMacApp: App {
+    @NSApplicationDelegateAdaptor(MacAppDelegate.self) private var appDelegate
     @StateObject private var model = BrowserModel(engine: WebKitEngine(), root: Self.debugRoot)
     @Environment(\.scenePhase) private var scenePhase
 
@@ -139,6 +140,8 @@ struct BrowserCommands: Commands {
         CommandGroup(replacing: .newItem) {
             Button("New Window") { openWindow(id: "browser") }.keyboardShortcut("n", modifiers: .command)
             Button("New Guest Window") { model.openGuestWindow() }.keyboardShortcut("n", modifiers: [.command, .shift, .option])
+            Button("Reopen Closed Window") { model.reopenClosedWindow() }.disabled(model.windows.closedWindows.isEmpty)
+            Button("Relaunch Without Extensions") { ExtensionSafeMode.relaunch() }
             Button("Move Tab to New Window") { if let id = model.activeID { model.moveTabToNewWindow(id) } }
                 .disabled(model.activeID == nil || (model.isSecondary && model.tabs.count < 2))
             Divider()
@@ -227,11 +230,48 @@ struct BrowserCommands: Commands {
             Button("Translate Page") { Task { await model.translateOnDevice() } }.disabled(model.active?.isBlank ?? true)
             Divider()
             Button("Privacy Dashboard…") { model.sheet = .dashboard }
+            Button("Search Everything…") { model.sheet = .workbench }.keyboardShortcut("k", modifiers: [.command, .option])
+            Button("Bookmark Tools…") { model.sheet = .bookmarkTools }
             Button("Saved Sessions…") { model.sheet = .sessions }
+            Button("Session Time Machine…") { model.sheet = .timeMachine }
             Button("Tab Activity…") { model.sheet = .timeline }
             Button("Close Duplicate Tabs") { model.closeDuplicateTabs() }.disabled(model.duplicateGroups().isEmpty)
+            Menu("Split View") {
+                Toggle("Link Scrolling", isOn: Binding(get: { model.linkedPanes }, set: { model.setLinkedPanes($0) })).disabled(model.splitTabID == nil)
+                Button("Compare the Two Pages…") { Task { await model.comparePanels() } }.disabled(model.splitTabID == nil)
+                Button("Reopen Last Split Layout") { model.reopenLastSplit() }.disabled(model.lastSplit == nil)
+            }
+            Menu("Sort Tabs") {
+                ForEach(TabSortOrder.allCases) { order in Button(order.title) { model.sortTabs(by: order) } }
+            }
+            Button("Mute All Tabs Playing Sound") { model.muteAllPlaying(true) }.disabled(!model.tabs.contains { $0.playingAudio })
+            Button("Put Idle Groups to Sleep") { Task { await model.sleepInactiveGroups() } }.disabled(model.inactiveGroups().isEmpty)
+            Menu("Snoozed and Scheduled Tabs") {
+                if model.tabSchedules.isEmpty { Text("Nothing waiting") }
+                ForEach(model.tabSchedules) { item in
+                    Button("\(item.title) · \(item.when.formatted(date: .abbreviated, time: .shortened))\(item.repeats == .once ? "" : " · " + item.repeats.title) (Cancel)") { model.cancelSchedule(item.id) }
+                }
+            }
             Divider()
             Button("Reader") { Task { await model.active?.toggleReader() } }.shortcut(.readerMode, model.shortcuts)
+            Menu("Reader Text") {
+                Button("Larger") { model.changeReaderSize(by: 2) }
+                Button("Smaller") { model.changeReaderSize(by: -2) }
+            }
+            Menu("Copy Citation") {
+                ForEach(PageCitation.Style.allCases) { style in Button(style.title) { model.copyCitation(style) } }
+            }.disabled(model.active?.isBlank ?? true)
+            Button("Copy Highlights with Citation") { model.copyHighlights() }.disabled(model.active?.readingItemID == nil)
+            Button("Translate Selected Text") { Task { await model.translateSelection() } }.disabled(model.active?.isBlank ?? true)
+            Button("Detect Page Language") { Task { await model.detectPageLanguage() } }.disabled(model.active?.isBlank ?? true)
+            Button("Search This Site…") { Task { await model.searchThisSite() } }.disabled(model.active?.isBlank ?? true)
+            Button("Summarize This Page…") { model.sheet = .summary }.disabled(model.active?.isBlank ?? true)
+            Menu("Video Speed") {
+                ForEach(VideoControls.speeds, id: \.self) { rate in
+                    Toggle(VideoControls.label(rate), isOn: Binding(get: { (model.activeVideoSpeed ?? 1) == rate }, set: { _ in model.setVideoSpeed(rate) }))
+                }
+            }.disabled(model.active?.isBlank ?? true)
+            Button("Picture in Picture") { model.togglePictureInPicture() }.disabled(model.active?.isBlank ?? true)
                 .disabled(model.active?.isBlank ?? true)
             Button("Share Page…") { model.shareActivePage() }.shortcut(.sharePage, model.shortcuts)
                 .disabled(model.active?.isBlank ?? true)

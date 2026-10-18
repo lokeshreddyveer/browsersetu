@@ -73,9 +73,11 @@
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Websites you allow can use your location.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Websites you allow can use your microphone.</string>
+	<string>Websites you allow can use your microphone, and voice search listens when you tap the microphone in the search box.</string>
 	<key>NSRemindersFullAccessUsageDescription</key>
 	<string>Browser Setu adds a reminder only when you choose Remind Me on selected text.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Voice search turns what you say into text on this device. Nothing you say is sent anywhere.</string>
 	<key>NSUserActivityTypes</key>
 	<array>
 		<string>com.browsersetu.page</string>

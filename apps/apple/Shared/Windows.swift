@@ -2,6 +2,11 @@ import SwiftUI
 
 /// The windows of one browser. Each window has its own `BrowserModel` (its tabs, selected tab, workspace, layout and sheets); they all share one database, one
 /// WebKit engine, one set of privacy rules and one extension runtime, which belong to the first window.
+/// A closed window, as much as is needed to bring it back: the pages it held.
+struct ClosedWindow: Equatable {
+    var urls: [URL]
+}
+
 @MainActor
 final class WindowRegistry {
     private struct Box { weak var model: BrowserModel? }
@@ -18,6 +23,10 @@ final class WindowRegistry {
     var pendingRestores: [[UInt64]] = []
     /// The next window to open is a guest window.
     var openingGuest = false
+    /// Windows the person closed, newest last: the pages each held (private tabs are never kept). Only for this run of the browser.
+    var closedWindows: [ClosedWindow] = []
+    /// Pages the next window to open should show, from a window being brought back.
+    var reopening: [URL] = []
 
     var all: [BrowserModel] { boxes.compactMap(\.model) }
     var count: Int { all.count }
@@ -34,7 +43,7 @@ final class WindowRegistry {
         "appearance", "accent", "theme", "theme_custom", "density", "workspaces", "dark_pages", "dark_sites", "website_appearance", "site_appearance", "site_zoom",
         "site_styles", "site_notes", "bookmark_tags", "group_colors", "favorites_order", "search_template", "search_suggestions", "search_shortcuts", "homepage", "startup",
         "strip_tracking", "app_links", "app_link_sites", "permission_expiry", "show_favorites", "show_continue", "show_frequent", "show_greeting", "show_recently_closed",
-        "start_background", "shortcuts", "organize_downloads", "download_concurrent", "save_logins", "spotlight_bookmarks", "site_js_off", "never_sleep_sites", "fingerprint_noise", "fingerprint_exceptions", "de_amp", "video_ads", "user_themes", "start_tile", "block_autoplay", "autoplay_exceptions", "block_popups", "popup_allowed_hosts", "youtube_rules_auto", "command_chains", "web_panels", "theme_schedule", "hidden_menu_items", "hover_previews", "hover_delay", "tab_stacks", "address_sources", "tab_tree",
+        "start_background", "shortcuts", "organize_downloads", "new_tab_mode", "new_tab_url", "start_color_a", "start_color_b", "protect_pinned", "organize_downloads_domain", "download_notify", "download_concurrent", "save_logins", "spotlight_bookmarks", "site_js_off", "never_sleep_sites", "fingerprint_noise", "fingerprint_exceptions", "de_amp", "video_ads", "cookie_banners", "video_speeds", "user_themes", "start_tile", "block_autoplay", "autoplay_exceptions", "block_popups", "popup_allowed_hosts", "youtube_rules_auto", "command_chains", "web_panels", "theme_schedule", "hidden_menu_items", "hover_previews", "hover_delay", "tab_stacks", "address_sources", "tab_tree",
     ]
 
     /// Tells the other windows that a setting changed, so what they show follows (their own layouts are left alone).
@@ -116,7 +125,9 @@ extension BrowserModel {
         hasStarted = true
         if lifecycle == nil { let manager = TabLifecycle(model: self); manager.start(); lifecycle = manager }
         var wanted: [UInt64] = []
+        var reopened: [URL] = []
         if windows.openingGuest { windows.openingGuest = false; isGuest = true }
+        else if !windows.reopening.isEmpty { reopened = windows.reopening; windows.reopening = [] }
         else if !windows.movingTabs.isEmpty { wanted = windows.movingTabs; windows.movingTabs = [] }
         else if !windows.pendingRestores.isEmpty { wanted = windows.pendingRestores.removeFirst() }
         var adopted = 0
@@ -124,6 +135,7 @@ extension BrowserModel {
             guard let source = windows.model(forTab: id), source !== self else { continue }
             if source.moveTab(id, to: self) { adopted += 1 }
         }
+        for url in reopened { _ = openTab(url: url, isPrivate: false); adopted += 1 }
         if adopted == 0 { _ = openTab(url: nil, isPrivate: isGuest) }
         windows.saveWindowLayout(in: self)
     }
@@ -136,11 +148,23 @@ extension BrowserModel {
         Task { @MainActor [weak self] in
             guard let self, windows.all.contains(where: { $0 === self }) else { return }
             onWindowShouldClose = nil
+            // Remember what the window held, so it can be brought back (a guest window and private tabs are never kept).
+            if !isGuest {
+                let pages = tabs.filter { !$0.isPrivate && !$0.isBlank && !$0.isInternalPage }.compactMap(\.url)
+                if !pages.isEmpty { windows.closedWindows.append(ClosedWindow(urls: pages)); windows.closedWindows = Array(windows.closedWindows.suffix(5)) }
+            }
             for tab in tabs { closeTab(id: tab.id, force: true) }
             windows.remove(self)
             windows.saveWindowLayout(in: self)
             lifecycle?.stop(); lifecycle = nil
         }
+    }
+
+    /// Brings back the window closed last, with the pages it held.
+    func reopenClosedWindow() {
+        guard let closed = windows.closedWindows.popLast() else { return }
+        windows.reopening = closed.urls
+        windows.onNeedWindow?()
     }
 
     /// Opens a guest window: private tabs only, nothing kept, gone when it closes.

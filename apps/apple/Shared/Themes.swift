@@ -291,6 +291,27 @@ extension BrowserModel {
         objectWillChange.send()
     }
 
+    private var startImageURL: URL { themeFolder.appendingPathComponent("start.jpg") }
+
+    func loadStartImage() { startImageData = try? Data(contentsOf: startImageURL) }
+
+    /// A picture for the start page background, chosen from this device: shrunk, kept in this profile's folder, never sent anywhere.
+    func setStartImage(from url: URL) {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        guard let data = try? Data(contentsOf: url), let jpeg = Self.shrunkJPEG(data, longSide: 2200) else { notice = "That picture could not be used."; return }
+        try? FileManager.default.createDirectory(at: themeFolder, withIntermediateDirectories: true)
+        guard (try? jpeg.write(to: startImageURL, options: .atomic)) != nil else { notice = "The picture could not be saved."; return }
+        startImageData = jpeg
+        startBackground = .image
+    }
+
+    func removeStartImage() {
+        try? FileManager.default.removeItem(at: startImageURL)
+        startImageData = nil
+        if startBackground == .image { startBackground = .gradient }
+    }
+
     func removeThemePhoto() {
         try? FileManager.default.removeItem(at: photoURL)
         var value = customTheme
@@ -299,7 +320,7 @@ extension BrowserModel {
         objectWillChange.send()
     }
 
-    private static func shrunkJPEG(_ data: Data, longSide: CGFloat) -> Data? {
+    static func shrunkJPEG(_ data: Data, longSide: CGFloat) -> Data? {
         #if canImport(AppKit)
         guard let image = NSImage(data: data), let rep = image.representations.first else { return nil }
         let w = CGFloat(rep.pixelsWide), h = CGFloat(rep.pixelsHigh)

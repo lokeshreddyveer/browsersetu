@@ -23,9 +23,13 @@ struct SheetContainer: View {
             Group {
                 switch sheet {
                 case .bookmarks: BookmarksPanel()
+                case .bookmarkTools: BookmarkToolsView()
+                case .compare: ComparePagesView()
+                case .timeMachine: TimeMachineView()
                 case .history: HistoryPanel()
                 case .downloads: DownloadsPanel(coordinator: model.downloads)
                 case .settings: SettingsView()
+                case .summary: PageSummaryView()
                 case .findAll: FindInAllTabsView()
                 case .sessions: SavedSessionsView()
                 case .timeline: TabActivityView()
@@ -67,7 +71,7 @@ struct SheetContainer: View {
             }
         }
         #if os(macOS)
-        .frame(minWidth: 520, minHeight: 460)
+        .frame(minWidth: sheet == .workbench ? 760 : 520, minHeight: sheet == .workbench ? 620 : 460)
         #endif
     }
 
@@ -76,6 +80,10 @@ struct SheetContainer: View {
         // These three carry their own large heading, so the sheet's bar says nothing.
         case .bookmarks, .history, .downloads: ""
         case .settings: "Settings"
+        case .summary: "Summary"
+        case .bookmarkTools: "Bookmark Tools"
+        case .compare: "Compare Pages"
+        case .timeMachine: "Session Time Machine"
         case .findAll: "Find in All Tabs"
         case .sessions: "Saved Sessions"
         case .timeline: "Tab Activity"
@@ -296,6 +304,8 @@ struct GeneralSettingsSection: View {
     var body: some View {
         Group {
             StartupSettingsSection()
+            ReaderSettingsSection()
+            HistoryRetentionSection()
             SearchSettingsSection()
             SearchShortcutsSection()
         }
@@ -311,13 +321,29 @@ struct ProfileSettingsSection: View {
             Section("Profiles") {
                 ForEach(model.profiles, id: \.self) { name in
                     HStack(spacing: 10) {
-                        Image(systemName: name == model.profileName ? "person.crop.circle.fill" : "person.crop.circle")
-                            .font(.system(size: 20)).foregroundStyle(name == model.profileName ? Theme.accent : Color.secondary)
+                        Image(systemName: model.profileStyle(name).symbol)
+                            .font(.system(size: 20)).foregroundStyle(model.profileStyle(name).tint ?? (name == model.profileName ? Theme.accent : Color.secondary))
                         VStack(alignment: .leading, spacing: 1) {
                             Text(name == "default" ? "Default" : name).fontWeight(.medium)
-                            Text(name == model.profileName ? "In use" : "Separate cookies, history and bookmarks").font(.caption).foregroundStyle(.secondary)
+                            Text(name == model.profileName ? "In use" : (model.isTemporaryProfile(name) ? "Temporary: deleted when you leave it" : "Separate cookies, history and bookmarks")).font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
+                        Menu {
+                            Menu("Icon") {
+                                ForEach(ProfileStyle.symbols, id: \.self) { symbol in
+                                    Button { model.setProfileStyle(name, symbol: symbol) } label: { Label(symbol, systemImage: symbol) }
+                                }
+                            }
+                            Menu("Colour") {
+                                ForEach(GroupColor.allCases) { c in Button(c.title) { model.setProfileStyle(name, color: .some(c.rawValue)) } }
+                                Divider()
+                                Button("No Colour") { model.setProfileStyle(name, color: .some(nil)) }
+                            }
+                            if name != model.profileName {
+                                Button("Copy Its Bookmarks Here") { model.copyBookmarks(from: name) }
+                            }
+                        } label: { Image(systemName: "paintpalette") }
+                            .menuStyle(.borderlessButton).fixedSize().help("Icon, colour and bookmarks")
                         if name != model.profileName { Button("Switch") { model.switchProfile(name) } }
                         if name != model.profileName && name != "default" {
                             Button(role: .destructive) { Task { if await model.requireAuthentication("Delete a profile and its data") { await model.removeProfile(name) } } } label: { Image(systemName: "trash").accessibilityLabel("Delete") }
@@ -335,8 +361,17 @@ struct ProfileSettingsSection: View {
                     }
                     .disabled(newProfile.isEmpty)
                 }
+                Button("Start a Temporary Profile") { model.startTemporaryProfile() }
+                Toggle("Keep each profile's downloads in its own folder", isOn: $model.downloadsByProfile)
             } footer: {
-                Text("A profile keeps its own cookies, history, bookmarks and permissions. Workspaces only organise tabs and share their profile's data.")
+                Text("A profile keeps its own cookies and other website data (each has its own WebKit data store), history, bookmarks, permissions, home page, search engine, appearance and extension state. A temporary profile and everything in it are deleted when you leave it or quit. Workspaces only organise tabs and share their profile's data. To move a whole profile, make an encrypted backup under Backup, switch to the other profile and restore it there; cookies, sign-ins to sites and history are not in a backup.")
+            }
+            if !model.siteProfiles.isEmpty {
+                Section("Sites that open in a profile") {
+                    ForEach(model.siteProfiles.sorted(by: { $0.key < $1.key }), id: \.key) { site, profile in
+                        HStack { Text(site); Spacer(); Text(profile).foregroundStyle(.secondary); Button("Remove") { model.assignSite(host: site, to: nil) }.buttonStyle(.borderless) }
+                    }
+                }
             }
         }
     }
@@ -720,6 +755,9 @@ struct ExtensionsSettingsSection: View {
     var body: some View {
         Group {
             Section("Installed Extensions") {
+                if model.extensionCenter.safeMode {
+                    Label("Started without extensions. Quit and open the app again to turn them back on.", systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+                }
                 if !model.extensionCenter.isSupported {
                     Text(unsupportedText).foregroundStyle(.secondary)
                 } else if model.extensionCenter.extensions.isEmpty {
@@ -820,6 +858,14 @@ struct ExtensionApprovalSheet: View {
             if info.manifestVersion > 0 { Text("Manifest V\(info.manifestVersion) extension").font(.caption).foregroundStyle(.secondary) }
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
+                    let cautions = ExtensionRisk.warnings(for: info.permissions + info.sites)
+                    if !cautions.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Label("Be careful", systemImage: "exclamationmark.shield").font(.subheadline.weight(.semibold)).foregroundStyle(.red)
+                            ForEach(cautions, id: \.self) { Text("• \($0)").font(.callout).foregroundStyle(.red) }
+                            Text("Only add extensions from people you trust.").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
                     group("It will be able to", info.permissions, empty: "Nothing beyond the pages you allow below.")
                     group("On these websites it can read and change what you see", info.sites, empty: "No websites.")
                     if !info.addedPermissions.isEmpty {
@@ -873,6 +919,10 @@ struct DownloadsSettingsSection: View {
             if model.organizeDownloads {
                 Text("New downloads go into Images, Documents, Archives, Audio, Video, Installers or Other inside that folder.").font(.caption).foregroundStyle(.secondary)
             }
+            Toggle("Sort downloads into folders by website", isOn: $model.organizeByDomain)
+            Text("Used when no rule or kind folder applies first: each site gets its own folder, such as example.com.").font(.caption).foregroundStyle(.secondary)
+            Toggle("Notify me when a download finishes", isOn: $model.notifyDownloads)
+            Text("Only when Browser Setu is in the background.").font(.caption).foregroundStyle(.secondary)
             Text("Files are never opened automatically. Name conflicts get a numbered suffix; nothing is overwritten.")
                 .font(.caption).foregroundStyle(.secondary)
             Button("Clear Download History") {
@@ -1009,9 +1059,11 @@ struct SettingsView: View {
             PrivacySettingsSection()
             SensitiveLockSection()
             ClearOnQuitSection()
+            SecurityEventsSection()
             PermissionActivitySection()
             SavedSignInsSection()
             PasswordsInfoSection()
+            AddressesSection()
             SearchableCopySection()
             PageMemorySection()
         case "sync":
@@ -1077,6 +1129,8 @@ struct SettingsView: View {
             SearchableCopySection()
             SavedSignInsSection()
             PasswordsInfoSection()
+            AddressesSection()
+            SecurityEventsSection()
             PermissionActivitySection()
             SiteZoomSection()
             GlobalStyleSection()
