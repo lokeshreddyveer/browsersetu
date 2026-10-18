@@ -33,7 +33,7 @@ struct BrowserSetuiOSApp: App {
 
     var body: some Scene {
         WindowGroup {
-            PhoneRootView()
+            Group { if UIDevice.current.userInterfaceIdiom == .pad { IPadRootView() } else { PhoneRootView() } }
                 .environmentObject(model)
                 .task {
                     await model.start()

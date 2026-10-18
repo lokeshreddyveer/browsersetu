@@ -3,7 +3,7 @@
 A native, security-first web browser for **macOS** and **iPhone/iPad**. It renders with the system's own WebKit, keeps everything on your device, and
 puts a small Rust core (tabs, address-bar logic, permission and navigation rules, per-profile SQLite storage) under a SwiftUI interface.
 
-> **Status: release candidate, in the production-hardening phase (0.3.3).** It is a real, working browser with a large automated test suite (about 650 tests), but
+> **Status: release candidate, in the production-hardening phase (0.3.3, build 11).** It is a real, working browser with a large automated test suite (about 650 tests), but
 > it is **not yet called production grade**: that needs the evidence in [`docs/RELEASE-BAR.md`](docs/RELEASE-BAR.md) to be complete and recorded. [`docs/capabilities.md`](docs/capabilities.md)
 > lists every feature as *Checked*, *Built* (compiled, not exercised end to end) or *Parked* (switched off), with the evidence and the limits. Read both before you rely on anything.
 
@@ -198,6 +198,8 @@ Every one can be changed in Settings › Shortcuts. The defaults:
 
 ### Themes, start page and settings
 
+- **Library panels.** Bookmarks, History and Downloads open in your choice of three ways (Settings › Tabs › Library panels, or the first-run setup): **beside the page** (the page narrows, drag the edge to resize; on the Mac and iPad),
+  **as a tab** in your tab list, or **as a floating card** over a dimmed page (Mac). Each list is a calm, grouped panel with a search field, filter chips and one-line rows; pressing the same shortcut again closes it.
 - **Themes.** **Pure Black** (true black, for OLED screens), a **theme schedule** (a day theme and a night theme by time) and eleven more moods (Slime Night, Blood Moon, Synthwave, Aurora, Paper, Arctic and more) and ten classic palettes (Dracula, Nord, Gruvbox, Solarized, Catppuccin, Tokyo Night, Rosé Pine, One Dark…), drawn in
   code with no downloaded art, painted under the **whole window including the title bar**. Make your own **Custom** theme (two background colours, an accent, optionally a photo whose main colour becomes the accent, with a
   warning when an accent is hard to see). **Import and export theme files** (colours only, so they are safe to share), or turn any theme into your Custom one to adjust it.
@@ -228,11 +230,19 @@ Every one can be changed in Settings › Shortcuts. The defaults:
 
 ### iPhone and iPad
 
-- A phone has no toolbar: a dock of three pills, a search button, and an address bar that opens in place when you tap it. The page keeps clear of the status bar and the dock, and a page without fixed bars gets
-  a transparent top.
+The three apps share one engine and one set of features, but each has its own layout.
+
+- **iPhone:** no toolbar. A dock of three pills, a search button, and an address bar that opens in place when you tap it. The page keeps clear of the status bar and the dock, and a page without fixed bars gets
+  a transparent top. While a page is read the dock folds into one small pill.
+- **iPad (its own touch design):** one toolbar row of 44-point buttons (sidebar, back and forward, a wide address field, share, new tab, tab count, the ⋮ menu), then a strip of large rounded tab chips.
+  The ⋮ menu holds the iPhone's full menu (find, share, reader, text size, page tools, extensions, close tabs) plus History, Bookmarks, Downloads and Reading List. Those three lists dock beside the page.
+  While a page is read the toolbar and tabs slide away, leaving a small pill with the site name. The tab overview has large cards, a Tabs / Private switch and search. Address suggestions are one card under
+  the field. An attached keyboard (Magic Keyboard or Bluetooth) uses the Mac's shortcuts: ⌘T, ⌘W, ⌘L, ⌘K, ⌘F, ⌘[ and ⌘], ⌘1 to ⌘9 and the rest, following the choices in Settings › Shortcuts.
+  **Limits:** the iPad layout has been looked at only in the simulator and on one device by the author; keyboard shortcuts could not be confirmed on a real Magic Keyboard (the same keyboard failed in Safari on that iPad, so it may
+  be that iPad or keyboard); it has no tests of its own yet.
 - The same privacy, passwords (with Face ID), sync, themes, start page with the Customize panel, PDF editor, page tools, address-bar answers, sent tabs and settings, as above. Extensions install and run from the More
   menu (iOS 18.4 or later). There is a speed-pill widget and Shortcuts actions.
-- **Mac only:** several windows, guest windows, split view, mouse gestures, the sidebar layouts and the Workbench developer tools.
+- **Mac only:** several windows, guest windows, split view, mouse gestures, the sidebar layouts, floating library cards, panels as tabs and the Workbench developer tools.
 
 ## What leaves your device
 

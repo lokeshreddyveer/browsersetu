@@ -11,7 +11,7 @@ Last updated 16 October 2026 (macOS 27.0 build 26A5425a, Xcode toolchain on this
 | Content blocking | Checked | local-server tests in `PrivacyIntegrationTests`; WebKit reports no blocked counts |
 | Web extensions on Mac (load, content scripts, permissions, revoke, update) | Checked | `ExtensionTests`, including a real content script stopping after a permission is revoked |
 | Real Chrome Web Store extensions | Partly checked | `docs/extension-compatibility.md`: loads and page effect only; popups, blocking and sign-in not exercised |
-| Extension install on iPhone | Refused in code | `ExtensionCenter.canInstall`; popup UI for iPhone not built |
+| Extension install on iPhone | Simulator only; real-device and distribution support unverified | install, More-menu entries and popup sheet ran on a simulator (see the post-0.2.0 row); not tried on a physical iPhone |
 | Extension native messaging (iCloud Passwords helper) | Parked | `NativeMessaging.swift`; stays off until CRX signatures and extension identity are verified (`chromeIDVerified` is never set) |
 | Saved HTTP sign-ins | Checked | keyed by scheme, host, port, realm, method and proxy flag; `PowerFeatureTests` |
 | Local sharing / Wi-Fi sync pairing | Built | 100-bit code, expiry, attempt limit, connection and inbox caps; format and key tests; not run between two real devices |
@@ -63,7 +63,7 @@ Last updated 16 October 2026 (macOS 27.0 build 26A5425a, Xcode toolchain on this
 | Handoff and Spotlight for bookmarks | Checked (rules) / Built (system behaviour) | `ContinuityTests`; not seen on a second device |
 | Sync: deterministic merge, deletions, stale copies, workspaces, saved sessions, opt-in passwords | Checked (logic and two in-process models) | `SyncMergeTests` (including random three-device runs), `SyncModelTests`, `SessionSyncTests`; **never run between two real devices** |
 | Download queue: priorities, hold until a time, pause and resume all, retry with back-off, restore after quitting | Checked (logic) | `DownloadQueueTests`, `DownloadPersistenceTests`; no speed limit (WebKit offers none); iPhone background time not measured on a device |
-| iPhone extensions: install, More-menu entries, popup sheet | Checked on a simulator (popup runs its script) | one sample extension only; no real store extension tried on iPhone |
+| iPhone extensions: install, More-menu entries, popup sheet | Simulator-only (popup runs its script); real-device and distribution support unverified | one sample extension only; nothing tried on a physical iPhone or from a store |
 | Per-site extension allow and block rules | Checked | `ExtensionTests` (a block rule stops a real content script and removing it brings it back) |
 | Several windows (independent models, tab moves, restored at start) | Checked in real runs | driven through System Events (⌘N, ⌘W, File menu, quit and reopen); the XCUITest runner could not drive the app in this session; external-display layouts not built |
 | Site rules ("when a site opens": private tab, container, group, workspace) | Checked | `SiteOpenRulesTests` and two real WebKit navigations |

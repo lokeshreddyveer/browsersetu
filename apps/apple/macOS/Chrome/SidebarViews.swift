@@ -849,7 +849,7 @@ struct SidebarFooter: View {
                        tint: model.activeBookmarked ? .yellow : nil) { perform(item) }
                 .disabled(model.active?.isBlank ?? true)
         case .downloads:
-            FooterItem(symbol: item.symbol, label: item.title, identifier: "downloads-button", tint: model.sidebarShowsDownloads ? Theme.accent : nil) { perform(item) }
+            FooterItem(symbol: item.symbol, label: item.title, identifier: "downloads-button", tint: model.dockedPanel == .downloads ? Theme.accent : nil) { perform(item) }
         case .extensions:
             FooterItem(symbol: item.symbol, label: item.title, identifier: "extensions-menu", tint: model.sidebarShowsExtensions ? Theme.accent : nil) { perform(item) }
         case .breakMode:
@@ -863,9 +863,7 @@ struct SidebarFooter: View {
     private func perform(_ item: SidebarFooterItem) {
         switch item {
         case .history: model.sheet = .history
-        case .downloads:
-            model.tabSearchVisible = false
-            model.sidebarShowsDownloads.toggle()
+        case .downloads: model.sheet = .downloads
         case .bookmarks: model.sheet = .bookmarks
         case .bookmarkThis: model.toggleBookmark()
         case .readingList: model.sheet = .readingList

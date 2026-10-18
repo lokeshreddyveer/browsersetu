@@ -51,7 +51,7 @@ extension BrowserModel {
     }
 
     /// After a page has loaded: if kept sign-ins exist for it and it shows a login form, offer to fill. `force` is the menu command and asks even if declined before.
-    func offerToFillLogin(in tab: TabController, force: Bool = false, frameOrigin: String? = nil) {
+    func offerToFillLogin(in tab: TabController, force: Bool = false, frameOrigin: String? = nil, usernameOnly: Bool = false) {
         guard !tab.isPrivate, !askingAboutLogin, let origin = frameOrigin ?? WebLoginOrigin.normalized(tab.url) else { return }
         let kept = WebLoginVault.list(origin: origin, profile: profileName)
         guard !kept.isEmpty, force || !declinedFill.contains(origin) else { if force { notice = "No saved sign-in for this site." }; return }
@@ -64,6 +64,18 @@ extension BrowserModel {
             defer { askingAboutLogin = false }
             let names = Array(kept.prefix(3))
             let host = URL(string: origin)?.host ?? origin
+            // The first step of a sign-in asks for the name alone. A name is not a secret, so it needs no Touch ID: with one saved name it is filled at once, with several the person picks one.
+            // The password is offered, behind Touch ID as always, when the next step shows its password field.
+            if usernameOnly {
+                var index = 0
+                if names.count > 1 {
+                    let picked = await Dialogs.choose(title: "Fill in your name?", message: "For \(host).", buttons: names.map(\.user) + ["Not Now"])
+                    guard picked < names.count else { return }
+                    index = picked
+                }
+                _ = await tab.engine.fillLogin(origin: origin, user: names[index].user, password: "")
+                return
+            }
             let choice = await Dialogs.choose(title: "Fill a saved sign-in?", message: "For \(host).", buttons: names.map(\.user) + ["Not Now"])
             guard choice < names.count else { declinedFill.insert(origin); return }
             guard await authenticateForFill(host: host) else { return }

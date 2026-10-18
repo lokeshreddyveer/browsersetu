@@ -50,7 +50,7 @@ enum TextDiff {
 }
 
 enum PriceFinder {
-    private static let pattern = try! NSRegularExpression(pattern: #"[$€£₹]\s?(\d{1,3}(?:,\d{3})+(?:\.\d{2})?|\d+(?:\.\d{2})?)"#)
+    private static let pattern = NSRegularExpression.fixed(#"[$€£₹]\s?(\d{1,3}(?:,\d{3})+(?:\.\d{2})?|\d+(?:\.\d{2})?)"#)
 
     /// The first price written in the text, as a number. The first price on a product page is usually the one for sale.
     static func firstPrice(in text: String) -> Double? {

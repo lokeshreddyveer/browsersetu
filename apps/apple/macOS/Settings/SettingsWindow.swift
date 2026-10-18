@@ -311,6 +311,7 @@ struct SettingsPanelView: View {
             TabsSettingsSection()
             TabHoverAndStacksSection()
             SidebarFooterSection()
+            DockedPanelsSection()
             SplitAndWindowSettingsSection()
             WorkspacesSettingsSection()
             WebPanelsSection()
@@ -415,6 +416,14 @@ private struct SettingsWindowGuard: NSViewRepresentable {
         var enabled = false
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
+            // Our own header names the panel, so the window's title is hidden and the content runs up under a clear title bar.
+            DispatchQueue.main.async { [weak self] in
+                guard let window = self?.window else { return }
+                window.titleVisibility = .hidden
+                window.titlebarAppearsTransparent = true
+                window.styleMask.insert(.fullSizeContentView)
+                window.isMovableByWindowBackground = true
+            }
             check()
         }
         func check() {

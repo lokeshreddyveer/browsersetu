@@ -10,7 +10,7 @@ struct IPadSidebar: View {
             GroupChips().padding(.horizontal, 12).padding(.vertical, 8)
             List {
                 ForEach(model.visibleTabs) { tab in
-                    SidebarTabRow(tab: tab, selected: tab.id == model.activeID)
+                    IPadTabRow(tab: tab, selected: tab.id == model.activeID)
                         .contentShape(Rectangle())
                         .onTapGesture { model.select(tab.id) }
                         .contextMenu { TabMenuItems(tab: tab) }
@@ -18,22 +18,27 @@ struct IPadSidebar: View {
                 .onDelete { idx in idx.map { model.visibleTabs[$0].id }.forEach { model.closeTab(id: $0) } }
             }
             .listStyle(.sidebar)
-            HStack {
-                Button { model.newTab() } label: { Label("New Tab", systemImage: "plus") }
+            Divider().opacity(0.5)
+            HStack(spacing: 4) {
+                Button { model.newTab() } label: { Label("New Tab", systemImage: "plus").font(.system(size: 15, weight: .medium)).lineLimit(1).fixedSize() }
+                    .frame(minHeight: 44)
                 Spacer()
-                Button { model.sheet = .bookmarks } label: { Image(systemName: "book") }.accessibilityLabel("Bookmarks")
-                Button { model.sheet = .history } label: { Image(systemName: "clock") }.accessibilityLabel("History")
-                Button { model.sheet = .settings } label: { Image(systemName: "gearshape") }.accessibilityLabel("Settings")
+                ForEach([("book", "Bookmarks", Sheet.bookmarks), ("clock", "History", .history), ("arrow.down.circle", "Downloads", .downloads), ("gearshape", "Settings", .settings)], id: \.1) { symbol, label, sheet in
+                    Button { model.sheet = sheet } label: { Image(systemName: symbol).font(.system(size: 17)).frame(width: 40, height: 44).contentShape(Rectangle()) }
+                        .accessibilityLabel(label)
+                }
             }
-            .padding(12)
+            .buttonStyle(.plain)
+            .foregroundStyle(Theme.accent)
+            .padding(.horizontal, 12).padding(.vertical, 2)
         }
-        .frame(width: 280)
+        .frame(width: 300)
         .themedBar(fallback: .bar)
         .accessibilityIdentifier("sidebar")
     }
 }
 
-struct SidebarTabRow: View {
+struct IPadTabRow: View {
     @ObservedObject var tab: TabController
     let selected: Bool
 
@@ -47,9 +52,11 @@ struct SidebarTabRow: View {
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 4) {
                     if tab.pinned { Image(systemName: "pin.fill").font(.caption2).foregroundStyle(.secondary) }
-                    Text(tab.displayTitle).lineLimit(1)
+                    Text(tab.displayTitle).font(.system(size: 15, weight: .medium)).lineLimit(1)
                 }
-                Text(tab.isBlank ? "Start page" : displayHost(tab.url)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                if tab.isBlank || tab.displayTitle != displayHost(tab.url) {
+                    Text(tab.isBlank ? "Start page" : displayHost(tab.url)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
             }
             Spacer(minLength: 0)
             if tab.isShowingError { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange) }

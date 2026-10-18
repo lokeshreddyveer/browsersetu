@@ -52,7 +52,7 @@ protocol TabEngineEvents: AnyObject {
     func engineWantsLoginCapture() -> Bool
     func engineLoginSubmitted(origin: String, user: String, password: String)
     /// The person put the cursor in a password field: the moment to offer a saved sign-in.
-    func engineLoginFieldFocused(origin: String?)
+    func engineLoginFieldFocused(origin: String?, usernameOnly: Bool)
     /// A password was typed (and a name with it); the sign-in has not been sent. Kept in memory so the person can save it from the page.
     func engineLoginTyped(origin: String, user: String, password: String)
     /// A script asked for a new window and the person had just clicked or typed: the new page, connected to this one. Nil if none could be made.
@@ -134,7 +134,7 @@ extension TabEngineEvents {
     func engineFixedBars(top: Bool, bottom: Bool) {}
     func engineWantsLoginCapture() -> Bool { false }
     func engineLoginSubmitted(origin: String, user: String, password: String) {}
-    func engineLoginFieldFocused(origin: String?) {}
+    func engineLoginFieldFocused(origin: String?, usernameOnly: Bool) {}
     func engineLoginTyped(origin: String, user: String, password: String) {}
     func engineOpenPopup(configuration: AnyObject) -> TabEngine? { nil }
     func engineBlockedPopup(url: URL?) {}

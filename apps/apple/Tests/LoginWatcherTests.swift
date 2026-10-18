@@ -167,3 +167,47 @@ final class AutoplayInRealTabTests: XCTestCase {
         XCTAssertTrue(result?.hasPrefix("refused") ?? false, "a script's play() with no tap must be refused, got \(result ?? "nil")")
     }
 }
+
+/// The first step of a two-step sign-in asks for the name alone: the saved name is filled in, with no question when only one is saved.
+@MainActor
+final class UsernameStepTests: XCTestCase {
+    private func page(saved: [WebLogin], html: String, focus script: String) async throws -> (value: String, asked: [String]) {
+        let model = BrowserModel(engine: WebKitEngine(), root: NSTemporaryDirectory() + "bs-step-\(UUID().uuidString)", profile: "step-" + UUID().uuidString)
+        defer { WebLoginVault.removeAll(profile: model.profileName) }
+        await model.start()
+        for login in saved { guard WebLoginVault.save(login, profile: model.profileName) else { throw XCTSkip("the Keychain is not available to this test run") } }
+        var asked: [String] = []
+        Dialogs.testHandler = { title, _, _ in asked.append(title); return 0 }
+        defer { Dialogs.testHandler = nil }
+        let tab = model.openTab(url: nil, isPrivate: false)
+        tab.engine.showHTML(html, baseURL: URL(string: "https://step.test/"))
+        try await Task.sleep(for: .seconds(2))
+        guard let web = (tab.engine as? WebKitTab)?.webView else { XCTFail("not a WebKitTab"); return ("", asked) }
+        tab.engine.runPageScript(script, arguments: [:])
+        try await Task.sleep(for: .seconds(2))
+        let value = try await web.callAsyncJavaScript("return document.getElementById('u').value", contentWorld: .defaultClient) as? String ?? ""
+        return (value, asked)
+    }
+
+    func testTheNameIsFilledOnTheFirstStepWithNoQuestionWhenOneIsSaved() async throws {
+        let result = try await page(saved: [WebLogin(origin: "https://step.test", user: "me@example.com", password: "pw")],
+                                    html: "<html><body><input id=u type=text name=username autocomplete=username></body></html>",
+                                    focus: "document.getElementById('u').focus(); return true;")
+        XCTAssertEqual(result.value, "me@example.com")
+        XCTAssertTrue(result.asked.isEmpty, "a lone saved name is filled without a question: \(result.asked)")
+    }
+
+    func testAFieldThatAlreadyHasANameIsNotFilledOver() async throws {
+        let result = try await page(saved: [WebLogin(origin: "https://step.test", user: "me@example.com", password: "pw")],
+                                    html: "<html><body><input id=u type=text name=username value='someone@else.test'></body></html>",
+                                    focus: "document.getElementById('u').focus(); return true;")
+        XCTAssertEqual(result.value, "someone@else.test")
+    }
+
+    func testASearchBoxIsNeverFilled() async throws {
+        let result = try await page(saved: [WebLogin(origin: "https://step.test", user: "me@example.com", password: "pw")],
+                                    html: "<html><body><input id=u type=search name=q placeholder='Search'></body></html>",
+                                    focus: "document.getElementById('u').focus(); return true;")
+        XCTAssertEqual(result.value, "")
+    }
+}

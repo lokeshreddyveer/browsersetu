@@ -11,20 +11,21 @@ extension Color {
     static var raised: Color { ThemeState.raised ?? adaptive(dark: 0.20, light: 1.0) }
     /// The selected tab: white at 18% in dark, 80% in light, so the window's tint shows through.
     static var selectedTab: Color {
-        Color(nsColor: NSColor(name: nil) { appearance in
-            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(white: 1, alpha: 0.18) : NSColor(white: 1, alpha: 0.80)
-        })
+        dynamic(dark: (1, 0.18), light: (1, 0.80))
     }
     /// The address field's fill: the text colour at 15% in dark, 8% in light.
     static var fieldFill: Color {
-        Color(nsColor: NSColor(name: nil) { appearance in
-            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(white: 1, alpha: 0.15) : NSColor(white: 0, alpha: 0.08)
-        })
+        dynamic(dark: (1, 0.15), light: (0, 0.08))
     }
 
     private static func adaptive(dark: CGFloat, light: CGFloat) -> Color {
+        dynamic(dark: (dark, 1), light: (light, 1))
+    }
+
+    /// A grey that follows the light or dark appearance, as (white, alpha) pairs.
+    private static func dynamic(dark: (CGFloat, CGFloat), light: (CGFloat, CGFloat)) -> Color {
         Color(nsColor: NSColor(name: nil) { appearance in
-            NSColor(white: appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light, alpha: 1)
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(white: dark.0, alpha: dark.1) : NSColor(white: light.0, alpha: light.1)
         })
     }
 }

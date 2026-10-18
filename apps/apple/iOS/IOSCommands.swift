@@ -9,11 +9,21 @@ struct IOSBrowserCommands: Commands {
         CommandGroup(replacing: .newItem) {
             Button("New Tab") { model.newTab() }.shortcut(.newTab, model.shortcuts)
             Button("New Private Tab") { model.openTab(url: nil, isPrivate: true) }.shortcut(.newPrivateTab, model.shortcuts)
-            Button("Open Location") { model.openSearchPanel() }.shortcut(.openLocation, model.shortcuts)
-            Button("Command Center") { model.openSearchPanel(prefill: ">") }.shortcut(.commandPalette, model.shortcuts)
+            Button("Open Location") { if UIDevice.current.userInterfaceIdiom == .pad { model.focusAddressBar() } else { model.openSearchPanel() } }.shortcut(.openLocation, model.shortcuts)
+            Button("Command Center") {
+                if UIDevice.current.userInterfaceIdiom == .pad { model.pendingAddressPrefill = ">"; model.focusAddressBar() } else { model.openSearchPanel(prefill: ">") }
+            }.shortcut(.commandPalette, model.shortcuts)
             Divider()
             Button("Close Tab") { if let id = model.activeID { model.closeTab(id: id) } }.shortcut(.closeTab, model.shortcuts)
             Button("Reopen Closed Tab") { model.reopenClosedTab() }.shortcut(.reopenClosedTab, model.shortcuts).disabled(model.closedTabs.isEmpty)
+        }
+        CommandGroup(after: .toolbar) {
+            Button("Show Sidebar") { model.sidebarVisible.toggle() }.shortcut(.toggleSidebar, model.shortcuts)
+        }
+        CommandMenu("Tabs") {
+            ForEach(1...9, id: \.self) { n in
+                Button("Tab \(n)") { model.selectTab(number: n) }.keyboardShortcut(KeyEquivalent(Character("\(n)")), modifiers: .command)
+            }
         }
         CommandMenu("Navigate") {
             Button("Back") { model.active?.goBack() }.shortcut(.back, model.shortcuts)
