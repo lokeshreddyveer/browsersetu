@@ -3,7 +3,7 @@ import AppKit
 /// The window the Dock menu and the Services menu act on: the first window that is not a guest or a secondary one.
 @MainActor
 private func frontModel() -> BrowserModel? {
-    let all = BrowserModel.liveModels.allObjects
+    let all = BrowserModel.activeModels.allObjects
     return all.first(where: { !$0.isSecondary }) ?? all.first
 }
 

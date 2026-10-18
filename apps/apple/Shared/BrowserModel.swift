@@ -362,6 +362,9 @@ final class BrowserModel: ObservableObject {
 
     private let persistsProfileChoice: Bool
 
+    /// The windows' models, for the Dock menu and the Services menu to act on the right one. Weak, so a closed window is not kept alive.
+    static let activeModels = NSHashTable<BrowserModel>.weakObjects()
+
     #if DEBUG
     /// Every model made in this process, so a test run can close their pages when each test ends: pages a test left open would keep their web processes alive for the
     /// rest of the run, and a long run would end with hundreds of them.
@@ -435,6 +438,7 @@ final class BrowserModel: ObservableObject {
         startTabWatch()
         observeNetwork()
         windows.add(self)
+        Self.activeModels.add(self)
         #if DEBUG
         Self.liveModels.add(self)
         #endif
@@ -457,6 +461,7 @@ final class BrowserModel: ObservableObject {
         startTabWatch()
         observeNetwork()
         windows.add(self)
+        Self.activeModels.add(self)
         #if DEBUG
         Self.liveModels.add(self)
         #endif
