@@ -4,6 +4,36 @@
     <title>Browser Setu</title>
     <item>
       <title>Browser Setu 0.3.3</title>
+      <pubDate>Sun, 18 Oct 2026 04:59:28 -0000</pubDate>
+      <sparkle:version>11</sparkle:version>
+      <sparkle:shortVersionString>0.3.3</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <description><![CDATA[# Browser Setu 0.3.3 (build 11)
+
+Mac: notarized, stapled DMG (replaces the build 10 file on the same release). iPhone/iPad: TestFlight build 11. Same version number, higher build number.
+
+## Added since build 10
+- **iPad has its own touch design:** a one-row toolbar, large tab chips, a redrawn tab overview, the iPhone&#x27;s full menu in ⋮, panels docked beside the page, a scroll-away toolbar with a return pill, and external-keyboard shortcuts.
+- **Library panels** (Bookmarks, History, Downloads): beside the page, as a tab, or as a floating card, chosen in Settings or the first-run setup; the Mac sidebar&#x27;s Downloads button now opens the panel instead of swapping the tab list.
+- **First-run setup explains every choice in plain words** and has a new step for where the panels open.
+- **Two-step sign-ins:** a saved username is filled on the first step (silently when only one is saved), the password on the next step behind Touch ID or Face ID.
+- Settings window: no system title; the panel&#x27;s own header names the page. Rows in History are one line. Lists load before they show, so rows no longer appear loose and then regroup.
+
+## Fixed
+- iPad ⌘L and ⌘K did nothing (they opened the phone&#x27;s floating panel); now they focus the address field.
+- The floating card no longer leaves an empty area under a short list.
+- `try!` regex initialisers replaced by a safe fallback; documented the startup stop and the plain-HTTP web-content setting; CI now runs the fuzz tests and the SBOM script.
+
+## Checked
+- Full Mac unit run: 574 passed, 7 failed. Six of the failures were timing and scale tests that took 15 to 25 minutes after about 500 earlier tests had left web views behind (opening 100 tabs took 25 minutes); each passed when run alone (opening 100 tabs took 0.5 seconds). The seventh, a check that the running app is sandboxed with the right entitlements, can only pass in a signed build and was not run signed.
+- Earlier, 12 focused suites (login, username step, privacy, fuzz, shortcuts, layout, page versions, YouTube rules) passed.
+
+## Not checked
+- iPhone and iPad unit and UI tests; the iPad design on a real iPad with an external keyboard (Safari failed on that keyboard too, so the cause may be the iPad or keyboard); live sign-ins and YouTube; real two-device sync; VoiceOver; the signed-build sandbox test.]]></description>
+      <enclosure url="https://github.com/lokeshreddyveer/browsersetu/releases/download/v0.3.3/BrowserSetu-0.3.3.dmg" type="application/octet-stream" sparkle:edSignature="LELe7IFnqVCgERJ2Z+j0n1z9U2w+GiOVrA0KhplLXTdY1t8QZZluNDUMFqSwPN8v6Qk/AKQTO+u5FsqW7ENbDQ==" length="16715417"/>
+    </item>
+    <item>
+      <title>Browser Setu 0.3.3</title>
       <pubDate>Sat, 17 Oct 2026 22:41:39 -0000</pubDate>
       <sparkle:version>10</sparkle:version>
       <sparkle:shortVersionString>0.3.3</sparkle:shortVersionString>
@@ -56,5 +86,5 @@
       <description><![CDATA[First public release. A native WebKit browser for macOS with a Rust core: tabs, sidebar layouts, workspaces, content blocking, per-site privacy, saved passwords in your Keychain, web extensions, research collections, developer tools, and automatic updates. Early release: see docs/capabilities.md for what has been checked and what has not.]]></description>
       <enclosure url="https://github.com/lokeshreddyveer/browsersetu/releases/download/v0.2.0/BrowserSetu-0.2.0.dmg" type="application/octet-stream" sparkle:edSignature="grmp8aD3U/KjtKeEkUcI3ESkfohsFjkds81VYV6rBzRGW6/JUxDLtcQ1hg178QCZEWXFRCB4AwrzLHSqGC2VCw==" length="14528271"/>
     </item>
-            </channel>
+              </channel>
 </rss>
