@@ -4,6 +4,15 @@
     <title>Browser Setu</title>
     <item>
       <title>Browser Setu 0.3.3</title>
+      <pubDate>Sun, 18 Oct 2026 18:05:06 -0000</pubDate>
+      <sparkle:version>12</sparkle:version>
+      <sparkle:shortVersionString>0.3.3</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <description><![CDATA[Build 12: downloads, security events, tab tools, resource governor, privacy detail, profiles, media, reading, new tab page and voice search, search and bookmark tools, split view tools, developer and network tools, Session Time Machine, automation, and Mac and iPhone fixes. Notes: docs/releases/0.3.3-build-12.md]]></description>
+      <enclosure url="https://github.com/lokeshreddyveer/browsersetu/releases/download/v0.3.3/BrowserSetu-0.3.3.dmg" type="application/octet-stream" sparkle:edSignature="jEOXjWNgsMxeuIRz8LkjjjeK/HD273MyKbmcLKOkkRXLR75SulB8rzTv3yoxsdj5gXAafMfH/JQDJrO3dSUFBw==" length="18223715"/>
+    </item>
+    <item>
+      <title>Browser Setu 0.3.3</title>
       <pubDate>Sun, 18 Oct 2026 04:59:28 -0000</pubDate>
       <sparkle:version>11</sparkle:version>
       <sparkle:shortVersionString>0.3.3</sparkle:shortVersionString>
@@ -86,5 +95,5 @@ Mac: notarized, stapled DMG (replaces the build 10 file on the same release). iP
       <description><![CDATA[First public release. A native WebKit browser for macOS with a Rust core: tabs, sidebar layouts, workspaces, content blocking, per-site privacy, saved passwords in your Keychain, web extensions, research collections, developer tools, and automatic updates. Early release: see docs/capabilities.md for what has been checked and what has not.]]></description>
       <enclosure url="https://github.com/lokeshreddyveer/browsersetu/releases/download/v0.2.0/BrowserSetu-0.2.0.dmg" type="application/octet-stream" sparkle:edSignature="grmp8aD3U/KjtKeEkUcI3ESkfohsFjkds81VYV6rBzRGW6/JUxDLtcQ1hg178QCZEWXFRCB4AwrzLHSqGC2VCw==" length="14528271"/>
     </item>
-              </channel>
+                </channel>
 </rss>
