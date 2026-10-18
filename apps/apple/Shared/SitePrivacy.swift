@@ -323,7 +323,7 @@ extension BrowserModel {
     func pushWebPolicy() {
         engine.setWebPolicy(WebPolicy(blockWebRTC: blockWebRTC, exceptions: webRTCExceptions, randomizeFingerprint: randomizeFingerprint,
                                       fingerprintExceptions: fingerprintExceptions, deAMP: deAMP, blockVideoAds: blockVideoAds, youtubeRules: youtubeRules,
-                                      blockAutoplay: blockAutoplay, autoplayExceptions: autoplayExceptions))
+                                      blockAutoplay: blockAutoplay, autoplayExceptions: autoplayExceptions, cookieBanners: hideCookieBanners, referrerSameSiteOnly: referrerMode == .sameSite, devCapture: devCapture, videoSpeeds: videoSpeeds))
     }
 
     func setWebRTCException(host: String?, allowed: Bool) {

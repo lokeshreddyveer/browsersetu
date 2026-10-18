@@ -12,6 +12,16 @@ struct ActiveDownload: Identifiable {
     let id: UUID
     var filename: String
     var fraction: Double
+    var completedBytes: Int64 = 0
+    var totalBytes: Int64 = 0
+    /// Smoothed transfer rate; zero until two samples have arrived.
+    var bytesPerSecond: Double = 0
+    var lastSample: Date = Date()
+    var lastBytes: Int64 = 0
+    var warnedDisk = false
+
+    /// "48 of 78 MB · 6.1 MB/s · about 5 s left", with whatever parts are known.
+    var detail: String { DownloadStats.detail(completed: completedBytes, total: totalBytes, rate: bytesPerSecond) }
 }
 
 /// Engine-neutral download bookkeeping. Engines report events; this decides where files go.
@@ -30,6 +40,14 @@ final class DownloadCoordinator: ObservableObject {
     var resumer: ((Data) -> Void)?
     /// Sort new downloads into folders by kind (Images, Documents, Archives…) inside the downloads folder.
     var organize = false
+    /// A folder named for the profile, inside the downloads folder, when downloads are kept apart by profile.
+    var profileFolder: String?
+    /// Sort new downloads into a folder named after the site they came from.
+    var organizeByDomain = false
+    /// Recent download events (start, finish, failure, warnings) for "Copy Download Diagnostics".
+    private(set) var events: [String] = []
+    /// Raised once per download when the disk looks too full for it.
+    var onLowDisk: ((_ filename: String, _ needed: Int64, _ available: Int64) -> Void)?
     /// The user's rules by site and kind; the first match names the folder, ahead of sorting by kind.
     var rules: [DownloadRule] = []
     var onFinished: ((_ source: URL?, _ filename: String) -> Void)?
@@ -248,7 +266,19 @@ final class DownloadCoordinator: ObservableObject {
         let flat = directory.appendingPathComponent(filename)
         if fm.fileExists(atPath: flat.path) { return flat }
         let sorted = directory.appendingPathComponent(category(forFilename: filename), isDirectory: true).appendingPathComponent(filename)
-        return fm.fileExists(atPath: sorted.path) ? sorted : nil
+        if fm.fileExists(atPath: sorted.path) { return sorted }
+        // Folders from site rules, per-site or per-profile sorting: looked for up to two levels down.
+        let top = (try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isDirectoryKey])) ?? []
+        for dir in top where (try? dir.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
+            let one = dir.appendingPathComponent(filename)
+            if fm.fileExists(atPath: one.path) { return one }
+            for inner in (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.isDirectoryKey])) ?? []
+            where (try? inner.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
+                let two = inner.appendingPathComponent(filename)
+                if fm.fileExists(atPath: two.path) { return two }
+            }
+        }
+        return nil
     }
 
     static func uniqueURL(in dir: URL, name: String) -> URL {
@@ -270,7 +300,14 @@ final class DownloadCoordinator: ObservableObject {
     func begin(suggestedName: String, sourceHost: String? = nil, cancel: @escaping () -> Void, suspend: ((@escaping (Data?) -> Void) -> Void)? = nil) -> (id: UUID, destination: URL) {
         let name = Self.safeName(suggestedName)
         var folder = Self.directory
+        if let profileFolder, let clean = DownloadRule.cleanFolder(profileFolder) {
+            folder = folder.appendingPathComponent(clean, isDirectory: true)
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        }
         if let ruled = DownloadRouting.folder(for: name, from: sourceHost, rules: rules), let clean = DownloadRule.cleanFolder(ruled) {
+            folder = folder.appendingPathComponent(clean, isDirectory: true)
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        } else if organizeByDomain, let host = sourceHost, let clean = DownloadRule.cleanFolder(host) {
             folder = folder.appendingPathComponent(clean, isDirectory: true)
             try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         } else if organize {
@@ -284,6 +321,7 @@ final class DownloadCoordinator: ObservableObject {
         cancellers[id] = cancel
         if let suspend { suspenders[id] = suspend }
         active[id] = ActiveDownload(id: id, filename: dest.lastPathComponent, fraction: 0)
+        note("Started \(dest.lastPathComponent)\(sourceHost.map { " from \($0)" } ?? "")")
         return (id, dest)
     }
 
@@ -291,9 +329,49 @@ final class DownloadCoordinator: ObservableObject {
         active[id]?.fraction = fraction
     }
 
+    /// Progress with byte counts: keeps a smoothed speed and warns once if the disk cannot hold the file.
+    func update(_ id: UUID, fraction: Double, completed: Int64, total: Int64) {
+        guard var d = active[id] else { return }
+        d.fraction = fraction
+        let now = Date()
+        let dt = now.timeIntervalSince(d.lastSample)
+        if dt >= 0.5 {
+            let instant = Double(max(0, completed - d.lastBytes)) / dt
+            d.bytesPerSecond = d.bytesPerSecond == 0 ? instant : d.bytesPerSecond * 0.7 + instant * 0.3
+            d.lastSample = now
+            d.lastBytes = completed
+        }
+        d.completedBytes = completed
+        d.totalBytes = max(0, total)
+        if !d.warnedDisk, total > 0, let free = DiskSpace.available(at: Self.directory), DiskSpace.isTight(needed: total - completed, available: free) {
+            d.warnedDisk = true
+            note("Low disk space for \(d.filename): needs \(DownloadStats.bytes(total)), \(DownloadStats.bytes(free)) free")
+            onLowDisk?(d.filename, total, free)
+        }
+        active[id] = d
+    }
+
+    func note(_ line: String) {
+        events.append("\(ISO8601DateFormatter().string(from: Date())) \(line)")
+        if events.count > 60 { events.removeFirst(events.count - 60) }
+    }
+
+    /// Plain-text summary a person can paste into a bug report. Holds file names and sites, no page content.
+    var diagnostics: String {
+        var lines = ["Browser Setu download diagnostics", "Folder: \(Self.directory.path)"]
+        if let free = DiskSpace.available(at: Self.directory) { lines.append("Free space: \(DownloadStats.bytes(free))") }
+        lines.append("Active: \(active.count), waiting: \(waiting.count), scheduled: \(scheduled.count), interrupted: \(interrupted.count)")
+        lines.append("Concurrent limit: \(maxConcurrent)")
+        for d in active.values { lines.append("• \(d.filename) \(Int(d.fraction * 100))% \(d.detail)") }
+        lines.append("Recent events:")
+        lines.append(contentsOf: events.suffix(40).map { "  " + $0 })
+        return lines.joined(separator: "\n")
+    }
+
     func finish(_ id: UUID, source: URL?) {
         if let dest = destinations[id] {
             completed.insert(dest, at: 0)
+            note("Finished \(dest.lastPathComponent)")
             onFinished?(source, dest.lastPathComponent)
         }
         forget(id)

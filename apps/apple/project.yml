@@ -15,7 +15,7 @@ settings:
   base:
     SWIFT_VERSION: "5.0"
     MARKETING_VERSION: "0.3.3"
-    CURRENT_PROJECT_VERSION: "11"
+    CURRENT_PROJECT_VERSION: "12"
     ENABLE_HARDENED_RUNTIME: YES
     GENERATE_INFOPLIST_FILE: NO
     EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64
@@ -39,6 +39,18 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleName: Browser Setu
         LSApplicationCategoryType: public.app-category.productivity
+        # Services menu: select text or a link in any app, then Services › Open in Browser Setu, or Search with Browser Setu.
+        NSServices:
+          - NSMenuItem:
+              default: Open in Browser Setu
+            NSMessage: openInBrowserSetu
+            NSPortName: Browser Setu
+            NSSendTypes: [NSStringPboardType]
+          - NSMenuItem:
+              default: Search with Browser Setu
+            NSMessage: searchWithBrowserSetu
+            NSPortName: Browser Setu
+            NSSendTypes: [NSStringPboardType]
         # Files this app downloads are marked as coming from the internet, so macOS checks them before anything in them is opened.
         LSFileQuarantineEnabled: true
         # Registers the app for web links, so it can be chosen as the default browser.
@@ -53,7 +65,8 @@ targets:
         # Lets the browser see whether a site's own app is installed, so it can ask before sending a link there.
         LSApplicationQueriesSchemes: [youtube, instagram, twitter, spotify, reddit, whatsapp]
         NSCameraUsageDescription: Websites you allow can use your camera.
-        NSMicrophoneUsageDescription: Websites you allow can use your microphone.
+        NSMicrophoneUsageDescription: Websites you allow can use your microphone, and voice search listens when you tap the microphone in the search box.
+        NSSpeechRecognitionUsageDescription: Voice search turns what you say into text on this device. Nothing you say is sent anywhere.
         NSRemindersFullAccessUsageDescription: Browser Setu adds a reminder only when you choose Remind Me on selected text.
         NSLocalNetworkUsageDescription: Browser Setu finds your other devices on this network when you send them a link or file.
         NSUserActivityTypes: [com.browsersetu.page]
@@ -123,7 +136,8 @@ targets:
           NSAllowsArbitraryLoadsInWebContent: true
         LSApplicationQueriesSchemes: [youtube, instagram, twitter, spotify, reddit, whatsapp]
         NSCameraUsageDescription: Websites you allow can use your camera.
-        NSMicrophoneUsageDescription: Websites you allow can use your microphone.
+        NSMicrophoneUsageDescription: Websites you allow can use your microphone, and voice search listens when you tap the microphone in the search box.
+        NSSpeechRecognitionUsageDescription: Voice search turns what you say into text on this device. Nothing you say is sent anywhere.
         NSRemindersFullAccessUsageDescription: Browser Setu adds a reminder only when you choose Remind Me on selected text.
         NSLocalNetworkUsageDescription: Browser Setu finds your other devices on this network when you send them a link or file.
         NSUserActivityTypes: [com.browsersetu.page]
@@ -226,7 +240,8 @@ targets:
         NSAppTransportSecurity:
           NSAllowsArbitraryLoadsInWebContent: true
         NSCameraUsageDescription: Websites you allow can use your camera.
-        NSMicrophoneUsageDescription: Websites you allow can use your microphone.
+        NSMicrophoneUsageDescription: Websites you allow can use your microphone, and voice search listens when you tap the microphone in the search box.
+        NSSpeechRecognitionUsageDescription: Voice search turns what you say into text on this device. Nothing you say is sent anywhere.
         NSLocationWhenInUseUsageDescription: Websites you allow can use your location.
         NSCalendarsWriteOnlyAccessUsageDescription: Browser Setu adds an event to your calendar only when you open a calendar file you downloaded.
         NSFaceIDUsageDescription: Browser Setu asks for Face ID before sensitive changes, if you turn that on.

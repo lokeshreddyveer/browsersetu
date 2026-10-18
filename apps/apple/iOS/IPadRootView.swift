@@ -53,6 +53,7 @@ struct IPadRootView: View {
         .scrollIndicators(.hidden)
         .motion(.easeOut(duration: 0.18), value: model.overviewVisible)
         .sheet(item: $model.sheet) { SheetContainer(sheet: $0) }
+        // A link, a file or some text dragged in from another app opens.
         .sheet(item: $model.storeOffer) { StoreOfferSheet(info: $0) }
         .sheet(item: $model.privacySheet) { PrivacySheetView(kind: $0, privacy: model.privacy) }
         .preferredColorScheme(model.appearance.colorScheme ?? (model.themeIsActive ? model.activeTheme.scheme?.colorScheme : nil))
@@ -137,7 +138,9 @@ private struct IPadToolbar: View {
         HStack(spacing: 4) {
             key("sidebar.left", "Sidebar", on: model.sidebarVisible) { model.sidebarVisible.toggle() }
             key("chevron.left", "Back", enabled: tab.canGoBack) { tab.goBack() }
+                .contextMenu { NavHistoryItems(tab: tab, back: true) }
             key("chevron.right", "Forward", enabled: tab.canGoForward) { tab.goForward() }
+                .contextMenu { NavHistoryItems(tab: tab, back: false) }
             HStack {
                 Spacer(minLength: 0)
                 PhoneAddressBar(tab: tab, address: model.addressBar)

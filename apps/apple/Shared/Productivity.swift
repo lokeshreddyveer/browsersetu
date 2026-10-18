@@ -16,6 +16,8 @@ struct ReadingItem: Codable, Identifiable, Equatable {
     /// Passages the reader marked in the saved copy.
     var highlights: [String] = []
     var hasOfflineCopy = false
+    /// How far down the article the person had read (0 to 1).
+    var progress: Double?
 }
 
 /// The reading list on disk: an index, and one file per saved article.
@@ -134,7 +136,15 @@ extension BrowserModel {
         let tab = openTab(url: nil, isPrivate: false)
         tab.readingItemID = item.id
         tab.setReadingTitle(item.title)
+        tab.readerContent = (article, item.highlights, URL(string: item.url))
         tab.engine.showHTML(ReaderHTML.page(for: article, highlights: item.highlights), baseURL: URL(string: item.url))
+        // Back to where the person stopped.
+        if let progress = item.progress, progress > 0.03, progress < 0.97 {
+            Task { @MainActor [weak tab] in
+                try? await Task.sleep(for: .seconds(0.8))
+                await tab?.engine.scrollTo(fraction: progress)
+            }
+        }
     }
 
     func removeReadingItem(_ item: ReadingItem) {
@@ -153,6 +163,7 @@ extension BrowserModel {
         if !item.highlights.contains(text) { item.highlights.append(text) }
         setReadingList(readingList.map { $0.id == id ? item : $0 })
         if let article = ReadingStore.loadArticle(id: id, root: profileFolder) {
+            tab.readerContent = (article, item.highlights, URL(string: item.url))
             tab.engine.showHTML(ReaderHTML.page(for: article, highlights: item.highlights), baseURL: URL(string: item.url))
         }
     }
@@ -223,6 +234,10 @@ extension BrowserModel {
     /// Hands the page's text to the system's own translation sheet. It works on this device; nothing is sent by Browser Setu.
     func translateOnDevice() async {
         guard let text = await active?.engine.pageText() else { notice = "There is no text on this page to translate."; return }
+        if let found = LanguageDetector.detect(text) {
+            if LanguageDetector.isSystemLanguage(found.code) { notice = "This page is already in \(found.name)."; return }
+            notice = "Translating from \(found.name)."
+        }
         translationText = text
     }
 }
@@ -250,23 +265,28 @@ struct SystemTranslation: ViewModifier {
 struct ReadingListView: View {
     @EnvironmentObject var model: BrowserModel
     @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
 
     var body: some View {
         List {
             Section {
+                TextField("Search saved articles", text: $query).autocorrectionDisabled()
                 Button("Add This Page to the Reading List") { Task { await model.addToReadingList() } }
                     .disabled(model.active?.isBlank ?? true)
             } footer: { Text("An article is kept on this device so it opens without a connection. Select text in a saved article, then choose Highlight Selection.") }
+            SavedPagesSection()
             Section("Saved") {
                 if model.readingList.isEmpty { Label("Nothing saved yet", systemImage: "books.vertical").foregroundStyle(.secondary) }
-                ForEach(model.readingList) { item in
+                else if model.searchReading(query).isEmpty { Label("No saved article matches", systemImage: "magnifyingglass").foregroundStyle(.secondary) }
+                ForEach(model.searchReading(query)) { item in
                     Button { model.openReadingItem(item); model.sheet = nil; dismiss() } label: {
                         HStack(spacing: 10) {
                             Circle().fill(item.read ? Color.clear : Theme.accent).frame(width: 8, height: 8)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(item.title).fontWeight(item.read ? .regular : .semibold).lineLimit(2)
                                 Text("\(item.site) · \(item.added.formatted(.relative(presentation: .named)))" + (item.hasOfflineCopy ? " · offline" : "")
-                                     + (item.highlights.isEmpty ? "" : " · \(item.highlights.count) highlight\(item.highlights.count == 1 ? "" : "s")"))
+                                     + (item.highlights.isEmpty ? "" : " · \(item.highlights.count) highlight\(item.highlights.count == 1 ? "" : "s")")
+                                     + (ReadingSearch.progressLabel(item.progress).map { " · " + $0 } ?? ""))
                                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                             }
                             Spacer()

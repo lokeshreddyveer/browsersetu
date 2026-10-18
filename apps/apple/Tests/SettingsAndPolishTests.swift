@@ -13,8 +13,8 @@ final class SearchEnginesTests: XCTestCase {
             XCTAssertEqual(SearchEngines.validated(engine.template), engine.template, "\(engine.name) must pass its own validation")
             XCTAssertEqual(SearchEngines.preset(for: engine.template)?.id, engine.id)
         }
-        XCTAssertEqual(SearchEngines.defaultEngine.name, "Brave Search", "Brave Search is the default")
-        XCTAssertEqual(SearchEngines.presets.first?.id, "brave", "and it is listed first")
+        XCTAssertEqual(SearchEngines.defaultEngine.name, "Google", "Google is the default until a profile picks another")
+        XCTAssertNotNil(SearchEngines.presets.first { $0.id == "brave" }, "Brave Search stays on offer")
     }
 
     func testCustomAddressesAreChecked() {

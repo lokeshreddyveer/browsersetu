@@ -191,6 +191,7 @@ extension BrowserModel {
         blockPopups = get("block_popups") != "0"
         if let list = get("address_bar_items") { addressBarItems = list.split(separator: ",").compactMap { AddressBarItem(rawValue: String($0)) } }
         if let list = get("sidebar_footer") { sidebarFooter = list.split(separator: ",").compactMap { SidebarFooterItem(rawValue: String($0)) } }
+        loadBlockedStats()
         WebLoginVault.synchronizable = get("passwords_icloud_keychain") == "1"
         passwordsInICloudKeychain = WebLoginVault.synchronizable
         // A new install is asked a few questions once. Not in a window made later, in a test run, or when the window is set up by hand for a screenshot.
@@ -267,6 +268,65 @@ extension BrowserModel {
         }
     }
 
+    private func videoSite(_ host: String?) -> String? { host.map { $0.lowercased().hasPrefix("www.") ? String($0.lowercased().dropFirst(4)) : $0.lowercased() } }
+
+    /// The speed remembered for the site in front, if any.
+    var activeVideoSpeed: Double? { videoSite(active?.url?.host).flatMap { site in videoSpeeds.first { site == $0.key || site.hasSuffix("." + $0.key) }?.value } }
+
+    /// Sets the speed of the video on this page now, and remembers it for the site (1× forgets it).
+    func setVideoSpeed(_ rate: Double) {
+        guard let tab = active, let site = videoSite(tab.url?.host) else { return }
+        tab.engine.runPageScript(VideoControls.setNow(rate), arguments: [:])
+        var map = videoSpeeds
+        if rate == 1 { map.removeValue(forKey: site) } else { map[site] = rate }
+        videoSpeeds = map
+        notice = rate == 1 ? "Video speed back to normal on \(site)." : "Video speed \(VideoControls.label(rate)) on \(site), remembered."
+    }
+
+    /// Sites to finish an address with: the most visited first. Read from history and bookmarks, then kept for a minute.
+    func completionSites() -> [String] {
+        if let cached = completionCache, Date().timeIntervalSince(cached.date) < 60 { return cached.sites }
+        let history = ((try? core.recentHistory(limit: 600)) ?? []).map { (url: $0.url, visits: Int($0.visitCount)) }
+        let bookmarks = ((try? core.listBookmarks(query: "")) ?? []).map(\.url)
+        let sites = URLCompletion.sites(history: history, bookmarks: bookmarks)
+        completionCache = (Date(), sites)
+        return sites
+    }
+
+    /// Asks what to look for, then searches only the website in front.
+    func searchThisSite() async {
+        guard let host = active?.url?.host, !host.isEmpty else { return }
+        let site = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+        guard let query = await Dialogs.promptText(title: "Search \(site)", message: "Looks only at this website, using your search engine.", placeholder: "What are you looking for?"),
+              !query.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        navigate(input: URLCompletion.siteQuery(host: host, query: query))
+    }
+
+    /// Links dropped on the window open in new tabs (up to ten); a file opens as a document (a PDF in the editor, anything else in the previewer).
+    @discardableResult func openDropped(urls: [URL]) -> Bool {
+        var opened = false
+        for url in urls.prefix(10) {
+            if url.isFileURL { openDocument(url); opened = true }
+            else if let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https", url.host != nil {
+                _ = openTab(url: url, isPrivate: active?.isPrivate ?? false); opened = true
+            }
+        }
+        return opened
+    }
+
+    /// Text dropped on the window: an address opens, anything else is searched, in a new tab. A tab being dragged around (its number) and the
+    /// browser's own button drags are not text from outside, so they are left alone.
+    @discardableResult func openDropped(text: String) -> Bool {
+        let wanted = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !wanted.isEmpty, wanted.count < 2000, !wanted.contains("\n"), UInt64(wanted) == nil,
+              !wanted.hasPrefix("footer:"), !wanted.hasPrefix("address:") else { return false }
+        _ = openTab(url: nil, isPrivate: active?.isPrivate ?? false)
+        navigate(input: wanted)
+        return true
+    }
+
+    func togglePictureInPicture() { active?.engine.runPageScript(VideoControls.pictureInPicture, arguments: [:]) }
+
     /// Chains, break mode, page actions and web panels, as palette commands.
     var extraPaletteItems: [PaletteItem] {
         var items: [PaletteItem] = chains.filter { !$0.steps.isEmpty }.map { chain in
@@ -284,6 +344,17 @@ extension BrowserModel {
                 if allowed { popupAllowedHosts.remove(host) } else { popupAllowedHosts.insert(host) }
                 notice = allowed ? "Pop-ups blocked again for \(host)." : "Pop-ups allowed for \(host)."
             })
+        }
+        if !windows.closedWindows.isEmpty {
+            items.append(.init(id: "reopen-window", title: "Reopen Closed Window", subtitle: "\(windows.closedWindows.last?.urls.count ?? 0) page(s)", symbol: "macwindow.badge.plus", shortcut: "") { [self] in reopenClosedWindow() })
+        }
+        if active?.isBlank == false {
+            items.append(.init(id: "search-site", title: "Search This Site…", subtitle: "Only this website", symbol: "magnifyingglass", shortcut: "") { [self] in Task { await searchThisSite() } })
+            items.append(.init(id: "summarize", title: "Summarize This Page", subtitle: "Written on this device", symbol: "text.alignleft", shortcut: "") { [self] in sheet = .summary })
+            for rate in VideoControls.speeds {
+                items.append(.init(id: "video-speed-\(rate)", title: "Video Speed: \(VideoControls.label(rate))", subtitle: "This page and this site", symbol: "speedometer", shortcut: "") { [self] in setVideoSpeed(rate) })
+            }
+            items.append(.init(id: "video-pip", title: "Picture in Picture", subtitle: "The video on this page", symbol: "pip.enter", shortcut: "") { [self] in togglePictureInPicture() })
         }
         for panel in webPanels {
             items.append(.init(id: "web-panel-\(panel.id)", title: "Web Panel: \(panel.name)", subtitle: panel.url, symbol: "sidebar.squares.left", shortcut: "") { [self] in toggleWebPanel(panel.id) })

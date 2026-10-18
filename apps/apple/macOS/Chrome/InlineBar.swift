@@ -163,7 +163,7 @@ struct InlineTabCell: View {
         .contentShape(Rectangle())
         .motion(.easeOut(duration: 0.16), value: hovering)
         .onHover { hovering = $0 }
-        .help(tab.displayTitle)
+        .modifier(TabTooltip(title: tab.displayTitle))
         .tabInteractions(tab)
     }
 }

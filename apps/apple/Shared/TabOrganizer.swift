@@ -307,6 +307,7 @@ struct TabBadges: View {
     var body: some View {
         let meta = model.tabMeta[tab.id]
         HStack(spacing: 4) {
+            AudioBadge(tab: tab)
             if let color = meta?.color.flatMap(GroupColor.init(rawValue:)) { Circle().fill(color.color).frame(width: 7, height: 7).accessibilityLabel("\(color.title) label") }
             if let status = meta?.status { Image(systemName: status.symbol).font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary).accessibilityLabel(status.title) }
             if meta?.note != nil { Image(systemName: "note.text").font(.system(size: 9)).foregroundStyle(.secondary).accessibilityLabel("Has a note") }

@@ -7,20 +7,37 @@ import AppKit
 struct WorkbenchView: View {
     @EnvironmentObject var model: BrowserModel
     enum Part: String, CaseIterable, Identifiable {
-        case search = "Search", automate = "Automate", developer = "Developer", files = "Files", extensions = "Extensions", health = "Health"
+        case search = "Search", automate = "Automate", developer = "Developer", utilities = "Utilities", network = "Network", files = "Files", extensions = "Extensions", health = "Health"
         var id: String { rawValue }
     }
     @State private var part = Part.search
 
     var body: some View {
         VStack(spacing: 0) {
-            Picker("", selection: $part) { ForEach(Part.allCases) { Text($0.rawValue).tag($0) } }
-                .pickerStyle(.segmented).labelsHidden().padding([.horizontal, .top], 16).padding(.bottom, 8)
+            // Eight parts do not fit as segments, so they are a row you can scroll sideways, the chosen one highlighted.
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(Part.allCases) { item in
+                        Button { part = item } label: {
+                            Text(item.rawValue).font(.callout.weight(part == item ? .semibold : .regular))
+                                .padding(.horizontal, 12).padding(.vertical, 6)
+                                .background(Capsule().fill(part == item ? Theme.accent.opacity(0.22) : Color.primary.opacity(0.06)))
+                                .foregroundStyle(part == item ? Theme.accent : Color.primary)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(part == item ? .isSelected : [])
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+            .padding(.top, 14).padding(.bottom, 8)
             Group {
                 switch part {
                 case .search: WorkbenchSearch()
                 case .automate: WorkbenchAutomate(bench: model.workbench)
                 case .developer: WorkbenchDeveloper(bench: model.workbench)
+                case .utilities: DevUtilitiesView()
+                case .network: NetworkToolsView()
                 case .files: WorkbenchFiles(bench: model.workbench)
                 case .extensions: WorkbenchExtensions(bench: model.workbench)
                 case .health: WorkbenchHealth(bench: model.workbench)
@@ -29,6 +46,9 @@ struct WorkbenchView: View {
             .transition(.opacity)
         }
         .animation(.easeOut(duration: 0.18), value: part)
+        #if DEBUG
+        .onAppear { if let name = UserDefaults.standard.string(forKey: "ShotPart"), let wanted = Part(rawValue: name) { part = wanted } }
+        #endif
         .quickLookPreview($model.previewURL)
         .accessibilityIdentifier("workbench")
     }
@@ -43,7 +63,7 @@ private struct WorkbenchSearch: View {
     var body: some View {
         List {
             Section {
-                TextField("Search tabs, bookmarks, history, downloads, research, notes, commands", text: $query)
+                TextField("Search tabs, bookmarks, history, downloads, reading list, closed tabs, sessions, notes, commands", text: $query)
                     .textFieldStyle(.roundedBorder).focused($focused)
                     .onSubmit { if let first = results.first { model.workbench.open(first) } }
             }
@@ -107,6 +127,7 @@ private struct WorkbenchAutomate: View {
                 }
             } header: { Text("Keyboard") }
 
+            AutomationExtrasSection(bench: bench)
             Section("Workflows") {
                 ForEach(bench.workflows) { flow in
                     HStack {
@@ -250,6 +271,7 @@ private struct WorkbenchDeveloper: View {
                 Toggle("Show the page size in the corner", isOn: $bench.showSizeHUD)
             }
             #endif
+            DeveloperExtras()
             Section("Scratchpad") {
                 TextEditor(text: $code).font(.system(.callout, design: .monospaced)).frame(minHeight: 70)
                 Button("Run on This Page") { Task { await bench.runScratch(code) } }
@@ -421,6 +443,7 @@ private struct WorkbenchHealth: View {
 
     var body: some View {
         List {
+            ReliabilitySection()
             Section("Tabs and memory") {
                 LabeledContent("Open tabs", value: "\(h.tabs) (\(h.sleeping) asleep, \(h.privateTabs) private)")
                 LabeledContent("Browser app memory", value: ByteCountFormatter.string(fromByteCount: Int64(h.appMemory), countStyle: .memory))

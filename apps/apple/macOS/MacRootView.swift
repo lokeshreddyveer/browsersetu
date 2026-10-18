@@ -65,14 +65,21 @@ struct MacRootView: View {
                 VStack(spacing: 0) {
                     if model.focusMode { FocusBand().padding(.leading, toolbarInset) }
                     else if fullWidthBar {
-                        // The bar keeps its place in the layout and glides shut, so the page rises with it in one motion.
-                        VStack(spacing: 0) { TopBar(leadingInset: toolbarInset); tabRow }
-                            .background { if let tab = model.active { ToolbarTintLayer(tab: tab) } }
-                            .frame(height: foldedAway ? 0 : barHeight, alignment: .top)
-                            .clipped()
-                            .opacity(foldedAway ? 0 : 1)
-                            .allowsHitTesting(!foldedAway)
-                            .accessibilityHidden(foldedAway)
+                        // The page's room changes once, at the start, instead of every frame (resizing a web page 30 times a second is what made the fold
+                        // stutter). The bar itself slides and fades over it on one smooth curve.
+                        Color.clear
+                            .frame(height: foldedAway ? 0 : barHeight)
+                            .transaction { $0.animation = nil }
+                            .overlay(alignment: .top) {
+                                VStack(spacing: 0) { TopBar(leadingInset: toolbarInset); tabRow }
+                                    .background { if let tab = model.active { ToolbarTintLayer(tab: tab) } }
+                                    .frame(height: barHeight, alignment: .top)
+                                    .offset(y: foldedAway ? -barHeight : 0)
+                                    .opacity(foldedAway ? 0 : 1)
+                                    .allowsHitTesting(!foldedAway)
+                                    .accessibilityHidden(foldedAway)
+                            }
+                            .zIndex(1)
                     }
                     else if columnBar || model.topBarHidden || model.singleToolbar { EmptyView() }
                     else { WindowDragRegion().frame(height: model.windowFullScreen ? 0 : 28) }
@@ -196,7 +203,7 @@ struct MacRootView: View {
             WindowDoubleClick.handler = { model.handleTopBarDoubleClick() }
         }
         .onChange(of: model.layoutPreset) { _, _ in peek.linger = peekLinger; peek.dwell = peekDwell }
-        .motion(.spring(response: 0.42, dampingFraction: 0.9), value: foldedAway)
+        .motion(.easeInOut(duration: 0.26), value: foldedAway)
         .motion(.spring(response: 0.4, dampingFraction: 0.9), value: pillScrolledAway)
         .motion(.spring(response: 0.38, dampingFraction: 0.86), value: model.pillCollapsed)
         .onAppear {
@@ -222,6 +229,9 @@ struct MacRootView: View {
         .motion(.easeOut(duration: 0.2), value: model.focusMode)
         .environment(\.holdBrowserChrome, { hold in peek.hold(hold); toolbarPeek.hold(hold) })
         .sheet(item: $model.sheet) { SheetContainer(sheet: $0) }
+        // A link, a file or some text from another app, dropped on the window, opens.
+        .dropDestination(for: URL.self) { urls, _ in model.openDropped(urls: urls) }
+        .dropDestination(for: String.self) { texts, _ in texts.first.map { model.openDropped(text: $0) } ?? false }
         .sheet(item: $model.storeOffer) { StoreOfferSheet(info: $0) }
         .sheet(item: $model.privacySheet) { PrivacySheetView(kind: $0, privacy: model.privacy) }
         .preferredColorScheme(model.appearance.colorScheme ?? (model.themeIsActive ? model.activeTheme.scheme?.colorScheme : nil))
@@ -405,8 +415,8 @@ struct ContentPanels: View {
     @ObservedObject var active: TabController
 
     var body: some View {
-        let panels = model.splitPanels
-        if panels.count > 1, panels.first?.id == active.id {
+        let panels = model.orderedSplitPanels()
+        if panels.count > 1 {
             SplitLayout(count: panels.count, horizontal: model.splitOrientation == .sideBySide) { index in
                 panel(panels[index], focused: panels[index].id == active.id, count: panels.count)
             }
@@ -421,7 +431,7 @@ struct ContentPanels: View {
             .overlay(RoundedRectangle(cornerRadius: 2).stroke(focused ? Theme.accent : Color.clear, lineWidth: 2).allowsHitTesting(false))
             .contentShape(Rectangle())
             .simultaneousGesture(TapGesture().onEnded { if !focused { model.swapSplit(with: tab.id) } })
-            .accessibilityLabel(focused ? "Active panel" : (count > 2 ? "Panel \(model.splitPanels.firstIndex { $0.id == tab.id }.map { $0 + 1 } ?? 2) of \(count)" : "Side panel"))
+            .accessibilityLabel(focused ? "Active panel" : (count > 2 ? "Panel \(model.orderedSplitPanels().firstIndex { $0.id == tab.id }.map { $0 + 1 } ?? 2) of \(count)" : "Side panel"))
             .transition(.opacity)
     }
 }
@@ -533,6 +543,10 @@ struct SplitControls: View {
             if model.thirdSplitTab != nil {
                 Button { model.removeThirdPanel() } label: { Image(systemName: "rectangle.badge.minus").accessibilityLabel("Remove the last panel") }.help("Remove the Last Panel")
             }
+            Button { model.setLinkedPanes(!model.linkedPanes) } label: {
+                Image(systemName: model.linkedPanes ? "link.circle.fill" : "link").accessibilityLabel(model.linkedPanes ? "Unlink scrolling" : "Link scrolling")
+            }.help(model.linkedPanes ? "Scrolling is linked. Click to unlink." : "Link Scrolling")
+            Button { Task { await model.comparePanels() } } label: { Image(systemName: "doc.on.doc").accessibilityLabel("Compare pages") }.help("Compare the Two Pages")
             Button { model.swapSplit() } label: { Image(systemName: "arrow.left.arrow.right").accessibilityLabel("Swap panels") }.help("Swap Panels")
             Button { model.closeSplit() } label: { Image(systemName: "xmark").accessibilityLabel("Close split view") }.help("Close Split View")
         }

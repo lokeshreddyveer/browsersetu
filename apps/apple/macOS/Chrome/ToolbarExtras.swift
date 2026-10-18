@@ -57,11 +57,24 @@ struct ProfileToolbarMenu: View {
     @EnvironmentObject var model: BrowserModel
 
     var body: some View {
-        ToolbarMenuButton(symbol: "person.crop.circle", help: "Profile: \(model.profileName)", identifier: "profile-button") {
+        ToolbarMenuButton(symbol: model.profileStyle(model.profileName).symbol, help: "Profile: \(model.profileName)", identifier: "profile-button") {
             ForEach(model.profiles, id: \.self) { name in
-                Button { model.switchProfile(name) } label: { Label(name, systemImage: name == model.profileName ? "checkmark" : "person.crop.circle") }
+                Button { model.switchProfile(name) } label: { Label(name, systemImage: name == model.profileName ? "checkmark" : model.profileStyle(name).symbol) }
             }
             Divider()
+            if let url = model.active?.url, !(model.active?.isBlank ?? true) {
+                Menu("Open This Page in Profile") {
+                    ForEach(model.profiles.filter { $0 != model.profileName }, id: \.self) { name in
+                        Button(name) { model.openInProfile(url, profile: name) }
+                    }
+                }
+                Menu("Always Open \(url.host ?? "This Site") in") {
+                    ForEach(model.profiles, id: \.self) { name in Button(name) { model.assignSite(host: url.host, to: name) } }
+                    Divider()
+                    Button("No Profile") { model.assignSite(host: url.host, to: nil) }
+                }
+            }
+            Button("Start a Temporary Profile") { model.startTemporaryProfile() }
             Button("Manage Profiles…") { SettingsRouter.open(.profiles) }
         }
     }

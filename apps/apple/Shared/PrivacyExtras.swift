@@ -88,7 +88,7 @@ struct PrivacyDashboardView: View {
                 #endif
             }
             Section {
-                Text("Blocking happens inside WebKit before a request is sent, so the browser cannot count what was blocked. Websites can still recognise you in other ways, and private browsing is not anonymity.")
+                Text("Blocking happens inside WebKit before a request is sent, so the counts in the shield card are estimates. Websites can still recognise you in other ways, and private browsing is not anonymity.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -98,6 +98,32 @@ struct PrivacyDashboardView: View {
             storedSites = await model.siteData().count
         }
         .accessibilityIdentifier("privacy-dashboard")
+    }
+}
+
+/// Pop-ups stopped, long redirect chains, risky downloads and pauses, newest first. Permission requests are in the section below it.
+struct SecurityEventsSection: View {
+    @EnvironmentObject var model: BrowserModel
+
+    var body: some View {
+        Section {
+            if model.securityEvents.isEmpty {
+                Label("Nothing to report", systemImage: "checkmark.shield").foregroundStyle(.secondary)
+            }
+            ForEach(model.securityEvents.prefix(30)) { event in
+                Label {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(event.detail).fontWeight(.medium)
+                        Text("\(event.site.isEmpty ? "" : event.site + " · ")\(event.date.formatted(.relative(presentation: .named)))").font(.caption).foregroundStyle(.secondary)
+                    }
+                } icon: { Image(systemName: event.symbol) }
+            }
+            if !model.securityEvents.isEmpty { Button("Clear Security Events", role: .destructive) { model.clearSecurityEvents() } }
+        } header: {
+            Text("Security Events")
+        } footer: {
+            Text("Things Browser Setu did or noticed to keep you safe. Private tabs are not recorded.")
+        }
     }
 }
 

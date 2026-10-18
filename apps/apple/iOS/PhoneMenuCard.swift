@@ -46,7 +46,18 @@ struct PhoneMenuContent: View {
                     Label(model.activeBookmarked ? "Remove Favorite" : "Favorite", systemImage: model.activeBookmarked ? "star.fill" : "star")
                 }
                 Button { PhoneAction.reader.run(model, tab) } label: { Label(tab.isReading ? "Exit Reader" : "Reader", systemImage: "doc.plaintext") }
+                Button { Task { await model.searchThisSite() } } label: { Label("Search This Site", systemImage: "magnifyingglass") }
+                Button { model.sheet = .summary } label: { Label("Summarize", systemImage: "text.alignleft") }
                 textSizeMenu
+                Menu {
+                    ForEach(VideoControls.speeds, id: \.self) { rate in
+                        Button { model.setVideoSpeed(rate) } label: {
+                            if model.activeVideoSpeed == rate || (model.activeVideoSpeed == nil && rate == 1) { Label(VideoControls.label(rate), systemImage: "checkmark") } else { Text(VideoControls.label(rate)) }
+                        }
+                    }
+                    Divider()
+                    Button { model.togglePictureInPicture() } label: { Label("Picture in Picture", systemImage: "pip.enter") }
+                } label: { Label("Video", systemImage: "play.rectangle") }
             }
             moreMenu
             extensionsMenu

@@ -32,9 +32,9 @@ enum AccentChoice: String, CaseIterable, Identifiable {
 }
 
 enum StartBackground: String, CaseIterable, Identifiable {
-    case gradient, plain
+    case gradient, plain, color, blend, image
     var id: String { rawValue }
-    var title: String { rawValue.capitalized }
+    var title: String { self == .image ? "Picture" : rawValue.capitalized }
 }
 
 enum SplitOrientation: String, CaseIterable, Identifiable {

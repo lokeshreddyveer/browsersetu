@@ -15,7 +15,7 @@ enum PanelMode: String, CaseIterable, Identifiable {
 }
 
 enum Sheet: String, Identifiable {
-    case bookmarks, history, downloads, pdfEditor, settings, layout, research, sitePrivacy, workbench, findAll, sessions, timeline, dashboard, readingList, note, qr, style, pageTools, selection, shareTabs, shopping, repair, devices, pageSearch, resources
+    case bookmarks, history, downloads, bookmarkTools, compare, timeMachine, pdfEditor, summary, settings, layout, research, sitePrivacy, workbench, findAll, sessions, timeline, dashboard, readingList, note, qr, style, pageTools, selection, shareTabs, shopping, repair, devices, pageSearch, resources
     var id: String { rawValue }
 }
 
@@ -51,6 +51,11 @@ final class BrowserModel: ObservableObject {
     @Published var activeID: UInt64?
     @Published private(set) var profileName: String
     @Published private(set) var profiles: [String] = []
+    @Published var profileStyles: [String: ProfileStyle] = ProfileRegistry.styles()
+    @Published var siteProfiles: [String: String] = ProfileRegistry.sites()
+    var sitePromptDeclined = Set<String>()
+    var pendingProfileURL: URL?
+    @Published var downloadsByProfile = ProfileRegistry.downloadsByProfile() { didSet { ProfileRegistry.saveDownloadsByProfile(downloadsByProfile); updateDownloadFolder() } }
     @Published var sheet: Sheet? {
         didSet {
             // Bookmarks, History and Downloads open beside the page on the Mac and the iPad when the person chose to dock them.
@@ -170,6 +175,18 @@ final class BrowserModel: ObservableObject {
     /// iOS shows normal and private tabs as separate sets; macOS mixes them in one strip.
     @Published var privateMode = false
     @Published var activeGroup = ""
+    /// Pages waiting to open: snoozed tabs and schedules.
+    @Published var tabSchedules: [TabSchedule] = []
+    /// What has played in tabs, newest first. Private tabs are never recorded.
+    @Published var mediaHistory: [MediaHistoryEntry] = []
+    @Published var readerStyle = ReaderStyle()
+    @Published var keepMediaHistory = true { didSet { saveSetting("media_history_on", keepMediaHistory ? "1" : "0") } }
+    /// When playing media in every tab is paused by the sleep timer.
+    @Published var mediaSleepAt: Date?
+    /// Groups folded shut in the sidebar's group list.
+    @Published var collapsedGroups: Set<String> = []
+    @Published var protectPinned = true { didSet { saveSetting("protect_pinned", protectPinned ? "1" : "0") } }
+    var watchTask: Task<Void, Never>?
     @Published private(set) var groupNames: [String] = []
     let addressBar = AddressBarController()
 
@@ -202,6 +219,28 @@ final class BrowserModel: ObservableObject {
     @Published var density: InterfaceDensity = .comfortable { didSet { saveSetting("density", density.rawValue) } }
     @Published var paletteVisible = false
     @Published var accent: AccentChoice = .teal { didSet { applyWorkspaceTheme(); saveSetting("accent", accent.rawValue) } }
+    /// The picture chosen for the start page background, already shrunk. Kept in this profile's folder; never sent anywhere.
+    @Published var startImageData: Data?
+    /// Checkpoints of the open pages, newest first (the Session Time Machine).
+    @Published var checkpoints: [SessionCheckpoint] = []
+    var unresponsiveStreak = 0
+    var splitDisplay: [UInt64] = []
+    var connectionNoteTask: Task<Void, Never>?
+    var lastConnectionNote = Date.distantPast
+    var unresponsiveReported = false
+    /// Days of browsing history to keep; 0 keeps it all.
+    @Published var historyRetentionDays = 0 { didSet { saveSetting("history_retention_days", String(historyRetentionDays)) } }
+    @Published var startTitle = "" { didSet { saveSetting("start_title", startTitle) } }
+    @Published var startFont: StartFont = .rounded { didSet { saveSetting("start_font", startFont.rawValue) } }
+    @Published var startSearchStyle: StartSearchStyle = .pill { didSet { saveSetting("start_search_style", startSearchStyle.rawValue) } }
+    @Published var startWidth: StartWidth = .standard { didSet { saveSetting("start_width", startWidth.rawValue) } }
+    /// How much the start page's picture is darkened (0 to 0.7) and blurred (0 to 30 points).
+    @Published var startImageDim = 0.3 { didSet { saveSetting("start_image_dim", String(startImageDim)) } }
+    @Published var startImageBlur = 0.0 { didSet { saveSetting("start_image_blur", String(startImageBlur)) } }
+    @Published var newTabMode: NewTabMode = .home { didSet { saveSetting("new_tab_mode", newTabMode.rawValue) } }
+    @Published var newTabURL = "" { didSet { saveSetting("new_tab_url", newTabURL) } }
+    @Published var startColorA = StartColor.defaultA { didSet { saveSetting("start_color_a", startColorA) } }
+    @Published var startColorB = StartColor.defaultB { didSet { saveSetting("start_color_b", startColorB) } }
     @Published var startBackground: StartBackground = .gradient { didSet { saveSetting("start_background", startBackground.rawValue) } }
     @Published var showGreeting = true { didSet { saveSetting("show_greeting", showGreeting ? "1" : "0") } }
     @Published var showRecentlyClosed = true { didSet { saveSetting("show_recently_closed", showRecentlyClosed ? "1" : "0") } }
@@ -240,6 +279,11 @@ final class BrowserModel: ObservableObject {
     @Published var randomizeFingerprint = false { didSet { saveSetting("fingerprint_noise", randomizeFingerprint ? "1" : "0"); pushWebPolicy() } }
     @Published var deAMP = true { didSet { saveSetting("de_amp", deAMP ? "1" : "0"); pushWebPolicy() } }
     /// Videos and sound start only after a tap or a key press (on by default); sites that need to play by themselves can be let off.
+    @Published var videoSpeeds: [String: Double] = [:] { didSet { saveSetting("video_speeds", encodedMap(videoSpeeds)); pushWebPolicy() } }
+    /// Developer capture of the console and WebSocket activity. Off by default; the page can see it, so it is a choice. Takes effect on the next page load.
+    @Published var devCapture = false { didSet { saveSetting("dev_capture", devCapture ? "1" : "0"); pushWebPolicy() } }
+    @Published var referrerMode: ReferrerMode = .standard { didSet { saveSetting("referrer_mode", referrerMode.rawValue); pushWebPolicy() } }
+    @Published var hideCookieBanners = true { didSet { saveSetting("cookie_banners", hideCookieBanners ? "1" : "0"); pushWebPolicy() } }
     @Published var blockAutoplay = true { didSet { saveSetting("block_autoplay", blockAutoplay ? "1" : "0"); pushWebPolicy() } }
     @Published var autoplayExceptions = Set<String>()
     @Published var youtubeRules = YouTubeAdRules.builtIn { didSet { saveJSON("youtube_rules", youtubeRules); pushWebPolicy() } }
@@ -276,7 +320,16 @@ final class BrowserModel: ObservableObject {
     /// Tabs whose branch is folded in the sidebar when the tab tree is on.
     @Published var collapsedTreeTabs: Set<UInt64> = []
     @Published var tabTree = false { didSet { saveSetting("tab_tree", tabTree ? "1" : "0"); if tabTree { arrangeAsTree() } } }
-    @Published var splitTabID: UInt64? { didSet { if splitTabID == nil { thirdSplitTabID = nil } } }
+    @Published var splitTabID: UInt64? {
+        willSet { if newValue == nil, splitTabID != nil { rememberSplit() } }
+        didSet { if splitTabID == nil { thirdSplitTabID = nil } }
+    }
+    /// Scrolling one panel moves the others with it.
+    @Published var linkedPanes = false
+    var linkTask: Task<Void, Never>?
+    /// The two pages of the split that was closed last.
+    @Published var lastSplit: SplitTemplate?
+    @Published var comparison: PageComparison?
     /// A third and a fourth panel; each is only ever set while the one before it is.
     @Published var thirdSplitTabID: UInt64? { didSet { if thirdSplitTabID == nil { fourthSplitTabID = nil } } }
     @Published var fourthSplitTabID: UInt64?
@@ -302,7 +355,7 @@ final class BrowserModel: ObservableObject {
     let privacy: PrivacyController
     var downloads: DownloadCoordinator { engine.downloads }
     private(set) var core: BrowserCore
-    private let root: String
+    let root: String
     /// This profile's folder on disk (the reading list keeps its articles here).
     var profileFolder: URL { URL(fileURLWithPath: root) }
     private var saveTask: Task<Void, Never>?
@@ -356,13 +409,21 @@ final class BrowserModel: ObservableObject {
         }
         privacy = PrivacyController(engine: engine, cacheDirectory: URL(fileURLWithPath: base).appendingPathComponent("privacy/lists", isDirectory: true),
                                    fetcher: listFetcher)
+        privacy.onSecurityEvent = { [weak self] kind, site, detail in self?.recordSecurity(kind: kind, site: site, detail: detail) }
         privacy.load(from: core)
         profiles = listProfiles(root: base)
         loadUISettings()
+        engine.downloads.onLowDisk = { [weak self] name, needed, free in
+            self?.notice = "Not enough disk space for \(name): it needs \(DownloadStats.bytes(needed)) and \(DownloadStats.bytes(free)) is free."
+        }
         engine.downloads.onFinished = { [weak self] source, filename in
+            if self?.notifyDownloads == true { DownloadNotifier.finished(filename) }
             try? self?.core.recordDownload(url: source?.absoluteString ?? "", filename: filename)
             self?.openFinishedPDFIfWanted(source: source, filename: filename)
             // A card at the foot of the window says it is done; a kind of file that can run code carries its warning in the same card instead of a box to dismiss.
+            if let warning = DownloadSafety.warning(forFilename: filename, from: source) {
+                self?.recordSecurity(kind: "download", site: source?.host ?? "", detail: "\(filename): \(warning)")
+            }
             self?.showDownloadBanner(filename: filename, fileURL: self?.engine.downloads.completed.first, warning: DownloadSafety.warning(forFilename: filename, from: source))
             #if os(iOS)
             // Wallet passes, contact cards and calendar events open in the system sheet that adds them.
@@ -371,6 +432,8 @@ final class BrowserModel: ObservableObject {
         }
         extensionObserver = extensionCenter.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
         attachExtensions()
+        startTabWatch()
+        observeNetwork()
         windows.add(self)
         #if DEBUG
         Self.liveModels.add(self)
@@ -391,6 +454,8 @@ final class BrowserModel: ObservableObject {
         isSecondary = true
         loadUISettings()
         extensionObserver = extensionCenter.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
+        startTabWatch()
+        observeNetwork()
         windows.add(self)
         #if DEBUG
         Self.liveModels.add(self)
@@ -398,6 +463,10 @@ final class BrowserModel: ObservableObject {
     }
 
     private func attachExtensions() {
+        if ExtensionSafeMode.launchRequested {
+            extensionCenter.enterSafeMode()
+            return
+        }
         engine.attachExtensions(center: extensionCenter, profile: profileName,
                                 directory: URL(fileURLWithPath: root).appendingPathComponent("extensions", isDirectory: true), host: self)
     }
@@ -509,7 +578,33 @@ final class BrowserModel: ObservableObject {
     // Privacy and memory (per profile)
     @Published var stripTrackingParameters = true { didSet { saveSetting("strip_tracking", stripTrackingParameters ? "1" : "0") } }
     @Published private(set) var strippedLinkCount = 0
+    /// How many requests the content rules refused, an hour at a time (an estimate: WebKit does not say). Kept per profile, on this device.
+    @Published var blockedStats = BlockedStats()
+    var completionCache: (date: Date, sites: [String])?
+    private var blockedStatsURL: URL { URL(fileURLWithPath: root).appendingPathComponent("blocked-\(profileName).json") }
+
+    func loadBlockedStats() { blockedStats = BlockedStats.load(from: blockedStatsURL) }
+
+    /// Adds what a page just had refused. Private tabs are never recorded.
+    func recordBlocked(_ count: Int, host: String? = nil, privateTab: Bool) {
+        guard count > 0, !privateTab else { return }
+        blockedStats.add(count, host: host.map { $0.hasPrefix("www.") ? String($0.dropFirst(4)) : $0 })
+        blockedStats.save(to: blockedStatsURL)
+    }
+
+    func resetBlockedStats() {
+        blockedStats = BlockedStats()
+        blockedStats.save(to: blockedStatsURL)
+    }
     @Published var memoryMode: MemoryMode = .balanced { didSet { saveSetting("memory_mode", memoryMode.rawValue) } }
+    /// Limits for the Custom profile.
+    @Published var customMemory = CustomMemoryPolicy() { didSet { saveSetting("custom_keep", String(customMemory.keepRecent)); saveSetting("custom_idle", String(customMemory.idleMinutes)) } }
+    /// Switch a Balanced profile to Battery Saver on a low battery or a hot device.
+    @Published var batteryAware = true { didSet { saveSetting("battery_aware", batteryAware ? "1" : "0") } }
+    @Published private(set) var perfLog: [PerfRecord] = []
+    private(set) lazy var governor = ResourceGovernor(model: self)
+    let launchedAt = Date()
+    private var recordedStartup = false
     @Published var keepPinnedTabs = true { didSet { saveSetting("keep_pinned", keepPinnedTabs ? "1" : "0") } }
     @Published private(set) var threatList = ThreatList.empty
     /// Set when the last launches ended before they finished starting: tabs come back, but none is loaded for you.
@@ -584,7 +679,7 @@ final class BrowserModel: ObservableObject {
     func focusAddressBar() {
         #if os(macOS)
         // On a new tab the field in the middle of the page is the one to type in; on a loaded page it is the address bar in the toolbar.
-        if let tab = active, tab.isBlank, !floatingAddressVisible { startFocusTick += 1; return }
+        if let tab = active, tab.isBlank, !floatingAddressVisible, !(newTabMode == .blank && !tab.isPrivate) { startFocusTick += 1; return }
         #endif
         expandChrome()
         // ⌘L with the pill folded away opens the pill first: it is the same pill, expanded.
@@ -622,7 +717,7 @@ final class BrowserModel: ObservableObject {
 
     /// Tabs shown in the strip, sidebar and overview: current group (and privacy set on iOS), pinned first.
     var visibleTabs: [TabController] {
-        let filtered = tabs.filter { $0.id != panelTabID && $0.workspace == activeWorkspace && $0.group == activeGroup && (!separatesPrivate || $0.isPrivate == privateMode) }
+        let filtered = tabs.filter { $0.id != panelTabID && $0.workspace == activeWorkspace && inActiveGroup($0.group) && (!separatesPrivate || $0.isPrivate == privateMode) }
         return filtered.filter(\.pinned) + filtered.filter { !$0.pinned }
     }
 
@@ -749,6 +844,8 @@ final class BrowserModel: ObservableObject {
     /// Tabs that cannot be closed by accident, and named sets of tabs saved to open again later.
     /// Downloads are sorted into folders by kind (Images, Documents…) inside the downloads folder.
     @Published var maxDownloads = DownloadQueueRules.defaultConcurrent { didSet { saveSetting("download_concurrent", String(maxDownloads)); engine.downloads.maxConcurrent = maxDownloads } }
+    @Published var organizeByDomain = false { didSet { saveSetting("organize_downloads_domain", organizeByDomain ? "1" : "0"); engine.downloads.organizeByDomain = organizeByDomain } }
+    @Published var notifyDownloads = true { didSet { saveSetting("download_notify", notifyDownloads ? "1" : "0") } }
     @Published var organizeDownloads = false { didSet { saveSetting("organize_downloads", organizeDownloads ? "1" : "0"); engine.downloads.organize = organizeDownloads } }
     @Published var userScripts: [UserScript] = []
     /// Ask for Touch ID, Face ID or the device passcode before sensitive changes (backup, clearing data, scripts, extensions, protection off).
@@ -762,6 +859,7 @@ final class BrowserModel: ObservableObject {
     /// Text handed to the system's on-device translation sheet; nil when it is not showing.
     @Published var translationText: String?
     @Published private(set) var permissionLog: [PermissionEvent] = []
+    @Published private(set) var securityEvents: [SecurityEvent] = []
     @Published private(set) var lockedTabIDs: Set<UInt64> = []
     @Published private(set) var savedSessions: [SavedSession] = []
     /// The page that opens at launch when Settings says so (http or https only).
@@ -834,7 +932,12 @@ final class BrowserModel: ObservableObject {
         downloads.store = profileFolder.appendingPathComponent("downloads", isDirectory: true)
         pushWebPolicy()
         if persistsProfileChoice {
-            safeStart = LaunchGuard.isLoop(unfinishedLaunches: LaunchGuard.begin(root: root))
+            let unfinished = LaunchGuard.begin(root: root)
+            safeStart = LaunchGuard.isLoop(unfinishedLaunches: unfinished)
+            DiagLog.folder = URL(fileURLWithPath: root)
+            if unfinished > 0 { ReliabilityStats.shared.noteUnexpectedTermination() }
+            DiagLog.record("launch", safeStart ? "Started in safe mode after repeated crashes." : "Started.")
+            loadCheckpoints()
             let folder = root
             Task { try? await Task.sleep(for: .seconds(15)); LaunchGuard.markHealthy(root: folder) }
         }
@@ -843,8 +946,17 @@ final class BrowserModel: ObservableObject {
         openingFirstTab = true
         restoreOrOpenFirstTab()
         openingFirstTab = false
+        if !isSecondary, let id = workbench.startupWorkflow, let flow = workbench.workflows.first(where: { $0.id == id }) { workbench.run(flow, source: "at start") }
         if !isSecondary { windows.loadPendingRestores(from: self) }
+        #if DEBUG
+        // For taking screenshots of a debug build: `-ShotSheet workbench -ShotPart Network` opens that screen after start-up.
+        if let name = UserDefaults.standard.string(forKey: "ShotSheet"), let wanted = Sheet(rawValue: name) {
+            Task { @MainActor [weak self] in try? await Task.sleep(for: .seconds(2.5)); self?.sheet = wanted }
+        }
+        #endif
         closeLeftoverScratchTabs()
+        Task { await removeLeftoverTemporaryProfiles() }
+        applyHistoryRetention()
         if lifecycle == nil {
             let manager = TabLifecycle(model: self)
             manager.start()
@@ -1055,7 +1167,13 @@ final class BrowserModel: ObservableObject {
     @discardableResult
     func newTab() -> TabController {
         Haptics.tap()
-        return openTab(url: nil, isPrivate: separatesPrivate ? privateMode : false)
+        let tab = openTab(url: nil, isPrivate: separatesPrivate ? privateMode : false)
+        // Private tabs keep their own page whatever the choice. Otherwise: an address of your choice, or an empty page with the address bar ready.
+        if !tab.isPrivate {
+            if newTabMode == .custom, let page = NewTabMode.customURL(from: newTabURL) { tab.load(page); focusAddressBar() }
+            else if newTabMode == .blank { focusAddressBar() }
+        }
+        return tab
     }
 
     func select(_ id: UInt64) {
@@ -1066,12 +1184,15 @@ final class BrowserModel: ObservableObject {
         if let previous = active, previous.id != id {
             previous.lastActive = Date()
             Task { await previous.captureSnapshot() }
+            // Chat pages scroll inside their own list; remember where, so coming back does not leave you at the first message.
+            if !previous.isDiscarded, !previous.isBlank { Task { await previous.engine.saveScrollState() } }
         }
         let previousTab = active
         expandChrome()
         activeID = id
         if let tab = active { activeFixedTop = tab.fixedTop; activeFixedBottom = tab.fixedBottom }
         active?.ensureLoaded()
+        if let shown = active, shown.id != previousTab?.id, shown.hasLoadedPage, !shown.isDiscarded { shown.engine.restoreScrollState() }
         if let current = active, !current.isPrivate { extensionCenter.tabActivated(current, previous: previousTab.flatMap { $0.isPrivate ? nil : $0 }) }
         if let tab = active, tab.workspace != activeWorkspace { activeWorkspace = tab.workspace }
         if let tab = active, tab.group != activeGroup { activeGroup = tab.group }
@@ -1107,6 +1228,7 @@ final class BrowserModel: ObservableObject {
     func closeTab(id: UInt64, force: Bool = false) {
         Haptics.tap()
         guard force || !lockedTabIDs.contains(id) else { notice = "That tab is locked. Unlock it to close it."; return }
+        if !force, needsPinnedConfirmation(id) { confirmClosePinned(id); return }
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
         let wasActive = id == activeID
         adoptChildren(ofClosing: id)
@@ -1153,6 +1275,7 @@ final class BrowserModel: ObservableObject {
     }
 
     func closeOtherTabs(except id: UInt64) {
+        if visibleTabs.count > 5 { takeCheckpoint(reason: "Before closing other tabs", force: true) }
         for tab in visibleTabs where tab.id != id && !tab.pinned { closeTab(id: tab.id) }
     }
 
@@ -1338,9 +1461,7 @@ final class BrowserModel: ObservableObject {
     }
 
     /// The memory mode in force: Memory Saver while Low Power Mode is on, when the user allows it.
-    var effectiveMemoryMode: MemoryMode {
-        lowPowerSavesMemory && ProcessInfo.processInfo.isLowPowerModeEnabled && memoryMode == .balanced ? .saver : memoryMode
-    }
+    var effectiveMemoryMode: MemoryMode { governor.effective.mode }
 
     static func decodeMap<T: Decodable>(_ json: String?, as: T.Type) -> [String: T] {
         guard let data = json?.data(using: .utf8) else { return [:] }
@@ -1420,6 +1541,19 @@ final class BrowserModel: ObservableObject {
     var fourthSplitTab: TabController? { thirdSplitTab == nil ? nil : tabs.first { $0.id == fourthSplitTabID } }
 
     /// The tabs showing in panels, in order, each once: the active tab, then the second, third and fourth panels.
+    /// The split panels in the order they are drawn. It does not change when you click a panel: the clicked page becomes the active one, but it stays where it is.
+    func orderedSplitPanels() -> [TabController] {
+        let members = splitPanels
+        let ids = members.map(\.id)
+        guard ids.count > 1 else { splitDisplay = []; return members }
+        var fresh = ids.filter { !splitDisplay.contains($0) }
+        // A panel that went away is replaced, in its own place, by the one that took its turn.
+        var order: [UInt64] = splitDisplay.compactMap { ids.contains($0) ? $0 : (fresh.isEmpty ? nil : fresh.removeFirst()) }
+        order += fresh
+        splitDisplay = order
+        return order.compactMap { id in members.first { $0.id == id } }
+    }
+
     var splitPanels: [TabController] {
         guard let active else { return [] }
         var out = [active]
@@ -1510,25 +1644,27 @@ final class BrowserModel: ObservableObject {
     func renameGroup(_ old: String, to new: String) {
         let clean = new.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty, clean.count <= 40, !groupNames.contains(clean),
-              let i = groupNames.firstIndex(of: old) else { return }
-        groupNames[i] = clean
-        for tab in tabs where tab.group == old {
-            tab.group = clean
-            try? core.setTabGroup(tabId: tab.id, group: clean)
+              groupNames.contains(old) else { return }
+        // A group's name is the front of every subgroup's name, so they follow it.
+        func renamed(_ name: String) -> String { name == old ? clean : clean + name.dropFirst(old.count) }
+        groupNames = groupNames.map { GroupPath.isInside($0, of: old) ? renamed($0) : $0 }
+        for tab in tabs where GroupPath.isInside(tab.group, of: old) {
+            tab.group = renamed(tab.group)
+            try? core.setTabGroup(tabId: tab.id, group: tab.group)
         }
-        if activeGroup == old { activeGroup = clean }
+        if GroupPath.isInside(activeGroup, of: old) { activeGroup = renamed(activeGroup) }
         saveGroupNames()
         saveSoon()
     }
 
     /// Deleting a group keeps its tabs; they return to the ungrouped set.
     func deleteGroup(_ name: String) {
-        for tab in tabs where tab.group == name {
+        for tab in tabs where GroupPath.isInside(tab.group, of: name) {
             tab.group = ""
             try? core.setTabGroup(tabId: tab.id, group: "")
         }
-        groupNames.removeAll { $0 == name }
-        if activeGroup == name { selectGroup("") }
+        groupNames.removeAll { GroupPath.isInside($0, of: name) }
+        if GroupPath.isInside(activeGroup, of: name) { selectGroup("") }
         saveGroupNames()
         saveSoon()
     }
@@ -1565,8 +1701,19 @@ final class BrowserModel: ObservableObject {
         if let first = visibleTabs.first { select(first.id) } else { newTab() }
     }
 
+    /// The group on show holds its own tabs and, if it has subgroups, theirs. "All Tabs" (no group) holds only ungrouped tabs.
+    func inActiveGroup(_ group: String) -> Bool {
+        activeGroup.isEmpty ? group.isEmpty : GroupPath.isInside(group, of: activeGroup)
+    }
+
+    func createSubgroup(under parent: String, named name: String) {
+        let leaf = name.replacingOccurrences(of: String(GroupPath.separator), with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !leaf.isEmpty else { return }
+        createGroup(parent + String(GroupPath.separator) + leaf)
+    }
+
     func tabCount(inGroup name: String) -> Int {
-        tabs.filter { $0.workspace == activeWorkspace && $0.group == name && (!separatesPrivate || !$0.isPrivate) }.count
+        tabs.filter { $0.workspace == activeWorkspace && (name.isEmpty ? $0.group.isEmpty : GroupPath.isInside($0.group, of: name)) && (!separatesPrivate || !$0.isPrivate) }.count
     }
 
     private func mergeGroupNamesFromTabs() {
@@ -1606,6 +1753,7 @@ final class BrowserModel: ObservableObject {
         case .url(let u), .search(let u): target = u
         }
         guard let url = URL(string: target) else { return }
+        if offerPreferredProfile(for: url) { return }
         (active ?? openTab(url: nil, isPrivate: false)).load(url)
     }
 
@@ -1654,8 +1802,21 @@ final class BrowserModel: ObservableObject {
         saveSoon()
     }
 
+    /// Runs the memory policy now as if the system had asked for memory.
+    func lifecycleRun() async { _ = await lifecycle?.run(.warning) }
+
+    func recordPerf(_ name: String, millis: Double) {
+        perfLog = PerfLog.add(PerfRecord(name: name, millis: millis), to: perfLog)
+        saveSetting("perf_log", (try? String(data: JSONEncoder().encode(perfLog), encoding: .utf8)) ?? "[]")
+    }
+
     func didFinishLoading(_ tab: TabController) {
         guard let url = tab.url else { return }
+        // How long from opening the window to the first page being ready; kept to spot a launch that has become slower.
+        if !recordedStartup, !isSecondary {
+            recordedStartup = true
+            recordPerf("startup-first-page", millis: Date().timeIntervalSince(launchedAt) * 1000)
+        }
         // A scratch tab leaves no history and no saved address.
         if tabMeta[tab.id]?.scratch != true { try? core.commitNavigation(tabId: tab.id, url: url.absoluteString, title: tab.title) }
         if tab.id == activeID { refreshBookmarkState() }
@@ -1855,6 +2016,19 @@ final class BrowserModel: ObservableObject {
         saveSetting("permission_log", (try? String(data: JSONEncoder().encode(permissionLog), encoding: .utf8)) ?? "[]")
     }
 
+    /// Keeps a line about something the browser did for safety. Private tabs are never recorded.
+    func recordSecurity(kind: String, site: String, detail: String, isPrivate: Bool = false) {
+        guard !isPrivate else { return }
+        securityEvents.insert(SecurityEvent(kind: kind, site: site, detail: detail), at: 0)
+        if securityEvents.count > 200 { securityEvents.removeLast(securityEvents.count - 200) }
+        saveSetting("security_events", (try? String(data: JSONEncoder().encode(securityEvents), encoding: .utf8)) ?? "[]")
+    }
+
+    func clearSecurityEvents() {
+        securityEvents = []
+        saveSetting("security_events", "[]")
+    }
+
     func clearPermissionLog() {
         permissionLog = []
         saveSetting("permission_log", "[]")
@@ -1906,7 +2080,16 @@ final class BrowserModel: ObservableObject {
         bookmarkTags = Self.decodeMap(get("bookmark_tags"), as: [String].self)
         readingList = ReadingStore.loadIndex(root: profileFolder)
         organizeDownloads = get("organize_downloads") == "1"
+        organizeByDomain = get("organize_downloads_domain") == "1"
+        updateDownloadFolder()
+        notifyDownloads = get("download_notify") != "0"
         maxDownloads = DownloadQueueRules.maxConcurrentChoices.contains(Int(get("download_concurrent") ?? "") ?? 0) ? Int(get("download_concurrent") ?? "")! : DownloadQueueRules.defaultConcurrent
+        tabSchedules = ((get("tab_schedules")?.data(using: .utf8)).flatMap { try? JSONDecoder().decode([TabSchedule].self, from: $0) }) ?? []
+        protectPinned = get("protect_pinned") != "0"
+        keepMediaHistory = get("media_history_on") != "0"
+        loadReaderStyle()
+        mediaHistory = ((get("media_history")?.data(using: .utf8)).flatMap { try? JSONDecoder().decode([MediaHistoryEntry].self, from: $0) }) ?? []
+        securityEvents = ((get("security_events")?.data(using: .utf8)).flatMap { try? JSONDecoder().decode([SecurityEvent].self, from: $0) }) ?? []
         permissionLog = ((get("permission_log")?.data(using: .utf8)).flatMap { try? JSONDecoder().decode([PermissionEvent].self, from: $0) }) ?? []
         lockedTabIDs = Set(((get("locked_tabs")?.data(using: .utf8)).flatMap { try? JSONDecoder().decode([UInt64].self, from: $0) }) ?? [])
         savedSessions = ((get("saved_sessions")?.data(using: .utf8)).flatMap { try? JSONDecoder().decode([SavedSession].self, from: $0) }) ?? []
@@ -1925,6 +2108,7 @@ final class BrowserModel: ObservableObject {
         tabMeta = Dictionary(uniqueKeysWithValues: Self.decodeMap(get("tab_meta"), as: TabMeta.self).compactMap { key, value in UInt64(key).map { ($0, value) } })
         containers = Self.decodeMap(get("containers"), as: [String].self)["list"] ?? []
         splitTemplates = Self.decodeMap(get("split_templates"), as: [SplitTemplate].self)["list"] ?? []
+        lastSplit = Self.decodeMap(get("last_split"), as: [SplitTemplate].self)["list"]?.first
         tabTree = get("tab_tree") == "1"
         loadLoginSettings(get)
         spotlightBookmarks = get("spotlight_bookmarks") == "1"
@@ -1990,6 +2174,12 @@ final class BrowserModel: ObservableObject {
         groupColors = Self.decodeMap(get("group_colors"), as: String.self)
         stripTrackingParameters = get("strip_tracking") != "0"
         memoryMode = MemoryMode(rawValue: get("memory_mode") ?? "") ?? .balanced
+        customMemory = CustomMemoryPolicy(keepRecent: CustomMemoryPolicy.keepChoices.contains(Int(get("custom_keep") ?? "") ?? 0) ? Int(get("custom_keep")!)! : 5,
+                                          idleMinutes: CustomMemoryPolicy.idleChoices.contains(Int(get("custom_idle") ?? "") ?? 0) ? Int(get("custom_idle")!)! : 15)
+        batteryAware = get("battery_aware") != "0"
+        referrerMode = ReferrerMode(rawValue: get("referrer_mode") ?? "") ?? .standard
+        devCapture = get("dev_capture") == "1"
+        perfLog = ((get("perf_log")?.data(using: .utf8)).flatMap { try? JSONDecoder().decode([PerfRecord].self, from: $0) }) ?? []
         keepPinnedTabs = get("keep_pinned") != "0"
         threatList = ThreatListStore.load(root: root)
         sidebarVisible = !sidebarAutoHide && resolveLayout(preset: layoutPreset, customTabLayout: tabLayout, customSidebarVisible: false, customSingleToolbar: singleToolbarCustom).sidebarVisible
@@ -2025,6 +2215,18 @@ final class BrowserModel: ObservableObject {
         accent = AccentChoice(rawValue: get("accent") ?? "") ?? .teal
         Theme.accent = accent.color
         startBackground = StartBackground(rawValue: get("start_background") ?? "") ?? .gradient
+        newTabMode = NewTabMode(rawValue: get("new_tab_mode") ?? "") ?? .home
+        loadStartImage()
+        startTitle = String((get("start_title") ?? "").prefix(40))
+        startFont = StartFont(rawValue: get("start_font") ?? "") ?? .rounded
+        startSearchStyle = StartSearchStyle(rawValue: get("start_search_style") ?? "") ?? .pill
+        startWidth = StartWidth(rawValue: get("start_width") ?? "") ?? .standard
+        startImageDim = min(max(Double(get("start_image_dim") ?? "") ?? 0.3, 0), 0.7)
+        startImageBlur = min(max(Double(get("start_image_blur") ?? "") ?? 0, 0), 30)
+        historyRetentionDays = HistoryRetention.choices.contains(Int(get("history_retention_days") ?? "") ?? -1) ? Int(get("history_retention_days")!)! : 0
+        newTabURL = get("new_tab_url") ?? ""
+        startColorA = StartColor.components(get("start_color_a") ?? "") != nil ? get("start_color_a")! : StartColor.defaultA
+        startColorB = StartColor.components(get("start_color_b") ?? "") != nil ? get("start_color_b")! : StartColor.defaultB
         showGreeting = get("show_greeting") != "0"
         showRecentlyClosed = get("show_recently_closed") != "0"
         tabPreviews = get("tab_previews") != "0"
@@ -2120,8 +2322,10 @@ final class BrowserModel: ObservableObject {
         }
     }
 
-    func switchProfile(_ name: String) {
+    func switchProfile(_ name: String, thenOpen url: URL? = nil) {
         guard name != profileName, let newCore = try? BrowserCore.open(root: root, profile: name) else { return }
+        let leaving = profileName
+        pendingProfileURL = url
         saveNow()
         tabs.forEach { $0.shutdown() }
         tabs.removeAll()
@@ -2129,13 +2333,16 @@ final class BrowserModel: ObservableObject {
         engine.privateSessionEnded()
         core = newCore
         profileName = name
-        if persistsProfileChoice { UserDefaults.standard.set(name, forKey: "profile") }
+        // A throw-away profile is never the one the app starts with next time.
+        if persistsProfileChoice, !isTemporaryProfile(name) { UserDefaults.standard.set(name, forKey: "profile") }
         loadUISettings()
         privacy.load(from: core)
         attachExtensions()
         Task { [self] in
             await privacy.apply()
             restoreOrOpenFirstTab()
+            if let page = pendingProfileURL { pendingProfileURL = nil; openTab(url: page, isPrivate: false) }
+            if isTemporaryProfile(leaving) { await removeLeftoverTemporaryProfiles() }
         }
     }
 
@@ -2177,11 +2384,11 @@ final class BrowserModel: ObservableObject {
     static let backupSettingKeys: Set<String> = [
         "accent", "address_bar", "address_bar_items", "appearance", "density", "keep_pinned", "layout_preset", "memory_mode", "show_favorites", "show_continue",
         "show_frequent", "show_greeting", "show_recently_closed", "sidebar_autohide", "sidebar_position", "sidebar_rail",
-        "sidebar_width", "single_toolbar", "split_orientation", "start_background", "startup", "startup_workspace",
+        "organize_downloads_domain", "download_notify", "last_split", "start_title", "start_font", "start_search_style", "start_width", "start_image_dim", "start_image_blur", "history_retention_days", "new_tab_mode", "new_tab_url", "start_color_a", "start_color_b", "reader_style", "media_history_on", "referrer_mode", "custom_keep", "custom_idle", "battery_aware", "security_events", "tab_schedules", "protect_pinned", "sidebar_width", "single_toolbar", "split_orientation", "start_background", "startup", "startup_workspace",
         "strip_tracking", "tab_groups", "tab_layout", "tab_previews", "tint_toolbar", "toolbar_autohide", "toolbar_items",
         "workspaces", "double_click", "collapse_on_scroll", "search_template", "search_suggestions", "speed_pill", "pill_collapsed", "site_icons", "shortcuts", "homepage", "saved_sessions", "organize_downloads", "site_notes", "search_shortcuts", "bookmark_tags", "site_styles", "phone_toolbar", "address_display", "address_icon", "search_panel_bottom", "search_panel_bottom2", "swipe_address", "app_links", "app_link_sites", "blur_private_switcher", "permission_expiry", "favorites_order", "overview_style", "overview_grouped", "overview_sort", "dark_pages", "dark_sites", "website_appearance", "site_appearance", "theme", "theme_custom", "low_power_memory", "clear_on_quit", "remember_reading", "keep_form_drafts", "site_zoom", "group_colors",
         "save_logins", "mouse_gestures", "mouse_gesture_map", "site_open_rules", "download_concurrent", "spotlight_bookmarks", "vim_on", "vim_keymap", "workflows", "download_rules", "extension_profiles", "site_delete_rules", "site_user_agents", "containers", "split_templates", "tab_tree", "block_webrtc", "webrtc_exceptions",
-        "site_js_off", "never_sleep_sites", "fingerprint_noise", "fingerprint_exceptions", "de_amp", "video_ads", "user_themes", "start_tile", "block_autoplay", "autoplay_exceptions",
+        "site_js_off", "never_sleep_sites", "fingerprint_noise", "fingerprint_exceptions", "de_amp", "video_ads", "cookie_banners", "user_themes", "start_tile", "block_autoplay", "autoplay_exceptions",
         "block_popups", "popup_allowed_hosts", "youtube_rules_auto", "command_chains", "web_panels", "theme_schedule", "hidden_menu_items", "hover_previews", "hover_delay", "tab_stacks", "address_sources", "tab_tree", "sidebar_footer",
     ]
 
@@ -2377,6 +2584,29 @@ extension BrowserModel {
             .init(id: "reading-list", title: "Reading List", subtitle: "Articles saved to read offline", symbol: "books.vertical", shortcut: "") { [self] in sheet = .readingList },
             .init(id: "add-reading", title: "Add to Reading List", subtitle: "", symbol: "text.badge.plus", shortcut: "") { [self] in Task { await addToReadingList() } },
             .init(id: "highlight", title: "Highlight Selection", subtitle: "In a saved article", symbol: "highlighter", shortcut: "") { [self] in Task { await highlightSelection() } },
+            .init(id: "sort-site", title: "Sort Tabs by Website", subtitle: "", symbol: "arrow.up.arrow.down", shortcut: "") { [self] in sortTabs(by: .website) },
+            .init(id: "sort-title", title: "Sort Tabs by Title", subtitle: "", symbol: "textformat", shortcut: "") { [self] in sortTabs(by: .title) },
+            .init(id: "sort-used", title: "Sort Tabs by Last Used", subtitle: "", symbol: "clock", shortcut: "") { [self] in sortTabs(by: .lastUsed) },
+            .init(id: "mute-all", title: "Mute All Tabs Playing Sound", subtitle: "", symbol: "speaker.slash", shortcut: "") { [self] in muteAllPlaying(true) },
+            .init(id: "idle-groups", title: "Put Idle Groups to Sleep", subtitle: "Groups unused for 30 minutes", symbol: "moon.zzz", shortcut: "") { [self] in Task { await sleepInactiveGroups() } },
+            .init(id: "snooze-tab", title: "Snooze This Tab Until Tomorrow", subtitle: "", symbol: "zzz", shortcut: "") { [self] in if let tab = active { snooze(tab, until: SnoozeChoice.tomorrow.date()) } },
+            .init(id: "reader-bigger", title: "Reader: Larger Text", subtitle: "", symbol: "textformat.size.larger", shortcut: "") { [self] in changeReaderSize(by: 2) },
+            .init(id: "reader-smaller", title: "Reader: Smaller Text", subtitle: "", symbol: "textformat.size.smaller", shortcut: "") { [self] in changeReaderSize(by: -2) },
+            .init(id: "cite-apa", title: "Copy Citation (APA)", subtitle: "", symbol: "quote.opening", shortcut: "") { [self] in copyCitation(.apa) },
+            .init(id: "cite-mla", title: "Copy Citation (MLA)", subtitle: "", symbol: "quote.opening", shortcut: "") { [self] in copyCitation(.mla) },
+            .init(id: "copy-highlights", title: "Copy Highlights with Citation", subtitle: "", symbol: "highlighter", shortcut: "") { [self] in copyHighlights() },
+            .init(id: "translate-selection", title: "Translate Selected Text", subtitle: "", symbol: "character.bubble", shortcut: "") { [self] in Task { await translateSelection() } },
+            .init(id: "page-language", title: "What Language Is This Page?", subtitle: "", symbol: "globe", shortcut: "") { [self] in Task { await detectPageLanguage() } },
+            .init(id: "open-clipboard-links", title: "Open Links from the Clipboard", subtitle: "Each address in its own tab", symbol: "link.badge.plus", shortcut: "") { [self] in Task { await openLinksFromClipboard() } },
+            .init(id: "clean-clipboard", title: "Remove Tracking from Links on the Clipboard", subtitle: "", symbol: "scissors", shortcut: "") { [self] in transformClipboard(.cleanLinks) },
+            .init(id: "reopen-split", title: "Reopen Last Split Layout", subtitle: "", symbol: "rectangle.split.2x1", shortcut: "") { [self] in reopenLastSplit() },
+            .init(id: "compare-panels", title: "Compare the Two Split Pages", subtitle: "", symbol: "rectangle.split.2x1.fill", shortcut: "") { [self] in Task { await comparePanels() } },
+            .init(id: "link-panels", title: "Link Scrolling in Split View", subtitle: "", symbol: "link", shortcut: "") { [self] in setLinkedPanes(!linkedPanes) },
+            .init(id: "time-machine", title: "Session Time Machine: Go Back to Earlier Tabs", subtitle: "", symbol: "clock.arrow.circlepath", shortcut: "") { [self] in sheet = .timeMachine },
+            .init(id: "diag-report", title: "Copy a Diagnostic Report", subtitle: "No addresses or titles", symbol: "stethoscope", shortcut: "") { [self] in
+                copyToPasteboard(ReliabilityStats.shared.report(tabs: tabs.count, sleeping: tabs.filter(\.isDiscarded).count, extensions: extensionCenter.extensions.filter(\.enabled).count)); notice = "Report copied."
+            },
+            .init(id: "bookmark-tools", title: "Bookmark Tools: Duplicates, Broken Links, Collections", subtitle: "", symbol: "bookmark.square", shortcut: "") { [self] in sheet = .bookmarkTools },
             .init(id: "page-note", title: "Note for This Page", subtitle: "", symbol: "note.text", shortcut: "") { [self] in sheet = .note },
             .init(id: "restore-text", title: "Restore Typed Text", subtitle: "", symbol: "text.badge.checkmark", shortcut: "") { [self] in Task { await restoreTypedText() } },
             .init(id: "smart-selection", title: "Selection Actions: Search, Define, Convert, Remind", subtitle: "", symbol: "text.cursor", shortcut: "") { [self] in sheet = .selection },

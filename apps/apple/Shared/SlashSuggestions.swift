@@ -23,9 +23,20 @@ extension BrowserModel {
         func matching() -> [TabController] { normal.filter { TabMatch.matches(title: $0.displayTitle, url: $0.url?.absoluteString ?? "", words: word) } }
         switch command {
         case .tabs:
-            return matching().prefix(8).map { tab in
+            let here = matching().prefix(8).map { tab in
                 Suggestion(kind: .openTab, title: tab.displayTitle, subtitle: displayHost(tab.url) + (tab.isDiscarded ? " · asleep" : ""), target: tab.url?.absoluteString ?? "", tabID: tab.id)
             }
+            // Tabs in the other windows too: choosing one brings it into this window.
+            let elsewhere: [Suggestion] = otherWindows.flatMap { other in
+                other.model.tabs.filter { $0.isPrivate == activeIsPrivate && !$0.isBlank && TabMatch.matches(title: $0.displayTitle, url: $0.url?.absoluteString ?? "", words: word) }
+                    .prefix(4).map { tab in
+                        self.command(tab.displayTitle, displayHost(tab.url) + " · in another window, bring it here", id: "slash-bring-\(tab.id)") { [weak self, weak other = other.model] in
+                            guard let self, let other else { return }
+                            _ = other.moveTab(tab.id, to: self)
+                        }
+                    }
+            }
+            return Array(here) + elsewhere
         case .close:
             let list = matching().filter { !$0.pinned && !isLocked($0) && $0.id != activeID }
             guard !word.isEmpty else { return [Suggestion(kind: .command, title: "/close <words>", subtitle: "Type words from a tab's title or address", target: "slash:/close ", action: nil)] }

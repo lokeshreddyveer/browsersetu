@@ -2,18 +2,20 @@ import Foundation
 
 /// One thing the browser knows about, from any source.
 struct SearchEntry: Identifiable, Equatable {
-    enum Kind: String, CaseIterable { case tab, bookmark, history, download, research, note, command
+    enum Kind: String, CaseIterable { case tab, bookmark, history, download, reading, closed, session, research, note, command
         var title: String {
             switch self { case .tab: "Open tabs"; case .bookmark: "Bookmarks"; case .history: "History"; case .download: "Downloads"
+                case .reading: "Reading list"; case .closed: "Recently closed"; case .session: "Saved sessions"
                 case .research: "Research"; case .note: "Notes"; case .command: "Commands" }
         }
         var symbol: String {
             switch self { case .tab: "square.on.square"; case .bookmark: "star"; case .history: "clock"; case .download: "arrow.down.circle"
+                case .reading: "book"; case .closed: "arrow.uturn.backward"; case .session: "rectangle.stack"
                 case .research: "books.vertical"; case .note: "note.text"; case .command: "command" }
         }
         /// A tab you already have open is worth more than the same page in history.
         var weight: Double {
-            switch self { case .tab: 30; case .command: 24; case .bookmark: 20; case .research: 16; case .note: 14; case .download: 10; case .history: 0 }
+            switch self { case .tab: 30; case .command: 24; case .bookmark: 20; case .reading: 18; case .session: 17; case .research: 16; case .closed: 12; case .note: 14; case .download: 10; case .history: 0 }
         }
     }
     var kind: Kind

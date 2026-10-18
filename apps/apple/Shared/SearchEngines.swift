@@ -21,7 +21,7 @@ enum SearchEngines {
     ]
 
     /// The engine a profile uses until the user picks another.
-    static var defaultEngine: SearchEngine { presets[0] }
+    static var defaultEngine: SearchEngine { presets.first { $0.id == "google" } ?? presets[0] }
 
     /// The preset whose address is exactly `template`, or nil for a custom one.
     static func preset(for template: String) -> SearchEngine? {

@@ -29,6 +29,7 @@ struct SitePrivacyView: View {
                 Section { Text("Open a page to see what its website has stored.").foregroundStyle(.secondary) }
             }
             rulesSection
+            SecurityEventsSection()
             PermissionActivitySection()
         }
         .task(id: host) { await refresh() }

@@ -102,7 +102,7 @@ struct PhoneRootView: View {
                         .clipped()
                         .allowsHitTesting(dockOnItsOwnStrip)
                 }
-                if model.addressBarPosition == .top, let tab = model.active, !showsDock {
+                if model.addressBarPosition == .top || landscape, let tab = model.active, !showsDock {
                     PhoneAddressArea(tab: tab).transition(.move(edge: .top).combined(with: .opacity))
                 }
                 if let tab = model.active {
@@ -131,7 +131,7 @@ struct PhoneRootView: View {
                 } else {
                     Color.platformBackground
                 }
-                if model.addressBarPosition == .bottom, let tab = model.active, !showsDock {
+                if model.addressBarPosition == .bottom, !landscape, let tab = model.active, !showsDock {
                     PhoneAddressArea(tab: tab).transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
@@ -204,10 +204,15 @@ struct PhoneAddressArea: View {
     @ObservedObject var tab: TabController
 
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+    private var landscapePhone: Bool { UIDevice.current.userInterfaceIdiom == .phone && verticalSizeClass == .compact }
 
     var body: some View {
         Group {
-            if sizeClass == .regular && UIDevice.current.userInterfaceIdiom == .pad {
+            if landscapePhone {
+                // As in Safari on its side: one slim row along the top. Back and forward, the address, then share, tabs and more.
+                PhoneLandscapeBar(tab: tab, address: model.addressBar)
+            } else if sizeClass == .regular && UIDevice.current.userInterfaceIdiom == .pad {
                 // A wide screen has room for everything on one line: the controls, then the address field.
                 HStack(spacing: 14) {
                     if !model.addressBar.isEditing { PhoneToolbar(tab: tab).frame(width: 400).transition(.opacity) }
@@ -222,9 +227,46 @@ struct PhoneAddressArea: View {
                 }
             }
         }
-        .padding(.horizontal, 12).padding(.vertical, 8)
+        .padding(.horizontal, landscapePhone ? 8 : 12).padding(.vertical, landscapePhone ? 3 : 8)
         .themedBar(fallback: .bar)
         .motion(.spring(response: 0.34, dampingFraction: 0.88), value: model.addressBar.isEditing)
+    }
+}
+
+/// The phone's bar when it is held on its side: a single slim row, like Safari's.
+struct PhoneLandscapeBar: View {
+    @EnvironmentObject var model: BrowserModel
+    @ObservedObject var tab: TabController
+    @ObservedObject var address: AddressBarController
+
+    var body: some View {
+        HStack(spacing: 2) {
+            if !address.isEditing {
+                if model.shows(.backForward) {
+                    item("chevron.left", disabled: !tab.canGoBack, label: "Back") { tab.goBack() }
+                    item("chevron.right", disabled: !tab.canGoForward, label: "Forward") { tab.goForward() }
+                }
+            }
+            PhoneAddressBar(tab: tab, address: address, compact: true)
+                .modifier(TabSwipe(allowsOverview: !address.isEditing))
+                .padding(.horizontal, 4)
+            if !address.isEditing {
+                if let url = tab.url, !tab.isBlank { ShareLink(item: url) { Image(systemName: "square.and.arrow.up").frame(width: 40, height: 30) }.accessibilityLabel("Share") }
+                Button { model.showOverview() } label: {
+                    Text("\(model.visibleTabs.count)").font(.footnote.bold()).frame(width: 22, height: 22)
+                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(lineWidth: 1.5)).frame(width: 40, height: 30)
+                }
+                .accessibilityLabel("Tab overview")
+                PhoneMoreMenu(tab: tab).transition(.opacity)
+            }
+        }
+        .motion(.easeOut(duration: 0.2), value: address.isEditing)
+    }
+
+    private func item(_ symbol: String, disabled: Bool, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) { Image(systemName: symbol).frame(width: 36, height: 30) }
+            .disabled(disabled).accessibilityLabel(label)
+            .contextMenu { if symbol == "chevron.left" { NavHistoryItems(tab: tab, back: true) } else { NavHistoryItems(tab: tab, back: false) } }
     }
 }
 
@@ -234,6 +276,8 @@ struct PhoneAddressBar: View {
     @ObservedObject var address: AddressBarController
     /// Used by the search panel, which opens because the user asked to type.
     var focusOnAppear = false
+    /// A shorter field, for the slim bar of a phone held on its side.
+    var compact = false
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -264,8 +308,8 @@ struct PhoneAddressBar: View {
         }
         .motion(.easeOut(duration: 0.2), value: address.isEditing)
         .motion(.easeOut(duration: 0.18), value: tab.isLoading)
-        .padding(.horizontal, 12).padding(.vertical, 10)
-        .background(.quaternary, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(.horizontal, compact ? 10 : 12).padding(.vertical, compact ? 6 : 10)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: compact ? 12 : 16, style: .continuous))
         .onAppear {
             sync()
             if focusOnAppear {
@@ -359,7 +403,7 @@ struct PhoneToolbar: View {
                 .accessibilityLabel("Tab overview")
                 Spacer()
             }
-            Menu {
+        Menu {
                 Button("New Tab", systemImage: "plus") { model.newTab() }
                 Button("New Private Tab", systemImage: "eye.slash") { model.openTab(url: nil, isPrivate: true) }
                 Button(model.activeBookmarked ? "Remove Bookmark" : "Add Bookmark", systemImage: "star") { model.toggleBookmark() }.disabled(tab.isBlank)
@@ -379,6 +423,8 @@ struct PhoneToolbar: View {
     private func button(_ symbol: String, disabled: Bool, label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) { Image(systemName: symbol).frame(width: 44, height: 32) }
             .disabled(disabled).accessibilityLabel(label)
+            // Press and hold Back or Forward for the pages behind or ahead.
+            .contextMenu { if symbol == "chevron.left" { NavHistoryItems(tab: tab, back: true) } else if symbol == "chevron.right" { NavHistoryItems(tab: tab, back: false) } }
     }
 }
 

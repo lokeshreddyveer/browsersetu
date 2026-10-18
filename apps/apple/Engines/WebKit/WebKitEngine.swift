@@ -235,6 +235,7 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
     func performLinkAction(_ action: LinkAction) { if let url = hoveredLink { events?.engineLinkAction(url, action) } }
     private let downloads: WebKitDownloads
     private var observers: [NSKeyValueObservation] = []
+    private var redirectWatch = RedirectWatch()
     #if os(iOS)
     private var lastScrollY: CGFloat?
     private var lastBoundsHeight: CGFloat = 0
@@ -313,13 +314,16 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
     @objc private func noteTap() { lastTap = Date() }
 
     private func checkMedia() {
-        guard webView.window != nil, mediaGuardActive() else { mediaStartedByPerson = false; return }
+        // Never in the background or while the video is full screen: play pressed on the lock screen, a headphone button or the player's own controls
+        // is the person asking, and pausing it again is what made video feel broken.
+        guard webView.window != nil, UIApplication.shared.applicationState == .active, mediaGuardActive() else { mediaStartedByPerson = false; return }
+        UserTouchClock.shared.install()
         webView.requestMediaPlaybackState { [weak self] state in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 guard state == .playing else { self.mediaStartedByPerson = false; return }
                 if self.mediaStartedByPerson { return }
-                if Date().timeIntervalSince(self.lastTap) < 6 { self.mediaStartedByPerson = true }
+                if Date().timeIntervalSince(max(self.lastTap, UserTouchClock.shared.last)) < 6 { self.mediaStartedByPerson = true }
                 else { self.webView.pauseAllMediaPlayback { } }
             }
         }
@@ -426,6 +430,22 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
         Task { _ = try? await webView.callAsyncJavaScript(script, arguments: ["css": css ?? NSNull()], contentWorld: .defaultClient) }
     }
 
+    func navigationEntries() -> (back: [NavEntry], forward: [NavEntry]) {
+        let list = webView.backForwardList
+        let back = list.backList.reversed().prefix(15).enumerated().map { NavEntry(offset: -($0.offset + 1), title: $0.element.title ?? "", url: $0.element.url) }
+        let forward = list.forwardList.prefix(15).enumerated().map { NavEntry(offset: $0.offset + 1, title: $0.element.title ?? "", url: $0.element.url) }
+        return (Array(back), Array(forward))
+    }
+
+    func navigate(toOffset offset: Int) {
+        if let item = webView.backForwardList.item(at: offset) { webView.go(to: item) }
+    }
+
+    func blockedAttempts() async -> Int {
+        let result = try? await webView.callAsyncJavaScript(BlockedCounter.read, contentWorld: .defaultClient)
+        return (result as? [Any])?.count ?? 0
+    }
+
     func runPageScript(_ script: String, arguments: [String: Any]) {
         Task { _ = try? await webView.callAsyncJavaScript(script, arguments: arguments, contentWorld: .defaultClient) }
     }
@@ -489,6 +509,126 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
         return !!document.querySelector('input[type=password], input[autocomplete^="cc-"], input[autocomplete="one-time-code"], input[name*="card" i], input[name*="cvv" i]');
         """, contentWorld: .defaultClient)
         return (r as? NSNumber)?.boolValue ?? true
+    }
+
+    func pageNetwork() async -> PageNetworkReport {
+        let js = """
+        const site = h => h.split('.').slice(-2).join('.');
+        const me = site(location.hostname);
+        const hosts = Array.from(new Set(performance.getEntriesByType('resource').map(e => { try { return new URL(e.name).hostname; } catch (x) { return ''; } }).filter(h => h && site(h) !== me)));
+        const blocked = typeof window.__bsBlockedCount === 'function' ? window.__bsBlockedCount() : [];
+        return { blocked: blocked, hosts: hosts };
+        """
+        guard let r = try? await webView.callAsyncJavaScript(js, contentWorld: .defaultClient) as? [String: Any] else { return PageNetworkReport() }
+        return PageNetworkReport(blockedURLs: r["blocked"] as? [String] ?? [], thirdPartyHosts: (r["hosts"] as? [String] ?? []).sorted())
+    }
+
+    func setScrollFraction(_ fraction: Double) async {
+        _ = try? await webView.callAsyncJavaScript("const h = document.documentElement.scrollHeight - window.innerHeight; if (h > 0) window.scrollTo(0, h * f);", arguments: ["f": min(max(fraction, 0), 1)], contentWorld: .defaultClient)
+    }
+
+    func devLog() async -> DevLog? {
+        guard let raw = try? await webView.callAsyncJavaScript(DevCaptureScript.read, contentWorld: .page) as? [String: Any] else { return nil }
+        return DevLog(raw: raw)
+    }
+
+    func pageSource() async -> String? {
+        let js = "return '<!DOCTYPE ' + (document.doctype ? document.doctype.name : 'html') + '>\\n' + document.documentElement.outerHTML;"
+        let r = try? await webView.callAsyncJavaScript(js, contentWorld: .defaultClient) as? String
+        return r.map { String($0.prefix(2_000_000)) }
+    }
+
+    func userAgentString() async -> String? {
+        if let custom = webView.customUserAgent, !custom.isEmpty { return custom }
+        return try? await webView.callAsyncJavaScript("return navigator.userAgent;", contentWorld: .defaultClient) as? String
+    }
+
+    /// Shows a file kept on this device (a saved web archive). Read access is limited to the file's own folder.
+    func loadLocalFile(_ url: URL) {
+        webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+    }
+
+    func respondsWithin(_ seconds: Double) async -> Bool {
+        await withTaskGroup(of: Bool.self) { group in
+            group.addTask { @MainActor [weak self] in
+                guard let self else { return true }
+                return (try? await self.webView.callAsyncJavaScript("return 1;", contentWorld: .defaultClient)) != nil
+            }
+            group.addTask { try? await Task.sleep(for: .seconds(seconds)); return false }
+            let first = await group.next() ?? true
+            group.cancelAll()
+            return first
+        }
+    }
+
+    func saveScrollState() async {
+        let js = """
+        (function () {
+          function path(el) { var p = []; while (el && el !== document.body && el.parentElement) { p.unshift(el.tagName + ':' + Array.prototype.indexOf.call(el.parentElement.children, el)); el = el.parentElement; } return p.join('/'); }
+          var out = [], all = document.body ? document.body.querySelectorAll('*') : [];
+          for (var i = 0; i < all.length && out.length < 30; i++) {
+            var e = all[i];
+            if (e.clientHeight > 120 && e.scrollHeight > e.clientHeight + 40 && e.scrollTop >= 0) {
+              var oy = getComputedStyle(e).overflowY;
+              if (oy === 'auto' || oy === 'scroll') { out.push({ p: path(e), top: e.scrollTop, bottom: (e.scrollHeight - e.clientHeight - e.scrollTop) < 8 }); }
+            }
+          }
+          var de = document.documentElement;
+          window.__bsScrollState = { w: { top: window.scrollY, bottom: (de.scrollHeight - window.innerHeight - window.scrollY) < 8 && de.scrollHeight > window.innerHeight + 40 }, c: out };
+        })();
+        """
+        _ = try? await webView.evaluateJavaScript(js)
+    }
+
+    func restoreScrollState() {
+        let js = """
+        (function () {
+          var s = window.__bsScrollState; if (!s) { return; }
+          function find(path) {
+            var el = document.body;
+            if (!path) { return null; }
+            var parts = path.split('/');
+            for (var i = 0; i < parts.length; i++) {
+              var bits = parts[i].split(':'); var child = el && el.children[parseInt(bits[1], 10)];
+              if (!child || child.tagName !== bits[0]) { return null; }
+              el = child;
+            }
+            return el;
+          }
+          function apply() {
+            var de = document.documentElement;
+            if (s.w.bottom) { if (de.scrollHeight - window.innerHeight - window.scrollY > 40) { window.scrollTo(0, de.scrollHeight); } }
+            else if (s.w.top > 40 && window.scrollY < s.w.top - 40) { window.scrollTo(0, s.w.top); }
+            s.c.forEach(function (c) {
+              var e = find(c.p); if (!e) { return; }
+              if (c.bottom) { if (e.scrollHeight - e.clientHeight - e.scrollTop > 40) { e.scrollTop = e.scrollHeight; } }
+              else if (c.top > 40 && e.scrollTop < c.top - 40) { e.scrollTop = c.top; }
+            });
+          }
+          [100, 400, 1000].forEach(function (ms) { setTimeout(apply, ms); });
+        })();
+        """
+        webView.evaluateJavaScript(js, completionHandler: nil)
+    }
+
+    func audioPlaying() async -> Bool {
+        let js = "return Array.from(document.querySelectorAll('video,audio')).some(m => !m.paused && !m.ended && m.readyState > 2 && m.volume > 0 && (!m.muted || m.dataset.bsMuted === '1'));"
+        let r = try? await webView.callAsyncJavaScript(js, contentWorld: .defaultClient)
+        return (r as? NSNumber)?.boolValue ?? false
+    }
+
+    /// Mutes by setting `muted` on every video and audio element, and again on any that starts later. Sound made another way (Web Audio) is not covered.
+    func setMuted(_ on: Bool) async {
+        let js = """
+        window.__bsMute = on;
+        const apply = () => document.querySelectorAll('video,audio').forEach(m => {
+          if (window.__bsMute) { if (m.dataset.bsMuted !== '1') { m.dataset.bsWas = m.muted ? '1' : '0'; m.dataset.bsMuted = '1'; } m.muted = true; }
+          else if (m.dataset.bsMuted === '1') { m.muted = m.dataset.bsWas === '1'; delete m.dataset.bsMuted; delete m.dataset.bsWas; }
+        });
+        apply();
+        if (!window.__bsMuteHook) { window.__bsMuteHook = true; document.addEventListener('play', apply, true); document.addEventListener('loadeddata', apply, true); }
+        """
+        _ = try? await webView.callAsyncJavaScript(js, arguments: ["on": on], contentWorld: .defaultClient)
     }
 
     func scrollFraction() async -> Double? {
@@ -572,6 +712,13 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
         if (action === 'play') m.play(); else if (action === 'pause') m.pause();
         else if (action === 'speed') m.playbackRate = value;
         else if (action === 'seek') m.currentTime = value;
+        else if (action === 'mute') m.muted = value > 0;
+        else if (action === 'volume') m.volume = Math.max(0, Math.min(1, value));
+        else if (action === 'airplay') { if (m.webkitShowPlaybackTargetPicker) m.webkitShowPlaybackTargetPicker(); }
+        else if (action === 'subtitle') {
+          const list = Array.from(m.textTracks || []).filter(t => t.kind === 'subtitles' || t.kind === 'captions');
+          list.forEach((t, i) => { t.mode = (i === Math.round(value)) ? 'showing' : 'disabled'; });
+        }
         else if (action === 'pictureInPicture') {
           if (m.webkitSetPresentationMode) m.webkitSetPresentationMode(m.webkitPresentationMode === 'picture-in-picture' ? 'inline' : 'picture-in-picture');
           else if (document.pictureInPictureEnabled) { document.pictureInPictureElement ? document.exitPictureInPicture() : m.requestPictureInPicture(); }
@@ -595,7 +742,15 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
         return Array.from(document.querySelectorAll('video, audio')).slice(0, 8).map(m => ({
           tag: m.tagName.toLowerCase(), src: m.currentSrc || m.src || '', blob: (m.currentSrc || m.src || '').startsWith('blob:'),
           currentTime: m.currentTime, duration: isFinite(m.duration) ? m.duration : 0, paused: m.paused, rate: m.playbackRate, readyState: m.readyState, networkState: m.networkState, hasMediaKeys: !!m.mediaKeys,
-          errorCode: m.error ? m.error.code : null, errorMessage: m.error ? (m.error.message || '') : null
+          errorCode: m.error ? m.error.code : null, errorMessage: m.error ? (m.error.message || '') : null,
+          volume: m.volume, muted: m.muted,
+          width: m.videoWidth || 0, height: m.videoHeight || 0,
+          dropped: (m.getVideoPlaybackQuality ? m.getVideoPlaybackQuality().droppedVideoFrames : 0), frames: (m.getVideoPlaybackQuality ? m.getVideoPlaybackQuality().totalVideoFrames : 0),
+          sessionTitle: (navigator.mediaSession && navigator.mediaSession.metadata) ? (navigator.mediaSession.metadata.title || '') : '',
+          sessionArtist: (navigator.mediaSession && navigator.mediaSession.metadata) ? (navigator.mediaSession.metadata.artist || '') : '',
+          pageTitle: document.title || '',
+          tracks: Array.from(m.textTracks || []).filter(t => t.kind === 'subtitles' || t.kind === 'captions').map(t => ({ label: t.label || t.language || 'Track', language: t.language || '', mode: t.mode })),
+          canAirPlay: !!m.webkitShowPlaybackTargetPicker
         }));
         """
         return try? await webView.callAsyncJavaScript(script, contentWorld: .defaultClient) as? [[String: Any]]
@@ -1124,6 +1279,14 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
         download.delegate = downloads
     }
 
+    func webView(_ webView: WKWebView, didReceiveServerRedirectForProvisionalNavigation navigation: WKNavigation!) {
+        if let sites = redirectWatch.hop(to: webView.url?.host) { events?.engineSuspiciousRedirect(sites: sites) }
+    }
+
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        redirectWatch.reset()
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         #if os(macOS)
         refreshEditableFocus()
@@ -1376,7 +1539,8 @@ final class WebKitDownloads: NSObject, WKDownloadDelegate {
             ids[key] = started.id
             observers[key] = download.progress.observe(\.fractionCompleted) { [weak self] p, _ in
                 let f = p.fractionCompleted
-                Task { @MainActor in self?.coordinator.update(started.id, fraction: f) }
+                let done = p.completedUnitCount, total = p.totalUnitCount
+                Task { @MainActor in self?.coordinator.update(started.id, fraction: f, completed: done, total: total) }
             }
             return started.destination
         }
@@ -1480,6 +1644,7 @@ final class ScrollReportingWebView: WKWebView {
             ("Open Link in New Tab", "plus.square.on.square", .newTab),
             ("Open Link in Background Tab", "square.stack", .backgroundTab),
             ("Open Link in Split View", "rectangle.split.2x1", .split),
+            ("Open Link in the Other Panel", "arrow.right.square", .otherPane),
             ("Open Link in Private Tab", "eye.slash", .privateTab),
         ]
         for (offset, choice) in choices.enumerated() {
@@ -1634,5 +1799,39 @@ final class GestureHandler: NSObject, WKScriptMessageHandler {
 extension WebKitTab: UIGestureRecognizerDelegate {
     /// The tap recorder watches; it never takes a touch away from the page.
     nonisolated func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
+}
+#endif
+
+
+#if os(iOS)
+/// When the person last touched the screen anywhere in the app, including the system's full-screen video player, which is a window of its own.
+@MainActor
+final class UserTouchClock: NSObject, UIGestureRecognizerDelegate {
+    static let shared = UserTouchClock()
+    private(set) var last = Date.distantPast
+    private var observed = Set<ObjectIdentifier>()
+    private var installed = false
+
+    func install() {
+        guard !installed else { attachAll(); return }
+        installed = true
+        NotificationCenter.default.addObserver(forName: UIWindow.didBecomeVisibleNotification, object: nil, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.attachAll() } }
+        attachAll()
+    }
+
+    private func attachAll() {
+        for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+            for window in scene.windows where observed.insert(ObjectIdentifier(window)).inserted {
+                let tap = UITapGestureRecognizer(target: self, action: #selector(touched))
+                tap.cancelsTouchesInView = false; tap.delaysTouchesBegan = false; tap.delaysTouchesEnded = false
+                tap.delegate = self
+                window.addGestureRecognizer(tap)
+            }
+        }
+    }
+
+    @objc private func touched() { last = Date() }
+
+    func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
 }
 #endif

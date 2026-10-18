@@ -337,6 +337,7 @@ struct SettingsPanelView: View {
             PopupSettingsSection()
             SavedSignInsSection()
             PasswordsInfoSection()
+            AddressesSection()
             PermissionActivitySection()
             SiteZoomSection()
             GlobalStyleSection()

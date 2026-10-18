@@ -173,6 +173,7 @@ struct HorizontalTab: View {
                     .font(.system(size: 12, weight: selected ? .medium : .regular))
                     .foregroundStyle(selected ? Color.primary : Color.primary.opacity(0.62))
                     .lineLimit(1).truncationMode(.tail)
+                AudioBadge(tab: tab)
             }
             .padding(.horizontal, 26)
             HStack {
@@ -185,7 +186,7 @@ struct HorizontalTab: View {
         .tabBackground(selected: selected, hovering: hovering, radius: model.density.stripPillHeight / 2, outlined: true)
         .transition(.scale(scale: 0.88).combined(with: .opacity))
         .onHover { hovering = $0 }
-        .help(tab.displayTitle)
+        .modifier(TabTooltip(title: tab.displayTitle))
         .tabInteractions(tab)
     }
 }
@@ -202,7 +203,7 @@ struct PinnedTab: View {
             .frame(width: 36, height: model.density.stripPillHeight)
             .tabBackground(selected: selected, hovering: hovering, radius: model.density.stripPillHeight / 2, outlined: true)
             .onHover { hovering = $0 }
-            .help(tab.displayTitle)
+            .modifier(TabTooltip(title: tab.displayTitle))
             .tabInteractions(tab)
     }
 }
@@ -222,7 +223,7 @@ struct CompactTab: View {
         .tabBackground(selected: false, hovering: hovering, radius: model.density.stripPillHeight / 2, outlined: true)
         .onHover { hovering = $0 }
         .motion(.easeOut(duration: 0.14), value: hovering)
-        .help(tab.displayTitle)
+        .modifier(TabTooltip(title: tab.displayTitle))
         .tabInteractions(tab)
     }
 }
@@ -385,6 +386,7 @@ struct VerticalTabRow: View {
                 .foregroundStyle(selected ? Color.primary : Color.primary.opacity(0.68))
                 .lineLimit(1).truncationMode(.tail)
             StackBadge(tab: tab)
+            AudioBadge(tab: tab)
             Spacer(minLength: 0)
             if tab.isLocked { Image(systemName: "lock.fill").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary).help("Locked") }
             else if hovering || selected { TabCloseButton { model.closeTab(id: tab.id) } }
@@ -394,7 +396,7 @@ struct VerticalTabRow: View {
         .tabBackground(selected: selected, hovering: hovering, radius: Radius.item)
         .transition(.scale(scale: 0.95).combined(with: .opacity))
         .onHover { hovering = $0 }
-        .help(tab.displayTitle)
+        .modifier(TabTooltip(title: tab.displayTitle))
         .tabInteractions(tab)
     }
 }
@@ -413,7 +415,15 @@ struct PinnedTile: View {
             .tabBackground(selected: selected, hovering: hovering, radius: large ? Radius.item : 12)
             .background(RoundedRectangle(cornerRadius: large ? Radius.item : 12, style: .continuous).fill(selected ? Color.clear : Color.fieldFill))
             .onHover { hovering = $0 }
-            .help(tab.displayTitle)
+            .modifier(TabTooltip(title: tab.displayTitle))
             .tabInteractions(tab)
     }
+}
+
+
+/// The page-title tooltip, only when the hover preview card is off: with both, hovering a tab shows two things at once.
+struct TabTooltip: ViewModifier {
+    @EnvironmentObject var model: BrowserModel
+    let title: String
+    func body(content: Content) -> some View { content.help(model.hoverPreviews ? "" : title) }
 }

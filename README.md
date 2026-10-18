@@ -3,7 +3,7 @@
 A native, security-first web browser for **macOS** and **iPhone/iPad**. It renders with the system's own WebKit, keeps everything on your device, and
 puts a small Rust core (tabs, address-bar logic, permission and navigation rules, per-profile SQLite storage) under a SwiftUI interface.
 
-> **Status: release candidate, in the production-hardening phase (0.3.3, build 11).** It is a real, working browser with a large automated test suite (about 650 tests), but
+> **Status: release candidate, in the production-hardening phase (0.3.3, build 12).** It is a real, working browser with a large automated test suite (about 750 tests), but
 > it is **not yet called production grade**: that needs the evidence in [`docs/RELEASE-BAR.md`](docs/RELEASE-BAR.md) to be complete and recorded. [`docs/capabilities.md`](docs/capabilities.md)
 > lists every feature as *Checked*, *Built* (compiled, not exercised end to end) or *Parked* (switched off), with the evidence and the limits. Read both before you rely on anything.
 
@@ -74,6 +74,13 @@ the evidence for each item, is [`docs/capabilities.md`](docs/capabilities.md). M
 
 - **One bar for everything.** It suggests from your own open tabs, bookmarks and history first (computed on the device), then page text you chose to keep a searchable copy of, then your search engine
   (suggestions are off until you turn them on). The search-engine menu sits in the bar; add your own engine, and search shortcuts such as `g cats` or `yt cats` use one engine for one search.
+- **Finishes addresses as you type (Mac).** Type `git` and, if you have been to GitHub, `github.com` appears with the rest selected: Return goes there, any other key replaces it, Delete removes it. It completes only the start of a
+  site you visited or bookmarked, and never once you have typed a space, a path or `https://`. (The iPhone and iPad fields cannot show a selected ending, so they suggest in the list instead.)
+- **Search inside one website.** Search This Site… (command palette, Library menu, or the ⋮ menu on a phone) asks what to look for and searches only the site in front, using your search engine's `site:` search.
+- **Drop it on the window.** A link, a file or some text from another app, dropped on the window, opens: a web link in a new tab, a file as a document (a PDF in the editor, anything else in the previewer), text as a
+  search or an address. Dropped over the page itself, the page gets it first (so file uploads on websites still work); drop on the toolbar, the sidebar or the start page.
+- **Reopen Closed Window** (File menu, Mac) brings back the last extra window you closed, with its pages. The last five are kept for this run of the browser; private tabs and guest windows are never kept.
+- **Pages behind and ahead.** Right-click (Mac) or press and hold (iPhone, iPad) Back or Forward to see the pages behind or ahead of this one, up to fifteen each way, and jump straight to one.
 - **Answers.** Type a sum (`12 * (3 + 4)`, `15% of 80`, `sqrt(2)`) or a conversion (`5 km to miles`, `72 f in c`, `1 gb to mb`) and the answer appears under the first row; Return copies it. Worked out on the device, no currency.
 - **Slash commands.** `/tabs`, `/close`, `/find`, `/group`, `/sleep`, `/duplicates`, `/save`, `/open`, `/workspace`, `/forget`, `/private`, `/scratch`, `/note`, `/split`, `/restore`: type a slash to see them, each
   explained as you type. Nothing runs until you press Return.
@@ -110,7 +117,14 @@ Every one can be changed in Settings › Shortcuts. The defaults:
 ### Privacy and security
 
 - **Content blocking.** Ads, trackers and session-recording scripts are blocked with WebKit's content-rule engine at three levels (Light, Balanced, Strict). A small starter list ships in the app; about 90 public
-  lists are optional downloads, fetched straight from their publishers only when you press Update (or turn on automatic updates, which is off by default). WebKit does not report blocked counts, so none is shown.
+  lists are optional downloads, fetched straight from their publishers only when you press Update (or turn on automatic updates, which is off by default). WebKit does not report blocked counts, so the numbers below are estimates.
+- **The shield card** (click the shield beside the address) holds the protection level, a **Blocked** count with a menu to choose what it covers (this page, today, 24 hours, 7 days, 30 days, 12 months, all time), a
+  **Protections** list that says what is on and flips each switch, and **Site not working?**: pause blocking for 10 minutes, an hour or until you quit (it switches back by itself), or open Repair This Page.
+  **This site…** opens switches for that one site (ads and trackers, pop-ups, autoplay, fingerprint noise, JavaScript, video speed, keeping its tab awake) and **Protection History…** shows a graph by day and the sites
+  with the most blocks. **The counts are estimates:** WebKit does not report what it blocks, so a picture, script or frame that fails to load with no network record is counted as blocked, and a page that asks again counts again.
+  Counts are kept on this device, per profile, in one small file; private tabs are never counted.
+- **Cookie banners.** Where a consent banner has a "reject" button for a common consent tool, the browser presses it; a banner left over is hidden and scrolling is given back. Nothing is accepted for you. On by default,
+  one switch in the shield card's Protections list. Tested on built banners, not yet on live sites.
 - **Cleaner links and pages.** Tracking parameters are stripped from links (Copy Clean Link does the same); plain-HTTP addresses are upgraded to HTTPS; **De-AMP** sends links through Google's AMP cache to the site's
   own page, and replaces an AMP page that names its own full version.
 - **No videos or sound starting by themselves (on by default).** A page can start media only after a real tap or key press (and for six seconds after one, so the page you open by tapping can start its own player), not
@@ -165,6 +179,10 @@ Every one can be changed in Settings › Shortcuts. The defaults:
 
 ### Reading, research and page tools
 
+- **Video speed and picture-in-picture.** Choose 0.5× to 2× from the command palette, the Library menu (Mac) or the ⋮ menu (iPhone, iPad); the speed is remembered for that site and put on every video it shows, including ones that
+  appear later. Picture in Picture opens the biggest video in a floating window (not tested on a real video).
+- **Summarize This Page.** A few lines written by the language model that is part of macOS 26 and iOS 26, on this device (Apple Intelligence). The page text is never sent anywhere. Where a device cannot run the model, the sheet says why.
+
 - **Reader** (⇧⌘R) for clean text, a **reading list** with offline copies, highlights and page notes, and "restore what I was typing" for forms.
 - **Research collections.** Save pages, highlights (each with a citation: title, address, author, dates), notes and PDFs; save an **offline PDF copy** of a page; add a note anchored to a selected passage and jump back to it;
   export to Markdown, HTML or PDF; copy a citation as plain text.
@@ -182,6 +200,67 @@ Every one can be changed in Settings › Shortcuts. The defaults:
 - **Short messages** ("Filled in.", "Password saved.") appear as a card that fades by itself, not a box to click away.
 - **Downloads you can see.** A card at the foot of the window shows progress while a file downloads, the Downloads button fills a ring and the Dock icon shows the percentage; when it finishes a card says
   "Downloaded" with Show in Finder and All Downloads (a file that can run code carries its warning in the same card instead of a box you have to dismiss).
+- **Download details.** Each running download shows size, speed and time left ("48 of 78 MB · 6.1 MB/s · about 5 s left"). A finished file has **Copy SHA-256** and **Verify Checksum…** (paste the hash the site published; the answer says match or no match).
+  A warning appears before a download that would not fit in the free disk space, a banner tells you when one finishes while the app is in the background (Settings, can be turned off), downloads can be sorted into a folder per website,
+  and "Copy Download Diagnostics" in the Downloads panel copies the folder, free space, queue and recent events for a bug report.
+- **Security events.** The Privacy dashboard lists what Browser Setu did to keep you safe (pop-ups stopped, a page that bounced through four or more different sites, risky file types downloaded, blocking paused for a site), newest first, next to the permission log. Private tabs are not recorded.
+- **Extensions, safer.** The approval sheet adds a red "Be careful" list for broad access (every website, cookies, history, downloads, network requests). **Relaunch Without Extensions** (File menu), holding Option while opening the app, or the `-BrowserSetuNoExtensions YES` launch argument starts with all extensions off to find one that breaks pages.
+- **Already there:** WebKit's own fraudulent-site warning (on by default) and macOS file quarantine for downloads (`LSFileQuarantineEnabled` on the Mac app).
+- **Tabs, more.** A speaker shows on a tab that is playing sound (click it to mute; the page's players stay silent after reloads; sound made through Web Audio is not covered). Tabs can be sorted by website, title or last use (pinned stay first),
+  snoozed (an hour, this evening, tomorrow, next Monday) or scheduled to open again daily, on weekdays or weekly (they open while the app runs, or at the next launch). Groups nest ("Work/Project A" via New Subgroup…), fold, and can be searched;
+  a group can be saved as a session. Idle groups (unused 30 minutes) can be put to sleep, pinned tabs ask before closing (a setting), and the tab search (/tabs) finds tabs in other windows and brings them over.
+  Not built: a per-tab memory number (the system does not report one; the Resources view shows awake or asleep and last use instead) and automatic detection of tabs "using too much".
+- **Resource governor.** Profiles: Balanced, Performance, Memory Saver, **Battery Saver** and **Custom** (how many recent tabs stay live, how long a tab may sit idle). Balanced switches to Battery Saver by itself in Low Power Mode, below 20% battery
+  unplugged, or when the device runs hot (a setting; the reason is shown). Tabs playing sound, locked, pinned, on a never-sleep site, loading or in use are never released. Battery Saver also checks sound and scheduled pages less often, stops refreshing
+  tab thumbnails, and automatic filter-list updates wait on a metered or Low Data connection. The Resources view shows the profile in force, free memory, power, connection, this app's processor use and an energy estimate, start-to-first-page
+  timing against earlier launches, and "Free Memory Now". Restored tabs load only when opened. Limits: WebKit's page processes cannot be measured, throttled or tuned from an app, so processor use and energy cover Browser Setu itself, and
+  there is no per-tab memory number; lifecycle control works by releasing tabs and trimming browser-owned caches.
+- **Privacy detail for the page in front.** The shield's "This site" panel now opens with: HTTPS or not, blocked requests (with a by-site list and an ads/trackers estimate guessed from host names, since WebKit does not say which list blocked a request),
+  how many other sites the page loaded from (and which), cookies stored from other sites, WebKit's cross-site tracking restriction, and what is switched off for the site. Settings › Security has **Referrer sent to other sites** (Standard, or
+  only within the same site; a page's own policy on a link still wins, and a few sign-in or download flows may need an exception). **Import a List…** in Custom Rules reads a hosts file, an Adblock-style list or plain domains and blocks each
+  whole domain (path, element and exception rules are skipped). Already there: ad and tracker blocking, HTTPS upgrades for known hosts, tracking-parameter removal, fingerprint noise, private tabs, auto-cleanup, per-site settings, element hiding,
+  cookie banners, storage inspection and deletion, and the Today / 7 days / 30 days / All time counts.
+- **Profiles.** Each profile has its own database (history, bookmarks, permissions, home page, search engine, appearance, extension settings) and its own WebKit data store, so cookies and site storage are not shared (this uses WebKit's per-identifier data stores, macOS 14 / iOS 17 and later).
+  New: an icon and a colour per profile, **Open This Page in Profile** and **Open in Profile** (the window switches, your tabs come back when you return), **Always Open this site in…** (the address bar offers to switch when a site belongs to another profile),
+  **Copy Its Bookmarks Here**, downloads in a folder per profile (a setting), and a **Temporary Profile** that is deleted when you leave it or quit. Moving a profile is the encrypted backup: back up, switch, restore. It carries bookmarks, settings and,
+  if you choose, passwords, but not cookies, site sign-ins or history. A guest window (private tabs only) already existed. Not built: choosing a profile from a link's right-click menu (use the tab or profile menu), and links from other apps always open in the current profile.
+- **Media.** Page tools › Video lists every player on the page with: what is playing (the page's media-session title and artist, else its title), picture size and dropped frames, play/pause, speed (remembered per site), mute, subtitle and caption choice,
+  Pop Out (Picture in Picture), full screen and an AirPlay/output picker where the page allows it. It also shows what is playing in other tabs (pause, mute, go to the tab, pause everything), a **sleep timer** (15 to 90 minutes, pauses media in every tab),
+  and **Recently Played** (pages that played media in normal tabs; off switch and clear). Already there: failure explanations and a device capability check, autoplay blocking, a per-tab speaker/mute, Break Mode, Picture in Picture and
+  background audio on iPhone. Media keys, Control Centre / lock-screen controls and the system Now Playing entry are WebKit's own handling of a page's media session, not something this app draws, and protected (DRM) video decides for itself what it allows;
+  Pop Out and AirPlay are refused by some services. Audio output on a Mac is the system's output device; the page-level picker is AirPlay only. Not built: a floating mini-player of our own (use Picture in Picture), and volume memory per site.
+- **Reading.** The reader has its own look in Settings: font (serif, sans, rounded, mono: the system's own), size, line and letter spacing, width and background (match system, light, sepia, dark, black), plus Larger/Smaller Text in the menu and palette.
+  Saved articles open offline, remember how far you read (and reopen there), can be searched by title, site, highlights and full text, and can be highlighted; **Copy Citation** (APA, MLA or plain; the author and date are not known to the browser, so the site
+  and "n.d." stand in) and **Copy Highlights with Citation** are in the menu. Translation checks the page's language first (on this device) and says if it is already in yours; **Translate Selected Text** and **Detect Page Language** use the same system.
+  Already there: read-aloud with a following highlight, find in page with highlighted matches, reduced-motion and high-contrast support, scaled fonts. Not built: custom font files (only system fonts), highlights on ordinary web pages (only saved articles and PDFs),
+  and per-highlight notes. Much of the app's own chrome uses fixed sizes, so system Dynamic Type affects only the parts that were built to scale.
+- **New tab page.** The start page is native (no web view is used to draw it): a search box with suggestions (Settings › Search can turn the remote ones off), your favorites (add, **edit**, drag to reorder, remove), recently closed, often-visited and
+  continue-browsing cards, themes and backgrounds (gradient, plain, a **colour**, a two-colour **blend**, or a photo theme), and a Customize drawer. **New tabs open** can be Browser Setu Home, a Blank Page (address bar ready) or a Custom Address (Settings › General,
+  and in the drawer); private tabs always keep their own page. Each profile keeps its own choices. **Google is now the default search engine** for a profile that has not picked one (Brave Search, DuckDuckGo, Bing and others are one click away). **Voice search**: a microphone in the search box (Mac, iPhone and iPad) listens when tapped and searches when you stop talking or tap again; it uses the system recogniser **on this device only** and refuses to run if the language has no on-device model, so nothing you say is sent anywhere. **Picture** is a background choice that uses an image from your device (shrunk, kept in the profile). Known gaps: a new tab
+  still creates its web view (only the start page is drawn without it), and a new tab focuses the page's search box rather than the toolbar address bar (⌘L reaches the toolbar one).
+- **Search and knowledge.** **Search Everything** (⌥⌘K, or the palette) searches open tabs, bookmarks, history, downloads, the reading list (titles, text and highlights), recently closed tabs, saved sessions, research, notes and commands in one box;
+  each result sits under its source's name. **Bookmark Tools** finds duplicate bookmarks (same page ignoring www, fragment and trailing slash; removing keeps the oldest), smart collections (added this week or month, untagged, each tag, sites with three or more),
+  and checks for broken links by asking each site once without cookies or a referrer; a link is called broken only on a 404/410 or a site that no longer exists, and refusals or timeouts are listed as "could not tell". Settings › History keeps history for
+  7 days to a year or forever. Already there: bookmark folders and tags, import and export, history by day with search by site, frequent and recent sites, favorites, recently closed, the timeline and saved-session and page-text search.
+- **Split view (Mac).** Two to four panels, side by side or stacked, with draggable dividers (double-click to even them), independent navigation and scrolling, move a tab in or swap panels, save a pair as a named layout, and the layout in each
+  workspace remembers its direction. New: **Link Scrolling** (scrolling one panel scrolls the others to the same share of the page), **Open Link in the Other Panel** in the link menu, **Compare the Two Pages** (what is the same and what differs, by lines of
+  text) and **Reopen Last Split Layout**. Find works in the panel you click, because each panel is its own tab. Not built: dragging a link from one panel onto another (WebKit's own link drag may already do it; not checked), and iPad Split View (on hold).
+- **Developer tools.** Workbench › Developer has: the page's performance, a waterfall and HAR export, storage, the element picker, a scratchpad, Safari's Web Inspector switch, and new **console, WebSocket and failed-resource capture** (opt-in and run inside the page, so
+  the page can notice it; reload after turning it on) with copy and save, **page source**, **response headers** (a fresh request, with notes on missing security headers), **certificate** details and the **user agent**. **Utilities** has a JSON formatter,
+  URL and Base64 coders, a timestamp converter, a regex tester, a colour picker and converter, a text comparison and a hash calculator (SHA-256/512, SHA-1, MD5). Not exposed by WebKit to an app: a page's own request headers and bodies, and a JavaScript debugger
+  (use Safari's Web Inspector).
+- **Network.** Workbench › Network shows: online or offline, the kind of link, metered or Low Data Mode, IPv4/IPv6/DNS support, the resolvers, every interface and its addresses, a timed test to the current site (name lookup, connect, TLS version, first answer),
+  a Wi-Fi sign-in page check, a throughput graph, device-wide data used since the app opened and the page's requests by kind. The app says when you go offline, come back or change link; failed pages retry by themselves. It cannot control DNS or WebKit's transport.
+- **Offline.** Saved Pages (web archives) open without a connection and run none of their scripts; the reading list keeps articles offline; bookmarks, sessions, notes, settings, downloads history and PDFs are all local, and backups are local and encrypted.
+- **Passwords and addresses.** The login editor shows a strength meter with advice, and the saved list flags weak passwords (reuse and leaks were already checked). **Saved Addresses** (Keychain, per profile) fill empty address boxes on request, behind Touch ID where on.
+  Not possible: payment-card autofill (the system's is closed to other browsers), and passkeys need an Apple entitlement.
+- **Reliability.** A **Session Time Machine** keeps checkpoints of the open pages (every few minutes while they change, and before closing many tabs), so you can reopen what was lost; only addresses, titles and arrangement are kept. The Health tab now shows measured
+  values: page crashes, pages that stopped answering (a page that misses two checks is reported), failed navigations, system memory warnings, the last unexpected termination, a database integrity check you can run now, a backup verifier and a diagnostic report that holds
+  no addresses or titles. Already there: crash and launch-loop safe mode, database integrity at open with recovery, restore of the last session, interrupted-download resume. Not possible: update rollback (Sparkle replaces the app).
+- **Automation.** Open several pages from text or the clipboard, clipboard tools (remove tracking, keep links, dedupe, sort, trim), batch bookmark actions on any smart collection (tag, move, remove), a workflow history, a workflow that runs at start, and workflow export and import
+  (imports may use only the safe commands). Not built: per-site keyboard commands.
+- **Mac integration.** New: a Dock menu (new tab, private tab, guest window, reopen closed tab, downloads, time machine) and Services (Open in Browser Setu, Search with Browser Setu from any app's selection). Already there: share sheet, Quick Look, Spotlight, Touch ID, Keychain,
+  drag and drop, Dock download progress, Shortcuts actions and Handoff.
 - **Downloads.** Resumable, with a queue (priorities, hold until a time, pause and resume all, retry with back-off) that survives a restart, an optional sort into folders by kind, **rules by site and kind**,
   a duplicate finder, preview, share and reveal in Finder. A page's own "Download" button that hands over a `data:` or `blob:` file works: it is saved, never run as a page. Progress shows on the Dock icon.
 - **PDF editor.** Open a downloaded or chosen PDF: highlight, draw, type, add shapes; rotate, delete, reorder, extract and merge pages; **sign** with a drawn, typed or picture signature kept in the Keychain behind Touch ID;

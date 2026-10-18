@@ -311,6 +311,7 @@ struct GlobalStyleSection: View {
 /// Customize, right where you are: themes, accent, what the start page shows and the search engine. Everything applies the moment it is touched; there is nothing to save.
 struct StartDrawer: View {
     @EnvironmentObject var model: BrowserModel
+    @State private var choosingStartImage = false
 
     private func close() { animated(.easeOut(duration: 0.22)) { model.startDrawerOpen = false } }
 
@@ -323,7 +324,7 @@ struct StartDrawer: View {
                     .accessibilityHidden(true)
                     .transition(.opacity)
                 panel
-                    .frame(width: min(340, geo.size.width - 36))
+                    .frame(width: min(380, geo.size.width - 28))
                     .frame(maxHeight: .infinity)
                     .themedBar(fallback: .regularMaterial)
                     .overlay(alignment: .leading) { Rectangle().fill(Color.primary.opacity(0.1)).frame(width: 0.5) }
@@ -333,6 +334,9 @@ struct StartDrawer: View {
                     .accessibilityAddTraits(.isModal)
             }
         }
+        .fileImporter(isPresented: $choosingStartImage, allowedContentTypes: [.image]) { result in
+            if case .success(let url) = result { model.setStartImage(from: url) }
+        }
         #if os(macOS)
         .onExitCommand { close() }
         #endif
@@ -340,14 +344,18 @@ struct StartDrawer: View {
 
     private var panel: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 16) {
                 HStack {
-                    Text("Customize").font(.title3.weight(.semibold))
+                    Text("Customize").font(.title2.weight(.semibold))
                     Spacer()
                     Button(action: close) { Image(systemName: "xmark.circle.fill").font(.title3).foregroundStyle(.secondary).accessibilityLabel("Close") }
                         .buttonStyle(.plain).keyboardShortcut(.cancelAction)
                 }
-                group("Appearance") {
+                card("Background") {
+                    backgroundTiles
+                    backgroundControls
+                }
+                card("Theme and accent") {
                     Text(model.activeTheme.name).font(.callout).foregroundStyle(.secondary)
                     ThemeDots()
                     if !model.themeIsActive {
@@ -361,18 +369,24 @@ struct StartDrawer: View {
                             }
                         }
                     }
-                    Picker("Background", selection: $model.startBackground) { ForEach(StartBackground.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented)
                 }
-                group("Layout") {
+                card("Heading and search") {
+                    TextField("Your own heading (empty shows the greeting)", text: $model.startTitle).textFieldStyle(.roundedBorder)
+                    labeled("Heading font") { Picker("", selection: $model.startFont) { ForEach(StartFont.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented).labelsHidden() }
+                    labeled("Search box") { Picker("", selection: $model.startSearchStyle) { ForEach(StartSearchStyle.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented).labelsHidden() }
+                    labeled("Page width") { Picker("", selection: $model.startWidth) { ForEach(StartWidth.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented).labelsHidden() }
+                    labeled("Icon size") { Picker("", selection: $model.startTile) { ForEach(StartTile.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented).labelsHidden() }
+                }
+                card("Show on the page") {
                     Toggle("Greeting", isOn: $model.showGreeting)
                     Toggle("Favorites", isOn: $model.showFavorites)
                     Toggle("Continue browsing", isOn: $model.showContinue)
                     Toggle("Often visited", isOn: $model.showFrequent)
                     Toggle("Recently closed", isOn: $model.showRecentlyClosed)
-                    Picker("Icon size", selection: $model.startTile) { ForEach(StartTile.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented)
                 }
-                group("Behavior") {
+                card("Behavior") {
                     HStack { Text("Search engine"); Spacer(); SearchEngineMenu() }
+                    HStack { Text("New tabs open"); Spacer(); Picker("", selection: $model.newTabMode) { ForEach(NewTabMode.allCases) { Text($0.title).tag($0) } }.labelsHidden().fixedSize() }
                 }
                 Button("More Settings…") {
                     close()
@@ -391,6 +405,86 @@ struct StartDrawer: View {
         // Below the status bar and clear of the Dynamic Island, in either orientation.
         .safeAreaPadding(.vertical, 6)
         #endif
+    }
+
+    /// One tile for each kind of background; the last is the person's own picture, and tapping it before one is chosen opens the file picker.
+    private var backgroundTiles: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 84), spacing: 10)], spacing: 12) {
+            ForEach(StartBackground.allCases) { kind in
+                let selected = model.startBackground == kind
+                Button {
+                    animated(.easeOut(duration: 0.18)) {
+                        if kind == .image && model.startImageData == nil { choosingStartImage = true } else { model.startBackground = kind }
+                    }
+                } label: {
+                    VStack(spacing: 6) {
+                        swatch(kind)
+                            .frame(height: 52)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(selected ? Theme.accent : Color.primary.opacity(0.15), lineWidth: selected ? 2.5 : 0.8))
+                        Text(kind == .image ? "My Photo" : kind.title).font(.caption).foregroundStyle(selected ? Color.primary : Color.secondary)
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(kind == .image ? "My photo" : kind.title) background\(selected ? ", selected" : "")")
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+        }
+    }
+
+    @ViewBuilder private func swatch(_ kind: StartBackground) -> some View {
+        switch kind {
+        case .gradient:
+            ZStack { Color(red: 0.047, green: 0.059, blue: 0.090); RadialGradient(colors: [Color(red: 0.067, green: 0.106, blue: 0.188), .clear], center: .center, startRadius: 0, endRadius: 50) }
+        case .plain: Color(red: 0.12, green: 0.13, blue: 0.17)
+        case .color: StartColor.color(model.startColorA)
+        case .blend: LinearGradient(colors: [StartColor.color(model.startColorA), StartColor.color(model.startColorB, fallback: StartColor.defaultB)], startPoint: .top, endPoint: .bottom)
+        case .image:
+            if let data = model.startImageData, let image = Image(platformData: data) {
+                Color.clear.overlay(image.resizable().scaledToFill()).clipped()
+            } else {
+                ZStack { Color.primary.opacity(0.06); Image(systemName: "photo.badge.plus").font(.system(size: 20)).foregroundStyle(.secondary) }
+            }
+        }
+    }
+
+    @ViewBuilder private var backgroundControls: some View {
+        switch model.startBackground {
+        case .image:
+            HStack {
+                Button(model.startImageData == nil ? "Choose a Photo…" : "Change Photo…") { choosingStartImage = true }
+                if model.startImageData != nil { Button("Remove", role: .destructive) { model.removeStartImage() } }
+            }
+            if model.startImageData != nil {
+                labeled("Darken") { Slider(value: $model.startImageDim, in: 0...0.7) }
+                labeled("Blur") { Slider(value: $model.startImageBlur, in: 0...30) }
+            }
+            Text("From Photos or Files. It stays on this device, in this profile.").font(.caption).foregroundStyle(.secondary)
+        case .color:
+            ColorPicker("Colour", selection: Binding(get: { StartColor.color(model.startColorA) }, set: { model.startColorA = StartColor.hex(of: $0) }), supportsOpacity: false)
+        case .blend:
+            ColorPicker("Top colour", selection: Binding(get: { StartColor.color(model.startColorA) }, set: { model.startColorA = StartColor.hex(of: $0) }), supportsOpacity: false)
+            ColorPicker("Bottom colour", selection: Binding(get: { StartColor.color(model.startColorB, fallback: StartColor.defaultB) }, set: { model.startColorB = StartColor.hex(of: $0) }), supportsOpacity: false)
+        default:
+            Button("Use My Own Photo…") { choosingStartImage = true }
+        }
+    }
+
+    private func labeled<Content: View>(_ title: String, @ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            content()
+        }
+    }
+
+    private func card<Content: View>(_ title: String, @ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title).font(.subheadline.weight(.semibold))
+            content()
+        }
+        .padding(14).frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.primary.opacity(0.05)))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5))
     }
 
     private func group<Content: View>(_ title: String, @ViewBuilder _ content: () -> Content) -> some View {

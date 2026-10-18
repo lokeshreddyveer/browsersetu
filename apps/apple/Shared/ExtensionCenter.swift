@@ -125,6 +125,8 @@ final class ExtensionCenter: ObservableObject {
     @Published private(set) var extensions: [ExtensionInfo] = []
     @Published private(set) var actions: [ExtensionActionItem] = []
     @Published private(set) var isSupported = false
+    /// This launch started with every extension off.
+    @Published private(set) var safeMode = false
     private var backend: ExtensionBackend?
     /// Extensions the user pinned to the toolbar. Until they choose, every extension with a button is pinned.
     @Published private(set) var pinnedIDs: [String]? = UserDefaults.standard.stringArray(forKey: "extension_pins")
@@ -168,6 +170,11 @@ final class ExtensionCenter: ObservableObject {
 
     func permissionRows(_ id: String) -> [ExtensionPermissionRow] { backend?.permissionRows(id: id) ?? [] }
     func setPermission(_ id: String, key: String, isSite: Bool, granted: Bool) { backend?.setPermission(id: id, key: key, isSite: isSite, granted: granted) }
+
+    func enterSafeMode() {
+        safeMode = true
+        attach(nil, supported: true)
+    }
 
     func attach(_ backend: ExtensionBackend?, supported: Bool) {
         self.backend = backend

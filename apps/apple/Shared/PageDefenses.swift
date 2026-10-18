@@ -16,6 +16,14 @@ struct WebPolicy: Equatable {
     /// A page may start video or sound only after a tap or a key press, not by itself (a feed that plays as you scroll, a preview, the next video).
     var blockAutoplay = false
     var autoplayExceptions = Set<String>()
+    /// Presses "reject" on consent banners, and hides the ones left.
+    var cookieBanners = false
+    /// Send no referrer to other sites.
+    var referrerSameSiteOnly = false
+    /// Developer capture of the page's console, WebSocket connections and failed resources (runs in the page's own world).
+    var devCapture = false
+    /// A remembered playback speed for each website (name without "www.").
+    var videoSpeeds: [String: Double] = [:]
 }
 
 // MARK: - AMP links
@@ -249,6 +257,8 @@ extension BrowserModel {
         blockVideoAds = get("video_ads") != "0"
         loadYouTubeRules(get)
         blockAutoplay = get("block_autoplay") != "0"
+        hideCookieBanners = get("cookie_banners") != "0"
+        videoSpeeds = Self.decodeMap(get("video_speeds"), as: Double.self)
         autoplayExceptions = list("autoplay_exceptions")
     }
 

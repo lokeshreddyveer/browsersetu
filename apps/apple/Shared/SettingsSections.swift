@@ -25,6 +25,7 @@ struct StartupSettingsSection: View {
                 }
             }
             Text(model.startup == "restore" ? "Restored tabs load only when you select them." : " ").font(.caption).foregroundStyle(.secondary)
+            NewTabSettings()
         }
     }
 }
@@ -142,8 +143,14 @@ struct VayuLevelSection: View {
 
 /// Facts about how the browser protects the user, stated only where the behaviour exists.
 struct SecurityFactsSection: View {
+    @EnvironmentObject var model: BrowserModel
+
     var body: some View {
         Section("Security") {
+            Picker("Referrer sent to other sites", selection: $model.referrerMode) {
+                ForEach(ReferrerMode.allCases) { Text($0.title).tag($0) }
+            }
+            Text(model.referrerMode.summary).font(.caption).foregroundStyle(.secondary)
             Label("Websites are upgraded to HTTPS when WebKit knows they support it.", systemImage: "lock")
             Label("WebKit’s deceptive-website warning is on.", systemImage: "exclamationmark.shield")
             Label("A link that would open another app asks you first.", systemImage: "arrow.up.forward.app")
@@ -340,6 +347,9 @@ struct SavedSignInsSection: View {
                     VStack(alignment: .leading) {
                         Text(URL(string: login.origin)?.host ?? login.origin).fontWeight(.medium)
                         Text(login.user).font(.caption).foregroundStyle(.secondary)
+                        if PasswordStrength.evaluate(login.password, user: login.user).isWeak {
+                            Label("Weak password", systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
+                        }
                         if let finding = findings[login.id], finding.isProblem {
                             Label(problemText(finding), systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange)
                         }
@@ -576,7 +586,20 @@ struct MemorySettingsSection: View {
                 ForEach(MemoryMode.allCases) { Text($0.title).tag($0) }
             }
             Text(model.memoryMode.summary).font(.caption).foregroundStyle(.secondary)
+            if model.memoryMode == .custom {
+                Picker("Keep this many recent tabs", selection: $model.customMemory.keepRecent) {
+                    ForEach(CustomMemoryPolicy.keepChoices, id: \.self) { Text("\($0)").tag($0) }
+                }
+                Picker("Release a tab unused for", selection: $model.customMemory.idleMinutes) {
+                    ForEach(CustomMemoryPolicy.idleChoices, id: \.self) { Text($0 >= 60 ? "\($0 / 60) h" : "\($0) min").tag($0) }
+                }
+            }
+            Toggle("Switch to Battery Saver on a low battery or a hot device", isOn: $model.batteryAware)
+            if let why = model.governor.effective.reason, model.governor.effective.mode != model.memoryMode {
+                Label("Battery Saver is in force because \(why).", systemImage: "leaf").font(.caption).foregroundStyle(.secondary)
+            }
             Toggle("Never release pinned tabs", isOn: $model.keepPinnedTabs)
+            Toggle("Ask before closing a pinned tab", isOn: $model.protectPinned)
             HStack {
                 LabeledContent("Released right now", value: "\(model.tabs.filter(\.isDiscarded).count)")
                 Button { showHelp.toggle() } label: { Image(systemName: "questionmark.circle") }
@@ -1001,6 +1024,7 @@ struct LoginEditor: View {
                 }
                 Button("Generate") { password = PasswordGenerator.make(); revealed = true }
             }
+            StrengthMeter(password: password, user: user)
             if let problem { Text(problem).font(.caption).foregroundStyle(.red) }
             HStack { Spacer(); Button("Cancel") { dismiss() }; Button("Save") { save() }.keyboardShortcut(.defaultAction).disabled(site.isEmpty || user.isEmpty || password.isEmpty) }
         }

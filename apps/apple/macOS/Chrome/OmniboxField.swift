@@ -157,6 +157,8 @@ struct OmniboxField: NSViewRepresentable {
     let focusTick: Int
     var focusOnMount: Bool = false
     @ObservedObject var address: AddressBarController
+    /// Sites to finish what is being typed with, most visited first. Mac only: the field puts the finished part in as selected text.
+    var completionSites: (() -> [String])?
 
     var onTextChange: (String) -> Void
     var onSubmit: (String) -> Void
@@ -228,6 +230,7 @@ struct OmniboxField: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextFieldDelegate {
         var parent: OmniboxField
         var lastFocusTick = 0
+        private var lastTypedCount = 0
         private var ownsEditing = false
         init(_ parent: OmniboxField) { self.parent = parent }
 
@@ -268,8 +271,20 @@ struct OmniboxField: NSViewRepresentable {
             // Only the person typing or pasting counts. Putting the address into the field as it takes focus also reports a change,
             // and counting that as "edited" is what stopped the whole address from staying selected.
             if NSApp.currentEvent?.type == .keyDown { field.userEdited = true; field.wantsFullSelection = false }
-            parent.address.text = field.stringValue
-            parent.onTextChange(field.stringValue)
+            let typed = field.stringValue
+            // Typing forward finishes a site you have been to: "git" shows "github.com" with the rest selected, so the next key or Delete replaces it.
+            if NSApp.currentEvent?.type == .keyDown, typed.count > lastTypedCount, let sites = parent.completionSites?(),
+               let full = URLCompletion.complete(typed, sites: sites), let editor = field.currentEditor() {
+                lastTypedCount = typed.count
+                field.stringValue = full
+                editor.selectedRange = NSRange(location: typed.utf16.count, length: full.utf16.count - typed.utf16.count)
+                parent.address.text = typed
+                parent.onTextChange(typed)
+                return
+            }
+            lastTypedCount = typed.count
+            parent.address.text = typed
+            parent.onTextChange(typed)
         }
 
         func controlTextDidBeginEditing(_ notification: Notification) {
