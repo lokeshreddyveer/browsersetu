@@ -332,21 +332,25 @@ final class DownloadCoordinator: ObservableObject {
     /// Progress with byte counts: keeps a smoothed speed and warns once if the disk cannot hold the file.
     func update(_ id: UUID, fraction: Double, completed: Int64, total: Int64) {
         guard var d = active[id] else { return }
-        d.fraction = fraction
         let now = Date()
+        // WebKit reports progress for every chunk, many times a second. Redrawing the panel, the toast and the Dock for each one keeps the main thread
+        // busy for nothing, so the numbers are published four times a second at most.
         let dt = now.timeIntervalSince(d.lastSample)
-        if dt >= 0.5 {
-            let instant = Double(max(0, completed - d.lastBytes)) / dt
-            d.bytesPerSecond = d.bytesPerSecond == 0 ? instant : d.bytesPerSecond * 0.7 + instant * 0.3
-            d.lastSample = now
-            d.lastBytes = completed
-        }
+        guard dt >= 0.25 || fraction >= 1 else { return }
+        let instant = Double(max(0, completed - d.lastBytes)) / max(dt, 0.001)
+        d.bytesPerSecond = d.bytesPerSecond == 0 ? instant : d.bytesPerSecond * 0.7 + instant * 0.3
+        d.lastSample = now
+        d.lastBytes = completed
+        d.fraction = fraction
         d.completedBytes = completed
         d.totalBytes = max(0, total)
-        if !d.warnedDisk, total > 0, let free = DiskSpace.available(at: Self.directory), DiskSpace.isTight(needed: total - completed, available: free) {
+        // The free space is looked at once, when the size is first known.
+        if !d.warnedDisk, total > 0 {
             d.warnedDisk = true
-            note("Low disk space for \(d.filename): needs \(DownloadStats.bytes(total)), \(DownloadStats.bytes(free)) free")
-            onLowDisk?(d.filename, total, free)
+            if let free = DiskSpace.available(at: Self.directory), DiskSpace.isTight(needed: total - completed, available: free) {
+                note("Low disk space for \(d.filename): needs \(DownloadStats.bytes(total)), \(DownloadStats.bytes(free)) free")
+                onLowDisk?(d.filename, total, free)
+            }
         }
         active[id] = d
     }
