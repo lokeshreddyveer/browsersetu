@@ -288,10 +288,10 @@ struct DownloadsPanel: View {
     var body: some View {
         VStack(spacing: 0) {
             PanelHeader(symbol: "arrow.down.circle", title: "Downloads", count: items.count + coordinator.active.count, query: $query, prompt: "Search downloads") {
-                Button { copyToPasteboard(coordinator.diagnostics); model.notice = "Download diagnostics copied." } label: { Label("Copy Download Diagnostics", systemImage: "stethoscope") }
-                    .buttonStyle(.borderless)
-                Button(role: .destructive) { try? model.core.clearDownloads(); coordinator.clearCompleted(); reload() } label: { Label("Clear Completed", systemImage: "trash") }
-                    .buttonStyle(.borderless).disabled(items.isEmpty)
+                Button { copyToPasteboard(coordinator.diagnostics); model.notice = "Download diagnostics copied." } label: { Image(systemName: "stethoscope").accessibilityLabel("Copy download diagnostics") }
+                    .buttonStyle(.borderless).help("Copy Download Diagnostics").fixedSize()
+                Button(role: .destructive) { try? model.core.clearDownloads(); coordinator.clearCompleted(); reload() } label: { Image(systemName: "trash").accessibilityLabel("Clear completed downloads") }
+                    .buttonStyle(.borderless).help("Clear Completed").disabled(items.isEmpty).fixedSize()
             }
             PanelChips(choices: Kind.allCases, selection: $kind, title: { $0.title }, count: { k in k == .all ? items.count : items.filter { Kind.of($0.filename) == k }.count })
             if loaded && !busy && shown.isEmpty {
