@@ -1533,6 +1533,8 @@ final class WebKitDownloads: NSObject, WKDownloadDelegate {
         // Waits for a free place (or is put off until later, or cancelled while waiting); WebKit fetches nothing until a destination is chosen.
         let source = download.originalRequest?.url
         guard await coordinator.admit(filename: suggestedFilename, source: source) else { download.cancel { _ in }; return nil }
+        // A big file from a server that can send it in pieces is fetched in six at once, which is several times faster where a site slows each connection.
+        if await takeOverInPieces(download, response: response, source: source, suggestedFilename: suggestedFilename) { return nil }
         return await MainActor.run {
             let started = coordinator.begin(suggestedName: suggestedFilename, sourceHost: download.originalRequest?.url?.host, cancel: { download.cancel { _ in } }, suspend: { done in download.cancel { data in done(data) } })
             let key = ObjectIdentifier(download)
@@ -1544,6 +1546,49 @@ final class WebKitDownloads: NSObject, WKDownloadDelegate {
             }
             return started.destination
         }
+    }
+
+    /// Checks, without cookies, that the server really sends this file in pieces, then fetches it that way. False means WebKit carries on as usual.
+    nonisolated private func takeOverInPieces(_ download: WKDownload, response: URLResponse, source: URL?, suggestedFilename: String) async -> Bool {
+        guard await MainActor.run(body: { coordinator.segmentedEnabled }), let http = response as? HTTPURLResponse, let source,
+              SegmentPlan.eligible(response: http, request: download.originalRequest) else { return false }
+        let total = http.expectedContentLength
+        let agent = await MainActor.run { download.webView?.customUserAgent }
+        let probe = SegmentedDownloader(url: source, userAgent: agent)
+        guard await probe.probe(expectedTotal: total) else { return false }
+        final class Current: @unchecked Sendable { var downloader: SegmentedDownloader?; var cancelled = false }
+        let current = Current()
+        await MainActor.run {
+            let started = coordinator.begin(suggestedName: suggestedFilename, sourceHost: source.host, cancel: { current.cancelled = true; current.downloader?.cancel() })
+            coordinator.note("Fetching \(started.destination.lastPathComponent) in pieces")
+            Task { @MainActor [coordinator] in
+                do {
+                    // Six connections; a server that refuses that many gets three, and then one, so a limit never loses the download.
+                    var lastError: Error = SegmentedDownloadError.refused
+                    var finishedOK = false
+                    for pieces in [SegmentPlan.connections, 3, 1] where !finishedOK && !current.cancelled {
+                        let downloader = SegmentedDownloader(url: source, userAgent: agent, pieces: pieces)
+                        current.downloader = downloader
+                        do {
+                            try await downloader.run(total: total, to: started.destination) { done in
+                                Task { @MainActor in coordinator.update(started.id, fraction: min(1, Double(done) / Double(total)), completed: done, total: total) }
+                            }
+                            finishedOK = true
+                        } catch SegmentedDownloadError.refused { lastError = SegmentedDownloadError.refused; coordinator.note("Server refused \(pieces) connections") }
+                    }
+                    if !finishedOK { throw current.cancelled ? CancellationError() : lastError }
+                    coordinator.finish(started.id, source: source)
+                    coordinator.downloadSucceeded(source: source)
+                } catch {
+                    coordinator.discard(started.id)
+                    if !(error is CancellationError) {
+                        coordinator.note("Pieces failed (\(error)); trying the normal download")
+                        coordinator.planRetry(for: source, error: error, resumeData: nil, id: started.id)
+                    }
+                }
+            }
+        }
+        return true
     }
 
     nonisolated func downloadDidFinish(_ download: WKDownload) {
