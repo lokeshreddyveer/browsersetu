@@ -40,6 +40,8 @@ final class DownloadCoordinator: ObservableObject {
     var resumer: ((Data) -> Void)?
     /// Sort new downloads into folders by kind (Images, Documents, Archives…) inside the downloads folder.
     var organize = false
+    /// Fetch large files in several pieces at once (see SegmentedDownload.swift).
+    var segmentedEnabled = true
     /// A folder named for the profile, inside the downloads folder, when downloads are kept apart by profile.
     var profileFolder: String?
     /// Sort new downloads into a folder named after the site they came from.

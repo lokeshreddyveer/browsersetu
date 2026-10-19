@@ -849,6 +849,7 @@ final class BrowserModel: ObservableObject {
     /// Tabs that cannot be closed by accident, and named sets of tabs saved to open again later.
     /// Downloads are sorted into folders by kind (Images, Documents…) inside the downloads folder.
     @Published var maxDownloads = DownloadQueueRules.defaultConcurrent { didSet { saveSetting("download_concurrent", String(maxDownloads)); engine.downloads.maxConcurrent = maxDownloads } }
+    @Published var fasterDownloads = true { didSet { saveSetting("download_segments", fasterDownloads ? "1" : "0"); engine.downloads.segmentedEnabled = fasterDownloads } }
     @Published var organizeByDomain = false { didSet { saveSetting("organize_downloads_domain", organizeByDomain ? "1" : "0"); engine.downloads.organizeByDomain = organizeByDomain } }
     @Published var notifyDownloads = true { didSet { saveSetting("download_notify", notifyDownloads ? "1" : "0") } }
     @Published var organizeDownloads = false { didSet { saveSetting("organize_downloads", organizeDownloads ? "1" : "0"); engine.downloads.organize = organizeDownloads } }
@@ -2086,6 +2087,7 @@ final class BrowserModel: ObservableObject {
         readingList = ReadingStore.loadIndex(root: profileFolder)
         organizeDownloads = get("organize_downloads") == "1"
         organizeByDomain = get("organize_downloads_domain") == "1"
+        fasterDownloads = get("download_segments") != "0"
         updateDownloadFolder()
         notifyDownloads = get("download_notify") != "0"
         maxDownloads = DownloadQueueRules.maxConcurrentChoices.contains(Int(get("download_concurrent") ?? "") ?? 0) ? Int(get("download_concurrent") ?? "")! : DownloadQueueRules.defaultConcurrent
@@ -2389,7 +2391,7 @@ final class BrowserModel: ObservableObject {
     static let backupSettingKeys: Set<String> = [
         "accent", "address_bar", "address_bar_items", "appearance", "density", "keep_pinned", "layout_preset", "memory_mode", "show_favorites", "show_continue",
         "show_frequent", "show_greeting", "show_recently_closed", "sidebar_autohide", "sidebar_position", "sidebar_rail",
-        "organize_downloads_domain", "download_notify", "last_split", "start_title", "start_font", "start_search_style", "start_width", "start_image_dim", "start_image_blur", "history_retention_days", "new_tab_mode", "new_tab_url", "start_color_a", "start_color_b", "reader_style", "media_history_on", "referrer_mode", "custom_keep", "custom_idle", "battery_aware", "security_events", "tab_schedules", "protect_pinned", "sidebar_width", "single_toolbar", "split_orientation", "start_background", "startup", "startup_workspace",
+        "organize_downloads_domain", "download_notify", "last_split", "download_segments", "start_title", "start_font", "start_search_style", "start_width", "start_image_dim", "start_image_blur", "history_retention_days", "new_tab_mode", "new_tab_url", "start_color_a", "start_color_b", "reader_style", "media_history_on", "referrer_mode", "custom_keep", "custom_idle", "battery_aware", "security_events", "tab_schedules", "protect_pinned", "sidebar_width", "single_toolbar", "split_orientation", "start_background", "startup", "startup_workspace",
         "strip_tracking", "tab_groups", "tab_layout", "tab_previews", "tint_toolbar", "toolbar_autohide", "toolbar_items",
         "workspaces", "double_click", "collapse_on_scroll", "search_template", "search_suggestions", "speed_pill", "pill_collapsed", "site_icons", "shortcuts", "homepage", "saved_sessions", "organize_downloads", "site_notes", "search_shortcuts", "bookmark_tags", "site_styles", "phone_toolbar", "address_display", "address_icon", "search_panel_bottom", "search_panel_bottom2", "swipe_address", "app_links", "app_link_sites", "blur_private_switcher", "permission_expiry", "favorites_order", "overview_style", "overview_grouped", "overview_sort", "dark_pages", "dark_sites", "website_appearance", "site_appearance", "theme", "theme_custom", "low_power_memory", "clear_on_quit", "remember_reading", "keep_form_drafts", "site_zoom", "group_colors",
         "save_logins", "mouse_gestures", "mouse_gesture_map", "site_open_rules", "download_concurrent", "spotlight_bookmarks", "vim_on", "vim_keymap", "workflows", "download_rules", "extension_profiles", "site_delete_rules", "site_user_agents", "containers", "split_templates", "tab_tree", "block_webrtc", "webrtc_exceptions",

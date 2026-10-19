@@ -919,6 +919,8 @@ struct DownloadsSettingsSection: View {
             if model.organizeDownloads {
                 Text("New downloads go into Images, Documents, Archives, Audio, Video, Installers or Other inside that folder.").font(.caption).foregroundStyle(.secondary)
             }
+            Toggle("Download big files in several pieces at once", isOn: $model.fasterDownloads)
+            Text("For files of 8 MB or more from sites that allow it. Faster where a site slows each connection; it does nothing if your own connection is the limit. Large downloads from sites you must sign in to use the normal way.").font(.caption).foregroundStyle(.secondary)
             Toggle("Sort downloads into folders by website", isOn: $model.organizeByDomain)
             Text("Used when no rule or kind folder applies first: each site gets its own folder, such as example.com.").font(.caption).foregroundStyle(.secondary)
             Toggle("Notify me when a download finishes", isOn: $model.notifyDownloads)
