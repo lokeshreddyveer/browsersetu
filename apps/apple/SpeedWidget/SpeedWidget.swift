@@ -11,6 +11,11 @@ struct SpeedWidgetBundle: WidgetBundle {
         FavoritesWidget()
         BlockedWidget()
         ReadingListWidget()
+        if #available(iOS 18.0, *) {
+            NewTabControl()
+            PrivateTabControl()
+            InboxControl()
+        }
         #endif
     }
 }

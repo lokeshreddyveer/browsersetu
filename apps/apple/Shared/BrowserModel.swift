@@ -219,6 +219,8 @@ final class BrowserModel: ObservableObject {
     @Published var density: InterfaceDensity = .comfortable { didSet { saveSetting("density", density.rawValue) } }
     @Published var paletteVisible = false
     @Published var accent: AccentChoice = .teal { didSet { applyWorkspaceTheme(); saveSetting("accent", accent.rawValue) } }
+    /// True once the user has picked an accent themselves; from then on a theme no longer repaints it.
+    @Published var accentChosen = false { didSet { applyWorkspaceTheme(); saveSetting("accent_chosen", accentChosen ? "1" : "0") } }
     /// The picture chosen for the start page background, already shrunk. Kept in this profile's folder; never sent anywhere.
     @Published var startImageData: Data?
     /// Checkpoints of the open pages, newest first (the Session Time Machine).
@@ -2087,6 +2089,7 @@ final class BrowserModel: ObservableObject {
         sidebarRail = get("sidebar_rail") == "1"
         sidebarAutoHide = get("sidebar_autohide") == "1"
         density = InterfaceDensity(rawValue: get("density") ?? "") ?? .comfortable
+        accentChosen = get("accent_chosen") == "1"
         singleToolbarCustom = get("single_toolbar") == "1"
         toolbarAutoHide = get("toolbar_autohide") == "1"
         tintToolbar = get("tint_toolbar") != "0"
@@ -2423,7 +2426,7 @@ final class BrowserModel: ObservableObject {
 
     /// Settings a backup carries. Anything else in a backup file is ignored on restore.
     static let backupSettingKeys: Set<String> = [
-        "accent", "address_bar", "address_bar_items", "appearance", "density", "keep_pinned", "layout_preset", "memory_mode", "show_favorites", "show_continue",
+        "accent", "accent_chosen", "address_bar", "address_bar_items", "appearance", "density", "keep_pinned", "layout_preset", "memory_mode", "show_favorites", "show_continue",
         "show_frequent", "show_greeting", "show_recently_closed", "sidebar_autohide", "sidebar_position", "sidebar_rail",
         "organize_downloads_domain", "download_notify", "last_split", "track_time", "break_minutes", "clipboard_history", "feeds", "backdrop_intensity", "icon_weight", "site_icon_shape", "site_looks", "motion_style", "download_segments", "start_title", "start_font", "start_search_style", "start_width", "start_image_dim", "start_image_blur", "history_retention_days", "new_tab_mode", "new_tab_url", "start_color_a", "start_color_b", "reader_style", "media_history_on", "referrer_mode", "custom_keep", "custom_idle", "battery_aware", "security_events", "tab_schedules", "protect_pinned", "sidebar_width", "single_toolbar", "split_orientation", "start_background", "startup", "startup_workspace",
         "strip_tracking", "tab_groups", "tab_layout", "tab_previews", "tint_toolbar", "toolbar_autohide", "toolbar_items",

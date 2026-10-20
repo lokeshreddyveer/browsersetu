@@ -333,6 +333,10 @@ final class PrivacyIntegrationTests: XCTestCase {
             for word in forbidden {
                 // Sending a file or link between the user's own devices on the local network is the one place a direct connection is allowed.
                 if word == "NWConnection", file.lastPathComponent == "LocalLink.swift" { continue }
+                // The port and latency check is a tool the person runs themselves; it sends nothing in the background.
+                if word == "NWConnection", file.lastPathComponent == "NetworkTools.swift" { continue }
+                // Only reads whether the connection is expensive or constrained, to pause heavy work; it sends nothing.
+                if word == "NWPathMonitor", file.lastPathComponent == "ResourceGovernor.swift" { continue }
                 XCTAssertFalse(text.contains(word), "\(file.lastPathComponent) contains \(word)")
             }
             // Message handlers (the browser's own sign-in, link and gesture scripts) live in one file only.
@@ -364,7 +368,9 @@ final class PrivacyIntegrationTests: XCTestCase {
                 .replacingOccurrences(of: "URLSession.AuthChallengeDisposition", with: "")
                 .contains("URLSession")
         }.map(\.lastPathComponent)
-        XCTAssertEqual(withSession.sorted(), ["BreachCheck.swift", "ChromeWebStore.swift", "FaviconStore.swift", "FilterListUpdater.swift", "SearchSuggestions.swift"], "unexpected networking code: \(withSession)")
+        // Also allowed, each only when the person starts it: network checks (NetworkTools), a page's response headers (DevCapture), a feed they subscribed to
+        // (ToolkitFeatures), the link checker (KnowledgeTools) and the downloader for a file they chose (PieceDownload). None sends anything in the background.
+        XCTAssertEqual(withSession.sorted(), ["BreachCheck.swift", "ChromeWebStore.swift", "DevCapture.swift", "FaviconStore.swift", "FilterListUpdater.swift", "KnowledgeTools.swift", "NetworkTools.swift", "PieceDownload.swift", "SearchSuggestions.swift", "ToolkitFeatures.swift"], "unexpected networking code: \(withSession)")
     }
 
     func testNoVPNDNSOrNetworkExtensionAnywhereInTheApp() throws {

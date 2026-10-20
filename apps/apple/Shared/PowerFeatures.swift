@@ -80,7 +80,7 @@ extension BrowserModel {
         let own = workspaces.first { $0.name == activeWorkspace }?.accent.flatMap(AccentChoice.init(rawValue:))
         Theme.accent = (own ?? accent).color
         // A theme brings its own accent, unless the workspace has one of its own.
-        if themeIsActive, own == nil { Theme.accent = activeTheme.accent.color }
+        if themeIsActive, own == nil, !accentChosen { Theme.accent = activeTheme.accent.color }
         objectWillChange.send()
     }
 

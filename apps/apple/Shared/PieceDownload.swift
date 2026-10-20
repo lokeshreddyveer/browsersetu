@@ -3,12 +3,12 @@ import Foundation
 /// Fetches one large file as several pieces at once, each over its own connection, and joins them. A site that limits the speed of a single
 /// connection (many do) gives the pieces together several times the speed. It is used only for plain public files that a server says it can
 /// send in pieces; everything else, and anything that goes wrong in the check, is left to WebKit's own download.
-enum SegmentPlan {
+enum PiecePlan {
     static let minimumSize: Int64 = 8_000_000
     static let connections = 6
 
     /// The pieces of a file: roughly equal, none smaller than `minimum` (a small file gets fewer pieces).
-    static func ranges(total: Int64, connections: Int = SegmentPlan.connections, minimum: Int64 = 2_000_000) -> [ClosedRange<Int64>] {
+    static func ranges(total: Int64, connections: Int = PiecePlan.connections, minimum: Int64 = 2_000_000) -> [ClosedRange<Int64>] {
         guard total > 0 else { return [] }
         let count = Int(max(1, min(Int64(connections), total / max(minimum, 1))))
         let size = (total + Int64(count) - 1) / Int64(count)
@@ -40,9 +40,9 @@ enum SegmentPlan {
     }
 }
 
-enum SegmentedDownloadError: Error { case refused, wrongSize, failed(String) }
+enum PieceDownloadError: Error { case refused, wrongSize, failed(String) }
 
-final class SegmentedDownloader: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
+final class PieceDownloader: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
     private let url: URL
     private let userAgent: String?
     private let pieces: Int
@@ -59,7 +59,7 @@ final class SegmentedDownloader: NSObject, URLSessionDownloadDelegate, @unchecke
     private var finished = false
     private var folder: URL?
 
-    init(url: URL, userAgent: String? = nil, pieces: Int = SegmentPlan.connections) {
+    init(url: URL, userAgent: String? = nil, pieces: Int = PiecePlan.connections) {
         self.url = url
         self.pieces = pieces
         self.userAgent = userAgent
@@ -85,13 +85,13 @@ final class SegmentedDownloader: NSObject, URLSessionDownloadDelegate, @unchecke
     /// downloader; any other answer means WebKit's own download is the better choice.
     func probe(expectedTotal: Int64) async -> Bool {
         guard let (_, response) = try? await session.data(for: request(0...0)), let http = response as? HTTPURLResponse else { return false }
-        return http.statusCode == 206 && SegmentPlan.total(fromContentRange: http.value(forHTTPHeaderField: "Content-Range")) == expectedTotal
+        return http.statusCode == 206 && PiecePlan.total(fromContentRange: http.value(forHTTPHeaderField: "Content-Range")) == expectedTotal
     }
 
     /// Downloads the whole file to `destination`. `progress` gets the bytes received so far. Throws on failure, or CancellationError after `cancel()`.
     func run(total: Int64, to destination: URL, progress: @escaping @Sendable (Int64) -> Void) async throws {
-        let parts = SegmentPlan.ranges(total: total, connections: pieces)
-        guard !parts.isEmpty else { throw SegmentedDownloadError.failed("empty") }
+        let parts = PiecePlan.ranges(total: total, connections: pieces)
+        guard !parts.isEmpty else { throw PieceDownloadError.failed("empty") }
         let work = destination.deletingLastPathComponent().appendingPathComponent(".\(destination.lastPathComponent).parts", isDirectory: true)
         try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
         prepare(parts: parts, progress: progress, folder: work)
@@ -143,14 +143,14 @@ final class SegmentedDownloader: NSObject, URLSessionDownloadDelegate, @unchecke
         let out = try FileHandle(forWritingTo: destination)
         defer { try? out.close() }
         for i in parts.indices {
-            guard let file = segmentFile(i) else { throw SegmentedDownloadError.failed("missing piece") }
+            guard let file = segmentFile(i) else { throw PieceDownloadError.failed("missing piece") }
             let input = try FileHandle(forReadingFrom: file)
             while let chunk = try input.read(upToCount: 4 << 20), !chunk.isEmpty { try out.write(contentsOf: chunk) }
             try input.close()
             try? fm.removeItem(at: file)
         }
         let size = (try? fm.attributesOfItem(atPath: destination.path)[.size] as? Int64) ?? 0
-        guard size == total else { try? fm.removeItem(at: destination); throw SegmentedDownloadError.wrongSize }
+        guard size == total else { try? fm.removeItem(at: destination); throw PieceDownloadError.wrongSize }
     }
 
     // MARK: URLSessionDownloadDelegate
@@ -175,7 +175,7 @@ final class SegmentedDownloader: NSObject, URLSessionDownloadDelegate, @unchecke
         guard let i, let folder, let expected, let http = downloadTask.response as? HTTPURLResponse else { return }
         let length = expected.upperBound - expected.lowerBound + 1
         let size = (try? FileManager.default.attributesOfItem(atPath: location.path)[.size] as? Int64) ?? 0
-        guard http.statusCode == 206, size == length else { fail(SegmentedDownloadError.refused); return }
+        guard http.statusCode == 206, size == length else { fail(PieceDownloadError.refused); return }
         let target = folder.appendingPathComponent("part\(i)")
         try? FileManager.default.removeItem(at: target)
         do { try FileManager.default.moveItem(at: location, to: target) } catch { fail(error); return }
