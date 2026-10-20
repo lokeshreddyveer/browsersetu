@@ -264,7 +264,8 @@ struct ThemeBackdrop: View {
         private var moving: Bool { kind.isAnimated && !reduceMotion && MotionStyle.current != .off && !ProcessInfo.processInfo.isLowPowerModeEnabled && scenePhase == .active }
 
         var body: some View {
-            TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !moving)) { timeline in
+            // The blurred scenes are the costly ones, so they draw fewer frames a second; the soft motion hides it.
+            TimelineView(.animation(minimumInterval: [.aurora, .lava].contains(kind) ? 1.0 / 15 : 1.0 / 24, paused: !moving)) { timeline in
                 canvas(t: moving ? timeline.date.timeIntervalSinceReferenceDate : 4)
             }
             .allowsHitTesting(false)
