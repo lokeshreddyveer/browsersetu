@@ -826,11 +826,11 @@ struct FloatingPanelView: View {
             .scaleEffect(shown ? 1 : 0.96).opacity(shown ? 1 : 0)
             .padding(.vertical, 56).padding(.horizontal, 24)
         }
-        .onAppear { withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) { shown = true } }
+        .onAppear { animated(.spring(response: 0.34, dampingFraction: 0.88)) { shown = true } }
     }
 
     private func close() {
-        withAnimation(.easeOut(duration: 0.16)) { shown = false }
+        animated(.easeOut(duration: 0.16)) { shown = false }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) { model.floatingPanel = nil }
     }
 

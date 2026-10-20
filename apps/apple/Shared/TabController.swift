@@ -349,7 +349,13 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
         model.pageScrolled(deltaY: deltaY)
     }
     func engineSecurityChanged(_ secure: Bool) { isSecure = secure }
-    func engineThemeColorChanged(_ tint: PageTint?) { self.tint = tint }
+    /// The colour the page itself asked for; a colour chosen for the site stands in for it.
+    private var pageTint: PageTint?
+    func engineThemeColorChanged(_ tint: PageTint?) { pageTint = tint; applySiteLook() }
+    func applySiteLook() {
+        let wanted = owner?.siteLook(forHost: url?.host) ?? pageTint
+        if wanted != self.tint { self.tint = wanted }
+    }
 
     /// Set by the engine once the page is read; the phone layout keeps only such pages clear of the status bar and the dock.
     private(set) var fixedTop = false
@@ -386,6 +392,7 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
     }
 
     func engineDidFinishLoading() {
+        applySiteLook()
         if muted { Task { await engine.setMuted(true) } }
         if !showingError { owner?.didFinishLoading(self) }
         refreshIdentity()

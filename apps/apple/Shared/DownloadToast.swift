@@ -48,8 +48,8 @@ struct DownloadToast: View {
             if !coordinator.active.isEmpty { progressCard.transition(.scale(scale: 0.9, anchor: .bottomTrailing).combined(with: .move(edge: .bottom)).combined(with: .opacity)) }
             if let banner = model.downloadBanner { doneCard(banner).transition(.scale(scale: 0.9, anchor: .bottomTrailing).combined(with: .move(edge: .bottom)).combined(with: .opacity)) }
         }
-        .animation(.easeOut(duration: 0.22), value: coordinator.active.isEmpty)
-        .animation(.easeOut(duration: 0.22), value: model.downloadBanner)
+        .motion(.easeOut(duration: 0.22), value: coordinator.active.isEmpty)
+        .motion(.easeOut(duration: 0.22), value: model.downloadBanner)
         .accessibilityElement(children: .contain)
     }
 
@@ -83,7 +83,7 @@ struct DownloadToast: View {
             HStack(spacing: 12) {
                 Image(systemName: banner.warning == nil ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
                     .font(.system(size: 22)).foregroundStyle(banner.warning == nil ? Color.green : Color.orange)
-                    .symbolEffect(.bounce, value: banner.id)
+                    .modifier(BounceOnChange(value: banner.id))
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Downloaded").font(.caption).foregroundStyle(.secondary)
                     Text(banner.filename).font(.callout.weight(.medium)).lineLimit(1).truncationMode(.middle)

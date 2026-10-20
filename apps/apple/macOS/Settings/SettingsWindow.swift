@@ -177,7 +177,7 @@ struct MacSettingsView: View {
         .background(SettingsWindowGuard(enabled: !inline && model.settingsInTab))
         .preferredColorScheme(model.appearance.colorScheme ?? (model.themeIsActive ? model.activeTheme.scheme?.colorScheme : nil))
         .tint(Theme.accent)
-        .animation(.easeOut(duration: 0.2), value: selected)
+        .motion(.easeOut(duration: 0.2), value: selected)
     }
 
     private var rail: some View {

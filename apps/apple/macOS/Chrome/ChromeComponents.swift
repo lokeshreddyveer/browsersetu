@@ -74,7 +74,7 @@ struct ToolbarTintLayer: View {
                 Color.clear
             }
         }
-        .animation(.easeOut(duration: 0.25), value: tab.tint)
+        .motion(.easeOut(duration: 0.25), value: tab.tint)
         .allowsHitTesting(false)
     }
 }
@@ -140,7 +140,7 @@ struct ChromeButtonStyle: ButtonStyle {
 
         var body: some View {
             configuration.label
-                .font(.system(size: iconSize, weight: .regular))
+                .font(.system(size: iconSize, weight: IconWeight.current.weight))
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(enabled ? Color.primary.opacity(0.85) : Color.primary.opacity(0.28))
                 .frame(width: iconSize > 13 ? 32 : 28, height: iconSize > 13 ? 32 : 28)
@@ -356,7 +356,7 @@ struct MacOmnibox: View {
         .onHover { hovering = $0 }
         // Safari lets the field swell a little when it takes focus.
         .scaleEffect(address.isEditing && !inSidebar && !floating ? 1.02 : 1)
-        .animation(.spring(response: 0.28, dampingFraction: 0.8), value: address.isEditing)
+        .motion(.spring(response: 0.28, dampingFraction: 0.8), value: address.isEditing)
         .accessibilityElement(children: .contain)
     }
 
@@ -373,7 +373,7 @@ struct MacOmnibox: View {
             }
             .buttonStyle(.plain)
             .opacity(1)
-            .animation(.easeOut(duration: 0.15), value: hovering)
+            .motion(.easeOut(duration: 0.15), value: hovering)
             .help(tab.identity.map { $0.headline + ". " + $0.detail } ?? "Site Information")
             .accessibilityLabel(tab.identity.map { "Site information. " + $0.headline } ?? "Site information")
             .onChange(of: showInfo) { _, shown in holdChrome(shown) }

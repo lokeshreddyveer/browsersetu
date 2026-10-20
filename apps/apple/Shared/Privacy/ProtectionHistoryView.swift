@@ -51,6 +51,6 @@ struct ProtectionHistoryView: View {
             }
         }
         .formStyle(.grouped)
-        .animation(.easeOut(duration: 0.2), value: span)
+        .motion(.easeOut(duration: 0.2), value: span)
     }
 }

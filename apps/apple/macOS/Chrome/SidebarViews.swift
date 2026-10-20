@@ -508,8 +508,8 @@ struct VerticalTabsList: View {
                 .accessibilityIdentifier("new-tab-row")
             }
             .padding(.horizontal, 6).padding(.bottom, 8)
-            .animation(.easeOut(duration: 0.12), value: model.visibleTabs.map(\.id))
-            .animation(.easeOut(duration: 0.18), value: model.density)
+            .motion(.easeOut(duration: 0.12), value: model.visibleTabs.map(\.id))
+            .motion(.easeOut(duration: 0.18), value: model.density)
         }
         .acceptsDroppedTabs(model)
     }
@@ -530,7 +530,7 @@ struct VerticalTabsList: View {
             ForEach(GroupPath.visible(model.groupNames, collapsed: model.collapsedGroups, query: groupQuery), id: \.self) { groupRow(GroupPath.leaf($0), group: $0) }
         }
         .padding(.bottom, 8)
-        .animation(.easeOut(duration: 0.16), value: model.collapsedGroups)
+        .motion(.easeOut(duration: 0.16), value: model.collapsedGroups)
     }
 
     private func groupRow(_ title: String, group: String) -> some View {
@@ -905,7 +905,7 @@ struct SidebarFooter: View {
         case .bookmarks: model.sheet = .bookmarks
         case .bookmarkThis: model.toggleBookmark()
         case .readingList: model.sheet = .readingList
-        case .extensions: withAnimation(.easeOut(duration: 0.2)) { model.sidebarShowsExtensions.toggle() }
+        case .extensions: animated(.easeOut(duration: 0.2)) { model.sidebarShowsExtensions.toggle() }
         case .newTab: model.newTab()
         case .privateTab: model.openTab(url: nil, isPrivate: true)
         case .tabOverview: model.showOverview()

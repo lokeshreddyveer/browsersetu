@@ -953,7 +953,7 @@ final class KeyboardLift: ObservableObject {
                 let safe = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first?.keyWindow?.safeAreaInsets.bottom ?? 0
                 let lift = max(0, screen - frame.minY - safe)
                 let duration = (note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0.25
-                withAnimation(.easeOut(duration: duration)) { self.height = lift }
+                animated(.easeOut(duration: duration)) { self.height = lift }
             }
         }
     }
@@ -978,6 +978,6 @@ private struct PageTopStrip: View {
             if let chosen { chosen.transition(.opacity) }
         }
         .ignoresSafeArea(edges: .top)
-        .animation(.easeInOut(duration: 0.25), value: tab.tint)
+        .motion(.easeInOut(duration: 0.25), value: tab.tint)
     }
 }

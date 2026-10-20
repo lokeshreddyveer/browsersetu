@@ -166,7 +166,7 @@ struct ThemeFileDocument: FileDocument {
 }
 
 extension BrowserModel {
-    var allThemes: [BrowserTheme] { BrowserTheme.all + BrowserTheme.palettes + userThemes.compactMap(\.theme) }
+    var allThemes: [BrowserTheme] { BrowserTheme.all + BrowserTheme.palettes + BrowserTheme.animated + userThemes.compactMap(\.theme) }
 
     func userTheme(id: String) -> BrowserTheme? { userThemes.first { $0.id == id }?.theme }
 
