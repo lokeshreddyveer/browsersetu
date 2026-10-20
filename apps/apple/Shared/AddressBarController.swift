@@ -122,6 +122,11 @@ final class AddressBarController: ObservableObject {
         local = result
         suggestions = result
         selection = nil
+        // Only a site already in your history or bookmarks has its name looked up ahead of the click, never what you are typing (that would tell the
+        // network a half-typed word). The system keeps the answer, so the page starts a moment sooner.
+        if !model.proxyEnabled, let first = result.first(where: { $0.kind == .history || $0.kind == .bookmark }), let host = URL(string: first.target)?.host {
+            DNSWarmUp.warm(host)
+        }
         startRemote(query: query, model: model)
     }
 
@@ -474,5 +479,26 @@ struct SuggestionsOverlay: View {
             }
         }
         .motion(.spring(response: 0.3, dampingFraction: 0.86), value: address.isEditing && !address.suggestions.isEmpty)
+    }
+}
+
+
+/// Asks the system to look up a site's address ahead of the click. It sends nothing to the site itself, and each name is looked up at most once a minute.
+enum DNSWarmUp {
+    nonisolated(unsafe) private static var recent: [String: Date] = [:]
+    private static let lock = NSLock()
+
+    static func warm(_ host: String) {
+        let name = host.lowercased()
+        lock.lock()
+        if let last = recent[name], Date().timeIntervalSince(last) < 60 { lock.unlock(); return }
+        recent[name] = Date()
+        if recent.count > 200 { recent = recent.filter { Date().timeIntervalSince($0.value) < 60 } }
+        lock.unlock()
+        DispatchQueue.global(qos: .utility).async {
+            var hints = addrinfo(); hints.ai_socktype = SOCK_STREAM
+            var result: UnsafeMutablePointer<addrinfo>?
+            if getaddrinfo(name, "443", &hints, &result) == 0 { freeaddrinfo(result) }
+        }
     }
 }
