@@ -31,6 +31,7 @@ targets:
         product: SetuPrivacyWebKit
       - framework: Generated/BrowserCore.xcframework
         embed: false
+      - target: BrowserSetuMacShare
     info:
       path: macOS/Info.plist
       properties:
@@ -57,6 +58,9 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: Web link
             CFBundleURLSchemes: [http, https]
+            CFBundleTypeRole: Viewer
+          - CFBundleURLName: Browser Setu actions
+            CFBundleURLSchemes: [browsersetu]
             CFBundleTypeRole: Viewer
         # A browser must be able to open plain-HTTP pages. This exempts web content only; the app's own URLSession
         # traffic (filter-list updates) stays under ATS and is HTTPS-only.
@@ -179,6 +183,36 @@ targets:
       configs:
         Release:
           CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
+  BrowserSetuMacShare:
+    type: app-extension
+    platform: macOS
+    sources: [ShareExtensionMac]
+    info:
+      path: ShareExtensionMac/Info.plist
+      properties:
+        CFBundleDisplayName: Browser Setu
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.share-services
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
+          NSExtensionAttributes:
+            NSExtensionActivationRule:
+              NSExtensionActivationSupportsWebURLWithMaxCount: 1
+              NSExtensionActivationSupportsText: true
+    entitlements:
+      path: ShareExtensionMac/ShareExtensionMac.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.browsersetu.mac.share
+        PRODUCT_NAME: BrowserSetuMacShare
+        ARCHS: arm64
+        DEVELOPMENT_TEAM: X4MH29QNRS
+        CODE_SIGN_IDENTITY: "Apple Development"
+        CODE_SIGN_STYLE: Automatic
+        SKIP_INSTALL: YES
   BrowserSetuShare:
     type: app-extension
     platform: iOS
@@ -253,6 +287,11 @@ targets:
     info:
       path: iOS/Info.plist
       properties:
+        # Links such as browsersetu://open?url=… from the widgets, Control Center buttons, Shortcuts and the share sheet.
+        CFBundleURLTypes:
+          - CFBundleURLName: Browser Setu actions
+            CFBundleURLSchemes: [browsersetu]
+            CFBundleTypeRole: Viewer
         CFBundleDisplayName: Browser Setu
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleShortVersionString: $(MARKETING_VERSION)

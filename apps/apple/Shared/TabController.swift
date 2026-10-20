@@ -47,7 +47,7 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
     /// When the tab was last in front; the memory policy releases the longest-idle tabs first.
     var lastActive = Date()
     /// True after the page's web process was released to save memory; it reloads when the tab is selected.
-    private(set) var isDiscarded = false
+    @Published private(set) var isDiscarded = false
     private var savedState: Any?
     private var crashGuard = CrashGuard()
 
@@ -139,7 +139,7 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
     /// Releases this tab's web process while keeping what the user sees in the tab list and what is needed to bring
     /// the page back. Private tabs are never released: their state could not be restored.
     /// Why the page was put to sleep, shown in the resource view.
-    private(set) var sleepReason = ""
+    @Published private(set) var sleepReason = ""
 
     func discard(reason: String = "not used for a while, to save memory") {
         guard !isPrivate, !isDiscarded, engine.currentURL != nil, let model = owner else { return }
@@ -538,6 +538,11 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
         // The user's own threat list comes first; then link cleaning re-issues the navigation without trackers.
         if let host = target.host, model.shouldWarnAboutThreat(host: host) {
             model.presentThreatWarning(for: target, in: self)
+            return .deny
+        }
+        // An address that imitates a well-known site is held back until the person says to go on.
+        if mainFrame, let host = target.host, let finding = model.lookalikeFinding(host: host) {
+            model.presentLookalikeWarning(finding, for: target, in: self)
             return .deny
         }
         // A link through an AMP cache goes straight to the site's own page.

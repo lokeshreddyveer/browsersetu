@@ -268,6 +268,7 @@ extension BrowserModel {
                 self.trackSiteTime()
                 self.consumeSharedInbox()
                 if tickCount % 20 == 0 { self.publishSharedSnapshot() }
+                if tickCount % 10 == 0 { self.applyFocusSchedule() }
                 self.checkMediaSleepTimer()
                 await self.updateReadingProgress()
                 if tickCount % 3 == 0 { await self.watchResponsiveness() }

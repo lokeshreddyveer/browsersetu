@@ -31,6 +31,11 @@ enum SharedStore {
     static var folder: URL? { FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group) }
     private static func file(_ name: String) -> URL? { folder?.appendingPathComponent(name) }
 
+    /// Removes everything the widgets and the share sheet share with the app.
+    static func eraseAll() {
+        for name in ["snapshot.json", "inbox.json"] { if let url = file(name) { try? FileManager.default.removeItem(at: url) } }
+    }
+
     static func readSnapshot() -> Snapshot? {
         guard let url = file("snapshot.json"), let data = try? Data(contentsOf: url) else { return nil }
         return try? JSONDecoder().decode(Snapshot.self, from: data)
