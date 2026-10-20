@@ -771,12 +771,13 @@ private struct StartEntrance: ViewModifier {
     let index: Int
     @State private var shown = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var still: Bool { reduceMotion || MotionStyle.current == .off }
 
     func body(content: Content) -> some View {
         content
-            .opacity(shown || reduceMotion ? 1 : 0)
-            .offset(y: shown || reduceMotion ? 0 : 14)
-            .animation(.easeOut(duration: 0.5).delay(Double(index) * 0.07), value: shown)
+            .opacity(shown || still ? 1 : 0)
+            .offset(y: shown || still ? 0 : 14)
+            .animation(MotionStyle.current.apply(.easeOut(duration: 0.5).delay(Double(index) * 0.07)), value: shown)
             .onAppear { shown = true }
     }
 }
