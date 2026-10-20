@@ -3,7 +3,7 @@
 A native, security-first web browser for **macOS** and **iPhone/iPad**. It renders with the system's own WebKit, keeps everything on your device, and
 puts a small Rust core (tabs, address-bar logic, permission and navigation rules, per-profile SQLite storage) under a SwiftUI interface.
 
-> **Status: release candidate, in the production-hardening phase (0.3.3, build 15).** It is a real, working browser with a large automated test suite (about 750 tests), but
+> **Status: release candidate, in the production-hardening phase (0.3.3, build 16).** It is a real, working browser with a large automated test suite (about 750 tests), but
 > it is **not yet called production grade**: that needs the evidence in [`docs/RELEASE-BAR.md`](docs/RELEASE-BAR.md) to be complete and recorded. [`docs/capabilities.md`](docs/capabilities.md)
 > lists every feature as *Checked*, *Built* (compiled, not exercised end to end) or *Parked* (switched off), with the evidence and the limits. Read both before you rely on anything.
 
@@ -150,6 +150,19 @@ Every one can be changed in Settings › Shortcuts. The defaults:
   **download scanner** that warns about risky file types and files whose contents do not match their name.
 - **Sensitive-settings lock** (Touch ID or password) in front of saved sign-ins, extension changes and similar; it refuses when the device cannot authenticate instead of opening.
 - **Clear on quit**, **safe start** after repeated crashes (tabs return but none loads), an in-app **health check**, and a **privacy dashboard** that shows what is on and what was cleaned.
+
+### Safety, daily digest and sharing
+
+- **Look-alike address warning.** Before a page opens, its address is compared with about sixty well-known sites. Swapped letters and digits (paypa1), letters from other alphabets (including addresses written as `xn--`), a name one letter off, a famous name placed in front of a different site (`paypal.com.example.net`) and bait words such as `secure-paypal-login` stop the page with a warning that names the site it imitates. You can go back or continue. It runs on the address alone, on the device; Settings › Privacy has the switch.
+- **Privacy grade.** *This site…* in the shield card opens an A to F grade for the page in front, with the reasons listed: secure connection, how many other sites it loaded from, trackers stopped, permissions you gave it, and a look-alike notice. Worked out on the device from what the page just did.
+- **Everything for one site in one place.** The same panel also holds zoom, the site's own light or dark look, "always open in a private tab" and the permissions you allowed there, each with a *Take Back* button.
+- **Clear Everything Now** (command palette, and Settings › Privacy) asks once, then closes every tab including locked and private ones and erases history, the downloads list, website data, copied text and what the widgets and share sheet hold. Bookmarks, passwords and settings stay.
+- **Daily Digest** (command palette): your unread reading list, the newest feed items, open tasks, today's time on sites and the blocked count, in one list.
+- **Automatic switching.** Settings › Workspaces (Mac) takes time rules, such as weekdays 9 to 17 in the Work workspace. A rule is applied once as its time begins; a switch you make by hand afterwards is left alone.
+- **Ask in plain words.** Type something like `pasta recipe last week` or `bank 3 days ago` in the command palette and the pages from your history that fit appear first. Worked out on the device.
+- **Tab groups travel.** The tab list from another device now carries each tab's group; one tap opens a whole group here.
+- **Sleeping tabs say so.** A tab put to sleep shows a moon, and its tooltip gives the reason.
+- **Share into Browser Setu.** iPhone and iPad: *Browser Setu* in the share sheet opens a link, saves it to the reading list or sends it to your other devices. Mac: *Browser Setu* in the Share menu of Safari and other apps (App Store build). Both hand over only the web address.
 
 ### Passwords
 
@@ -321,7 +334,8 @@ The three apps share one engine and one set of features, but each has its own la
   be that iPad or keyboard); it has no tests of its own yet.
 - The same privacy, passwords (with Face ID), sync, themes, start page with the Customize panel, PDF editor, page tools, address-bar answers, sent tabs and settings, as above. Extensions install and run from the More
   menu (iOS 18.4 or later). There is a speed-pill widget and Shortcuts actions.
-- **Mac only:** several windows, guest windows, split view, mouse gestures, the sidebar layouts, floating library cards, panels as tabs and the Workbench developer tools.
+  **Widgets:** Search, Favorites, Blocked Today and Reading List for the Home Screen, and Search and Blocked Today for the Lock Screen. **Control Center and Lock Screen buttons (iOS 18):** New Tab, Private Tab and Shared Inbox. Widgets need the shared App Group, which is set up for this app.
+- **Mac only:** Control-Option-Space opens a small search from the menu bar in any app (turn it on in the Browser Setu menu), several windows, guest windows, split view, mouse gestures, the sidebar layouts, floating library cards, panels as tabs and the Workbench developer tools.
 
 ## What leaves your device
 
@@ -336,6 +350,7 @@ Browser Setu has no accounts, no analytics and no telemetry. The only network re
 | You add an extension from the Chrome Web Store | one package request | Google's store |
 | The downloadable Mac build checks for updates (daily, can be turned off) | the app's version | github.com |
 | The YouTube ad blocker and its update option are on (at most daily; "Check Now" any time) | one small rules file, no cookies or identifiers | raw.githubusercontent.com (this project) |
+| You start a network check, a response-headers view, the dead-link checker, a feed refresh, or a large download | one request each, with no cookies or referrer; a large download uses up to six connections to the same file | the address you chose |
 | You press Check Passwords for Leaks | the first five characters of each password's SHA-1 hash, nothing else | haveibeenpwned.com |
 | You sync | an encrypted snapshot | your iCloud, or your own device over Wi-Fi |
 
