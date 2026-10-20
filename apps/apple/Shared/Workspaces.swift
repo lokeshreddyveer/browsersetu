@@ -69,12 +69,42 @@ struct SurfaceBackground: ViewModifier {
     }
 }
 
+/// How lively the app's own animations are. It changes every animation in the interface at once, and is separate from the system's Reduce Motion
+/// setting, which always wins.
+enum MotionStyle: String, CaseIterable, Identifiable {
+    case off, calm, standard, snappy, lively
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
+    var summary: String {
+        switch self {
+        case .off: "No animation: changes happen at once."
+        case .calm: "Slower and softer."
+        case .standard: "The default."
+        case .snappy: "Quick and light."
+        case .lively: "Springy, with a little bounce."
+        }
+    }
+
+    nonisolated(unsafe) static var current = MotionStyle.standard
+
+    /// The animation to use in place of the one asked for; nil means none.
+    func apply(_ animation: Animation) -> Animation? {
+        switch self {
+        case .off: nil
+        case .calm: animation.speed(0.65)
+        case .standard: animation
+        case .snappy: animation.speed(1.6)
+        case .lively: .bouncy(duration: 0.45)
+        }
+    }
+}
+
 struct MotionModifier<V: Equatable>: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let animation: Animation
     let value: V
     func body(content: Content) -> some View {
-        content.animation(reduceMotion ? nil : animation, value: value)
+        content.animation(reduceMotion ? nil : MotionStyle.current.apply(animation), value: value)
     }
 }
 
@@ -86,7 +116,8 @@ func animated<R>(_ animation: Animation = .easeOut(duration: 0.2), _ body: () th
     #else
     let reduce = UIAccessibility.isReduceMotionEnabled
     #endif
-    return reduce ? try body() : try withAnimation(animation, body)
+    guard !reduce, let styled = MotionStyle.current.apply(animation) else { return try body() }
+    return try withAnimation(styled, body)
 }
 
 extension View {

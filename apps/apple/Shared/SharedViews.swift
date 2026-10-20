@@ -383,6 +383,8 @@ struct AppearanceSettingsSection: View {
     var body: some View {
         Group {
             Section("Appearance") {
+                Picker("Animation", selection: $model.motionStyle) { ForEach(MotionStyle.allCases) { Text($0.title).tag($0) } }
+                Text(model.motionStyle.summary).font(.caption).foregroundStyle(.secondary)
                 Picker("Theme", selection: $model.appearance) {
                     ForEach(AppearanceMode.allCases) { Text($0.title).tag($0) }
                 }

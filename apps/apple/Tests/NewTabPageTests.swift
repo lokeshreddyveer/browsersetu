@@ -47,3 +47,12 @@ final class VoiceQueryTests: XCTestCase {
         XCTAssertEqual(StartBackground.image.title, "Picture")
     }
 }
+
+final class MotionStyleTests: XCTestCase {
+    func testOffGivesNoAnimationAndTheOthersDo() {
+        XCTAssertNil(MotionStyle.off.apply(.easeOut(duration: 0.2)))
+        for style in MotionStyle.allCases where style != .off { XCTAssertNotNil(style.apply(.easeOut(duration: 0.2))) }
+        XCTAssertEqual(MotionStyle.allCases.count, 5)
+        XCTAssertEqual(MotionStyle(rawValue: "standard"), .standard)
+    }
+}
