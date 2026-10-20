@@ -191,7 +191,7 @@ struct WindowBackdrop: View {
         if reduceTransparency || model.themeIsActive {
             // A chosen theme paints the whole window in its own colour. The system's blur lets the desktop show through and washes the colour out, most of all above
             // the page, so a theme is drawn solid everywhere.
-            Color.chrome
+            if model.themeIsActive { ChromeBackdrop() } else { Color.chrome }
         } else if model.singleToolbar || model.topBarHidden {
             ZStack {
                 BlurBackdrop()

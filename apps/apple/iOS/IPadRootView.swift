@@ -39,7 +39,7 @@ struct IPadRootView: View {
                 .padding(.horizontal, 16).padding(.bottom, 24)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         }
-        .background((ThemeState.chrome ?? Color(.systemBackground)).ignoresSafeArea())
+        .background { Group { if model.themeIsActive { ChromeBackdrop() } else { Color(.systemBackground) } }.ignoresSafeArea() }
         .background { IPadShortcutLayer() }
         // An external keyboard talks to whatever has focus. With nothing focused its keys go nowhere, so the page takes focus whenever
         // the window, the tab or a dialog settles, and the address field keeps it while it is being typed in.

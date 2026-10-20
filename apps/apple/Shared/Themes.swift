@@ -141,6 +141,25 @@ struct CustomTheme: Codable, Equatable {
 enum ThemeState {
     nonisolated(unsafe) static var chrome: Color?
     nonisolated(unsafe) static var raised: Color?
+    /// The theme in use has a moving backdrop, so the bars let it show through instead of covering it.
+    nonisolated(unsafe) static var animated = false
+}
+
+/// The colour of the browser's own surfaces (window, toolbar, tabs, sidebar). With an animated theme it also holds the moving backdrop, which
+/// shows wherever a bar is see-through. It is never drawn behind a web page.
+struct ChromeBackdrop: View {
+    @EnvironmentObject var model: BrowserModel
+
+    var body: some View {
+        ZStack {
+            ThemeState.chrome ?? Color.clear
+            if model.themeIsActive, model.activeTheme.decoration.isAnimated {
+                ThemeBackdrop.Decoration(kind: model.activeTheme.decoration, tint: model.activeTheme.accent.color)
+                    .transition(.opacity)
+            }
+        }
+        .motion(.easeInOut(duration: 0.4), value: model.themeID)
+    }
 }
 
 // MARK: - Drawing
@@ -164,7 +183,7 @@ struct ThemeBackdrop: View {
         .ignoresSafeArea()
     }
 
-    private struct Decoration: View {
+    struct Decoration: View {
         let kind: ThemeDecoration
         let tint: Color
         @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -357,6 +376,7 @@ extension BrowserModel {
             ThemeState.chrome = nil
             ThemeState.raised = nil
         }
+        ThemeState.animated = themeIsActive && theme.decoration.isAnimated
         applyWorkspaceTheme()
         applySystemAppearance()
     }
@@ -586,7 +606,7 @@ extension View {
     /// The same for a surface that fills its whole area (a bar, a drawer).
     func themedBar<F: ShapeStyle>(fallback: F) -> some View {
         Group {
-            if let raised = ThemeState.raised { background(raised.opacity(0.94)) } else { background(fallback) }
+            if let raised = ThemeState.raised { background(raised.opacity(ThemeState.animated ? 0.45 : 0.94)) } else { background(fallback) }
         }
     }
 }
