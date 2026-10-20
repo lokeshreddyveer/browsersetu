@@ -69,6 +69,8 @@ final class LookTests: XCTestCase {
         XCTAssertTrue(ThemeDecoration.aurora.isAnimated)
         XCTAssertFalse(ThemeDecoration.stars.isAnimated)
         XCTAssertEqual(BrowserTheme.animated.count, 16)
+        XCTAssertEqual(BrowserTheme.photos.count, 7)
+        XCTAssertTrue(BrowserTheme.photos.allSatisfy { $0.backdropImage != nil })
         XCTAssertTrue(BrowserTheme.animated.allSatisfy { $0.decoration.isAnimated })
     }
 
