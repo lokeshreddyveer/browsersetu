@@ -66,7 +66,7 @@ struct PhoneRootView: View {
                 .padding(.horizontal, 12).padding(.bottom, 92)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         }
-        .background((ThemeState.chrome ?? Color(.systemBackground)).ignoresSafeArea())
+        .background { Group { if model.themeIsActive { ChromeBackdrop() } else { Color(.systemBackground) } }.ignoresSafeArea() }
         .ignoresSafeArea(.keyboard, edges: showsDock ? .bottom : [])
         .scrollIndicators(.hidden)
         .motion(.easeOut(duration: 0.18), value: model.overviewVisible)
