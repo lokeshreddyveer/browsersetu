@@ -67,7 +67,7 @@ extension BrowserModel {
         syncSeq += 1
         saveSyncLedger()
         let tabs = tabs.filter { !$0.isPrivate && !$0.isBlank }.compactMap { tab in
-            tab.url.map { BackupPayload.Tab(url: $0.absoluteString, title: tab.displayTitle) }
+            tab.url.map { BackupPayload.Tab(url: $0.absoluteString, title: tab.displayTitle, group: tab.group.isEmpty ? nil : tab.group) }
         }
         var snapshot = BackupPayload(created: Date(), bookmarks: [], settings: [:])
         snapshot.state = syncLedger

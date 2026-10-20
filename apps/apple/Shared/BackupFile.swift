@@ -14,6 +14,8 @@ struct BackupPayload: Codable, Equatable {
     struct Tab: Codable, Equatable {
         var url: String
         var title: String
+        /// The tab group it was in. Older copies have none.
+        var group: String? = nil
     }
 
     var version = 1

@@ -27,6 +27,7 @@ struct SheetContainer: View {
                 case .compare: ComparePagesView()
                 case .timeMachine: TimeMachineView()
                 case .toolkit: ToolkitView()
+                case .digest: DigestView()
                 case .history: HistoryPanel()
                 case .downloads: DownloadsPanel(coordinator: model.downloads)
                 case .settings: SettingsView()
@@ -86,6 +87,7 @@ struct SheetContainer: View {
         case .compare: "Compare Pages"
         case .timeMachine: "Session Time Machine"
         case .toolkit: "Feeds and Tools"
+        case .digest: "Daily Digest"
         case .findAll: "Find in All Tabs"
         case .sessions: "Saved Sessions"
         case .timeline: "Tab Activity"
@@ -716,6 +718,7 @@ struct PrivacySettingsSection: View {
             ProxySection()
             PageDefensesSection()
             SitePermissionsSection()
+            SafetySettingsSection()
             PopupSettingsSection()
             WebsiteDataSection()
             BrowsingDataSection()
@@ -1128,6 +1131,7 @@ struct SettingsView: View {
             TabsSettingsSection()
             #if os(macOS)
             WorkspacesSettingsSection()
+            FocusScheduleSection()
             #endif
             StartPageSettingsSection()
             PrivacySettingsSection()

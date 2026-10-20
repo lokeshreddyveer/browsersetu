@@ -351,6 +351,11 @@ struct TabCard: View {
                 if tab.pinned { Image(systemName: "pin.fill").font(.caption2).foregroundStyle(.secondary) }
                 Text(tab.displayTitle).font(.callout).lineLimit(1)
                 Spacer(minLength: 0)
+                if tab.isDiscarded {
+                    Image(systemName: "moon.zzz.fill").font(.caption2).foregroundStyle(.secondary)
+                        .help("Asleep: \(tab.sleepReason)").accessibilityLabel("Asleep: \(tab.sleepReason)")
+                        .transition(.opacity)
+                }
                 AudioBadge(tab: tab)
             }
             .padding(.horizontal, 10).padding(.vertical, 8)

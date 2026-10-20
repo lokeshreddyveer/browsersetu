@@ -15,7 +15,7 @@ enum PanelMode: String, CaseIterable, Identifiable {
 }
 
 enum Sheet: String, Identifiable {
-    case bookmarks, history, downloads, bookmarkTools, compare, timeMachine, toolkit, pdfEditor, summary, settings, layout, research, sitePrivacy, workbench, findAll, sessions, timeline, dashboard, readingList, note, qr, style, pageTools, selection, shareTabs, shopping, repair, devices, pageSearch, resources
+    case bookmarks, history, downloads, bookmarkTools, compare, timeMachine, toolkit, digest, pdfEditor, summary, settings, layout, research, sitePrivacy, workbench, findAll, sessions, timeline, dashboard, readingList, note, qr, style, pageTools, selection, shareTabs, shopping, repair, devices, pageSearch, resources
     var id: String { rawValue }
 }
 
@@ -870,6 +870,14 @@ final class BrowserModel: ObservableObject {
     var timeTicks = 0
     var breakSite = ""
     var breakStart: Date?
+    /// Warns before opening an address that imitates a well-known site.
+    @Published var lookalikeGuard = true { didSet { saveSetting("lookalike_guard", lookalikeGuard ? "1" : "0") } }
+    /// Hosts the person chose to open anyway, until the browser closes.
+    var allowedLookalikes = Set<String>()
+    /// "On weekdays 9 to 17, use the Work workspace."
+    @Published var focusRules: [FocusRule] = [] { didSet { saveSetting("focus_rules", encodedMap(["list": focusRules])) } }
+    /// The rule already applied in its current time window, so a change made by hand afterwards is left alone.
+    var focusAppliedKey = ""
     @Published var keepClipboardHistory = false { didSet { saveSetting("clipboard_history", keepClipboardHistory ? "1" : "0"); if !keepClipboardHistory { clipboardHistory = [] } } }
     @Published var clipboardHistory: [ClipboardEntry] = []
     @Published var backdropIntensity: BackdropIntensity = .medium { didSet { ThemeState.intensity = backdropIntensity.value; saveSetting("backdrop_intensity", backdropIntensity.rawValue) } }
@@ -2236,6 +2244,8 @@ final class BrowserModel: ObservableObject {
         addressBarPosition = AddressBarPosition(rawValue: get("address_bar") ?? "") ?? Self.defaultAddressBarPosition
         showFavorites = get("show_favorites") != "0"
         showContinue = get("show_continue") != "0"
+        lookalikeGuard = get("lookalike_guard") != "0"
+        focusRules = Self.decodeMap(get("focus_rules"), as: [FocusRule].self)["list"] ?? []
         showFrequent = get("show_frequent") != "0"
         if let raw = get("toolbar_items") {
             var chosen = raw.split(separator: ",").compactMap { ToolbarItemID(rawValue: String($0)) }
@@ -2426,7 +2436,7 @@ final class BrowserModel: ObservableObject {
 
     /// Settings a backup carries. Anything else in a backup file is ignored on restore.
     static let backupSettingKeys: Set<String> = [
-        "accent", "accent_chosen", "address_bar", "address_bar_items", "appearance", "density", "keep_pinned", "layout_preset", "memory_mode", "show_favorites", "show_continue",
+        "accent", "accent_chosen", "lookalike_guard", "focus_rules", "address_bar", "address_bar_items", "appearance", "density", "keep_pinned", "layout_preset", "memory_mode", "show_favorites", "show_continue",
         "show_frequent", "show_greeting", "show_recently_closed", "sidebar_autohide", "sidebar_position", "sidebar_rail",
         "organize_downloads_domain", "download_notify", "last_split", "track_time", "break_minutes", "clipboard_history", "feeds", "backdrop_intensity", "icon_weight", "site_icon_shape", "site_looks", "motion_style", "download_segments", "start_title", "start_font", "start_search_style", "start_width", "start_image_dim", "start_image_blur", "history_retention_days", "new_tab_mode", "new_tab_url", "start_color_a", "start_color_b", "reader_style", "media_history_on", "referrer_mode", "custom_keep", "custom_idle", "battery_aware", "security_events", "tab_schedules", "protect_pinned", "sidebar_width", "single_toolbar", "split_orientation", "start_background", "startup", "startup_workspace",
         "strip_tracking", "tab_groups", "tab_layout", "tab_previews", "tint_toolbar", "toolbar_autohide", "toolbar_items",
@@ -2649,6 +2659,8 @@ extension BrowserModel {
             .init(id: "screenshot-annotate", title: "Screenshot This Page and Mark It Up", subtitle: "Whole page, then draw, highlight, redact or sign", symbol: "camera.viewfinder", shortcut: "") { [self] in Task { await annotatePageScreenshot() } },
             .init(id: "restore-last-session", title: "Reopen My Last Session", subtitle: "The pages from the newest checkpoint", symbol: "clock.arrow.circlepath", shortcut: "") { [self] in reopenLastSession() },
             .init(id: "inbox", title: "Take In Items from the Share Sheet", subtitle: "", symbol: "tray.and.arrow.down", shortcut: "") { [self] in consumeSharedInbox() },
+            .init(id: "digest", title: "Daily Digest", subtitle: "Saved articles, feeds and tasks in one place", symbol: "newspaper", shortcut: "") { [self] in sheet = .digest },
+            .init(id: "panic", title: "Clear Everything Now", subtitle: "Closes every tab and erases history, data and copied text", symbol: "exclamationmark.octagon", shortcut: "") { [self] in Task { await panic() } },
             .init(id: "toolkit", title: "Feeds, Ask This Page, Time on Sites, Clipboard", subtitle: "", symbol: "square.grid.2x2", shortcut: "") { [self] in sheet = .toolkit },
             .init(id: "time-machine", title: "Session Time Machine: Go Back to Earlier Tabs", subtitle: "", symbol: "clock.arrow.circlepath", shortcut: "") { [self] in sheet = .timeMachine },
             .init(id: "diag-report", title: "Copy a Diagnostic Report", subtitle: "No addresses or titles", symbol: "stethoscope", shortcut: "") { [self] in
@@ -2747,13 +2759,21 @@ extension BrowserModel {
 
     func paletteItems(query: String) -> [PaletteItem] {
         let all = allPaletteItems(query: query)
-        return all.compactMap { item -> (Int, PaletteItem)? in
+        // "pasta recipe last week" lists the pages from history that fit, ahead of the commands.
+        let recalled: [PaletteItem] = (plainRecall(query)?.items ?? []).prefix(5).compactMap { page in
+            guard let url = URL(string: page.url) else { return nil }
+            return PaletteItem(id: "recall-\(page.url)", title: page.title.isEmpty ? page.url : page.title,
+                               subtitle: "From your history · \(Date(timeIntervalSince1970: TimeInterval(page.lastVisit)).formatted(.relative(presentation: .named)))",
+                               symbol: "clock.arrow.circlepath", shortcut: "") { [self] in _ = openTab(url: url, isPrivate: false) }
+        }
+        let ranked = all.compactMap { item -> (Int, PaletteItem)? in
             guard let score = fuzzyScore(query: query, in: item.title) ?? fuzzyScore(query: query, in: item.subtitle).map({ $0 - 20 }) else { return nil }
             return (score, item)
         }
         .sorted { $0.0 > $1.0 }
         .prefix(12)
         .map(\.1)
+        return Array((recalled + ranked).prefix(12))
     }
 }
 

@@ -92,11 +92,20 @@ struct SyncedTabsView: View {
             List {
                 ForEach(model.remoteTabs) { device in
                     Section {
+                        let named = Dictionary(grouping: device.tabs.filter { !($0.group ?? "").isEmpty }, by: { $0.group ?? "" })
+                        ForEach(named.keys.sorted(), id: \.self) { name in
+                            Button {
+                                model.adoptSyncedGroup(name, tabs: named[name] ?? [])
+                                dismiss()
+                            } label: {
+                                Label("Open the group “\(name)” here (\(named[name]?.count ?? 0) tabs)", systemImage: "square.stack.3d.up")
+                            }
+                        }
                         ForEach(device.tabs, id: \.url) { tab in
                             Button { model.open(urlString: tab.url, newTab: true); dismiss() } label: {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(tab.title.isEmpty ? tab.url : tab.title).lineLimit(1)
-                                    Text(displayHost(URL(string: tab.url))).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                    Text(displayHost(URL(string: tab.url)) + ((tab.group ?? "").isEmpty ? "" : " · " + (tab.group ?? ""))).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                                 }
                             }
                             .buttonStyle(.plain)
