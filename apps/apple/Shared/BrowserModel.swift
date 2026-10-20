@@ -1194,6 +1194,7 @@ final class BrowserModel: ObservableObject {
             if !previous.isDiscarded, !previous.isBlank { Task { await previous.engine.saveScrollState() } }
         }
         let previousTab = active
+        if previousTab?.id != id { Haptics.selection() }
         expandChrome()
         activeID = id
         if let tab = active { activeFixedTop = tab.fixedTop; activeFixedBottom = tab.fixedBottom }

@@ -45,8 +45,8 @@ struct DownloadToast: View {
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 8) {
-            if !coordinator.active.isEmpty { progressCard.transition(.move(edge: .bottom).combined(with: .opacity)) }
-            if let banner = model.downloadBanner { doneCard(banner).transition(.move(edge: .bottom).combined(with: .opacity)) }
+            if !coordinator.active.isEmpty { progressCard.transition(.scale(scale: 0.9, anchor: .bottomTrailing).combined(with: .move(edge: .bottom)).combined(with: .opacity)) }
+            if let banner = model.downloadBanner { doneCard(banner).transition(.scale(scale: 0.9, anchor: .bottomTrailing).combined(with: .move(edge: .bottom)).combined(with: .opacity)) }
         }
         .animation(.easeOut(duration: 0.22), value: coordinator.active.isEmpty)
         .animation(.easeOut(duration: 0.22), value: model.downloadBanner)
@@ -83,6 +83,7 @@ struct DownloadToast: View {
             HStack(spacing: 12) {
                 Image(systemName: banner.warning == nil ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
                     .font(.system(size: 22)).foregroundStyle(banner.warning == nil ? Color.green : Color.orange)
+                    .symbolEffect(.bounce, value: banner.id)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Downloaded").font(.caption).foregroundStyle(.secondary)
                     Text(banner.filename).font(.callout.weight(.medium)).lineLimit(1).truncationMode(.middle)

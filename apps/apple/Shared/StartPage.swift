@@ -49,14 +49,15 @@ struct StartPageView: View {
                             greeting
                             heroSearch
                         }
+                        .startEntrance(0)
                         // Above everything below it: the suggestions open over the favorites and the cards, and they were being drawn under them.
                         .zIndex(10)
                         if isPrivate {
                             privateNote
                         } else {
-                            if model.showFavorites { FavoritesGrid(addingFavorite: $addingFavorite) }
-                            if model.showContinue, let tab = model.continueTab { ContinueCard(tab: tab) }
-                            if model.showFrequent || model.showRecentlyClosed { HistoryChips() }
+                            if model.showFavorites { FavoritesGrid(addingFavorite: $addingFavorite).startEntrance(1) }
+                            if model.showContinue, let tab = model.continueTab { ContinueCard(tab: tab).startEntrance(2) }
+                            if model.showFrequent || model.showRecentlyClosed { HistoryChips().startEntrance(3) }
                             if !model.inbox.isEmpty { SentToThisDevice() }
                             if !model.remoteTabs.isEmpty { OtherDeviceTabs() }
                         }
@@ -67,6 +68,7 @@ struct StartPageView: View {
                             PrivacyLine()
                             CustomizeMenu()
                         }
+                        .startEntrance(4)
                         .padding(.top, 20)
                         .padding(.bottom, bottomInset)
                     }
@@ -176,7 +178,7 @@ struct StartPageView: View {
             else if scheme == .dark {
                 ZStack {
                     Color(red: 0.047, green: 0.059, blue: 0.090)                       // #0C0F17
-                    RadialGradient(colors: [Color(red: 0.067, green: 0.106, blue: 0.188).opacity(0.85), .clear],   // #111B30
+                    RadialGradient(colors: [StartTone.glow().opacity(0.85), .clear],   // #111B30
                                    center: .init(x: 0.5, y: 0.42), startRadius: 0, endRadius: 520)
                 }
             } else {
@@ -762,3 +764,33 @@ private struct StartSearchField: View {
     private func reset() { address.clear(); address.text = ""; address.isEditing = false; focused = false }
 }
 #endif
+
+
+/// Each part of the start page rises into place a moment after the one above it. Without motion (Reduce Motion) it simply appears.
+private struct StartEntrance: ViewModifier {
+    let index: Int
+    @State private var shown = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(shown || reduceMotion ? 1 : 0)
+            .offset(y: shown || reduceMotion ? 0 : 14)
+            .animation(.easeOut(duration: 0.5).delay(Double(index) * 0.07), value: shown)
+            .onAppear { shown = true }
+    }
+}
+
+private extension View { func startEntrance(_ index: Int) -> some View { modifier(StartEntrance(index: index)) } }
+
+/// The glow behind the start page leans warm in the morning, cool by day, violet in the evening and deep blue at night.
+enum StartTone {
+    static func glow(hour: Int = Calendar.current.component(.hour, from: Date())) -> Color {
+        switch hour {
+        case 5..<9: Color(red: 0.20, green: 0.13, blue: 0.08)
+        case 9..<17: Color(red: 0.07, green: 0.16, blue: 0.21)
+        case 17..<21: Color(red: 0.17, green: 0.10, blue: 0.23)
+        default: Color(red: 0.067, green: 0.106, blue: 0.188)
+        }
+    }
+}
