@@ -297,7 +297,7 @@ private struct IPadReturnPill: View {
                 Image(systemName: "chevron.down").font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary)
             }
             .padding(.horizontal, 16).frame(height: 40)
-            .background(.regularMaterial, in: Capsule())
+            .background(ThemeState.animated ? AnyShapeStyle(Color.black.opacity(0.35)) : AnyShapeStyle(.regularMaterial), in: Capsule())
             .overlay(Capsule().strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5))
             .shadow(color: .black.opacity(0.25), radius: 10, y: 3)
         }
@@ -316,7 +316,7 @@ private struct IPadSuggestions: View {
                 Color.clear.contentShape(Rectangle()).onTapGesture { address.isEditing = false }
                 SuggestionsList(address: address)
                     .padding(8).frame(maxWidth: 640)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .background(ThemeState.animated ? AnyShapeStyle(Color.black.opacity(0.35)) : AnyShapeStyle(.regularMaterial), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5))
                     .shadow(color: .black.opacity(0.3), radius: 18, y: 8)
                     .padding(.top, 8)

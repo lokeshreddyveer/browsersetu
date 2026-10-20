@@ -610,8 +610,8 @@ struct PageArea: View {
     var body: some View {
         ZStack {
             EngineViewHost(view: tab.hostView)
-            if tab.isSettingsPage { MacSettingsView(inline: true).settlesBeforeShowing().background(Color.platformBackground).transition(.opacity) }
-            else if let panel = tab.panelSheet { PanelTabView(sheet: panel, tab: tab).background(Color.platformBackground).transition(.opacity) }
+            if tab.isSettingsPage { MacSettingsView(inline: true).settlesBeforeShowing().chromeFill().transition(.opacity) }
+            else if let panel = tab.panelSheet { PanelTabView(sheet: panel, tab: tab).chromeFill().transition(.opacity) }
             else if tab.isBlank { StartPageView(isPrivate: tab.isPrivate).contextMenu { if !tab.isPrivate { StartPageContextMenu() } } }
         }
         .overlay(alignment: .bottomTrailing) { if model.workbench.showSizeHUD { SizeHUD() } }
