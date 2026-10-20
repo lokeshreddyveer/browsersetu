@@ -140,3 +140,19 @@ zerovec-derive 0.11.6 — Unicode-3.0
 zmij 1.0.23 — MIT
 
 Each library is used under the terms of the licence shown. Where two licences are listed, either one applies. Full licence texts are published with each library on crates.io and in its source repository.
+
+
+Photographs used as theme backgrounds (Settings, Appearance, Themes, Photos)
+These are NASA images. NASA states that its images are generally not copyrighted and may be used with credit to the source; the credit lines below are those NASA gives for each image. Browser Setu is not endorsed by NASA.
+- Cosmic Cliffs, Carina Nebula (James Webb Space Telescope, NIRCam): NASA, ESA, CSA, STScI. images.nasa.gov, id carina_nebula.
+- Horsehead Nebula (Hubble Space Telescope): NASA, ESA, STScI. images.nasa.gov, id PIA16008.
+- Blue Marble 2007 West: NASA. images.nasa.gov, id GSFC_20171208_Archive_e002131.
+- Earthset from Orion: NASA. images.nasa.gov, id art002e021278.
+- Andromeda Galaxy: NASA/JPL/California Institute of Technology. images.nasa.gov, id PIA04921.
+The pictures were reduced in size and compressed; nothing else was changed.
+
+Paintings used as theme backgrounds
+These works are in the public domain, and The Metropolitan Museum of Art releases images of them under its Open Access programme (CC0). The Met does not endorse Browser Setu.
+- The Great Wave (Under the Wave off Kanagawa), Katsushika Hokusai, about 1830 to 1832. The Metropolitan Museum of Art, H. O. Havemeyer Collection, Bequest of Mrs. H. O. Havemeyer, 1929 (object 45434).
+- Wheat Field with Cypresses, Vincent van Gogh, 1889. The Metropolitan Museum of Art, Purchase, The Annenberg Foundation Gift, 1993 (object 436535).
+These pictures were reduced in size and compressed; nothing else was changed.

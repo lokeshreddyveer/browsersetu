@@ -47,6 +47,8 @@ struct BrowserTheme: Identifiable, Equatable {
     let decoration: ThemeDecoration
     /// Where the gallery files it: the moods, the classic palettes, or the person's own.
     var family = "Mood"
+    /// A picture bundled with the app that fills the theme's background (see Acknowledgements for who made it).
+    var backdropImage: String? = nil
 
     static let midnight = BrowserTheme(id: "midnight", name: "Midnight", note: "The default", accent: RGB(0.05, 0.50, 0.60), chrome: nil,
                                        top: RGB(0.045, 0.055, 0.095), bottom: RGB(0.055, 0.058, 0.068), glow: RGB(0.067, 0.106, 0.188), scheme: nil, decoration: .none)
@@ -73,6 +75,24 @@ struct BrowserTheme: Identifiable, Equatable {
                      top: RGB(hex: 0x191724), bottom: RGB(hex: 0x12101B), glow: RGB(hex: 0x26233A), scheme: .dark, decoration: .none, family: "Palette"),
         BrowserTheme(id: "onedark", name: "One Dark", note: "The editor classic", accent: RGB(hex: 0x61AFEF), chrome: RGB(hex: 0x21252B),
                      top: RGB(hex: 0x282C34), bottom: RGB(hex: 0x1B1F27), glow: RGB(hex: 0x3E4451), scheme: .dark, decoration: .none, family: "Palette"),
+    ]
+
+    /// Real photographs of space and Earth, by NASA, free to use with credit. Each is credited in Acknowledgements and in the theme's note.
+    static let photos: [BrowserTheme] = [
+        BrowserTheme(id: "photo-carina", name: "Cosmic Cliffs", note: "Webb telescope: NASA, ESA, CSA, STScI", accent: RGB(hex: 0xFFB36B), chrome: RGB(hex: 0x120C14),
+                     top: RGB(hex: 0x1A1018), bottom: RGB(hex: 0x0C0810), glow: RGB(hex: 0x3A2030), scheme: .dark, decoration: .none, family: "Photos", backdropImage: "carina"),
+        BrowserTheme(id: "photo-horsehead", name: "Horsehead Nebula", note: "Hubble: NASA, ESA, STScI", accent: RGB(hex: 0xFF7A8A), chrome: RGB(hex: 0x120A10),
+                     top: RGB(hex: 0x1A0C14), bottom: RGB(hex: 0x0C060A), glow: RGB(hex: 0x3A1624), scheme: .dark, decoration: .none, family: "Photos", backdropImage: "horsehead"),
+        BrowserTheme(id: "photo-bluemarble", name: "Blue Marble", note: "Earth from space: NASA", accent: RGB(hex: 0x5CB8FF), chrome: RGB(hex: 0x080E18),
+                     top: RGB(hex: 0x081020), bottom: RGB(hex: 0x040810), glow: RGB(hex: 0x10305A), scheme: .dark, decoration: .none, family: "Photos", backdropImage: "bluemarble"),
+        BrowserTheme(id: "photo-earthset", name: "Earthset", note: "Seen from Orion: NASA", accent: RGB(hex: 0x8FC7FF), chrome: RGB(hex: 0x0A0E14),
+                     top: RGB(hex: 0x0C1018), bottom: RGB(hex: 0x05070C), glow: RGB(hex: 0x1A2A40), scheme: .dark, decoration: .none, family: "Photos", backdropImage: "earthset"),
+        BrowserTheme(id: "art-greatwave", name: "The Great Wave", note: "Hokusai, c. 1830. The Met, public domain", accent: RGB(hex: 0xE8D8A8), chrome: RGB(hex: 0x0E1A28),
+                     top: RGB(hex: 0x12263C), bottom: RGB(hex: 0x0A1624), glow: RGB(hex: 0x24486E), scheme: .dark, decoration: .none, family: "Photos", backdropImage: "greatwave"),
+        BrowserTheme(id: "art-cypresses", name: "Wheat Field with Cypresses", note: "Van Gogh, 1889. The Met, public domain", accent: RGB(hex: 0xF2C14E), chrome: RGB(hex: 0x10161C),
+                     top: RGB(hex: 0x16212C), bottom: RGB(hex: 0x0C1218), glow: RGB(hex: 0x2E4A5E), scheme: .dark, decoration: .none, family: "Photos", backdropImage: "cypresses"),
+        BrowserTheme(id: "photo-andromeda", name: "Andromeda", note: "Our neighbour galaxy: NASA/JPL-Caltech", accent: RGB(hex: 0xC9A6FF), chrome: RGB(hex: 0x0C0A16),
+                     top: RGB(hex: 0x100C1E), bottom: RGB(hex: 0x06050C), glow: RGB(hex: 0x2A1E50), scheme: .dark, decoration: .none, family: "Photos", backdropImage: "andromeda"),
     ]
 
     /// Themes whose background moves. Each is drawn in code, so it works offline and weighs nothing; it stands still when motion is off or the battery is low.
@@ -222,6 +242,9 @@ struct ThemeBackdrop: View {
         ZStack {
             LinearGradient(colors: [theme.top.color, theme.bottom.color], startPoint: .top, endPoint: .bottom)
             RadialGradient(colors: [theme.glow.color.opacity(0.75), .clear], center: .init(x: 0.5, y: 0.38), startRadius: 0, endRadius: 560)
+            if let name = theme.backdropImage, let data = BundledBackdrops.data(name), let image = Image(platformData: data) {
+                Color.clear.overlay(image.resizable().scaledToFill()).overlay(Color.black.opacity(0.28)).clipped()
+            }
             if let photo, let image = Image(platformData: photo) {
                 image.resizable().scaledToFill().overlay(Color.black.opacity(photoDim))
             }
@@ -515,7 +538,7 @@ extension BrowserModel {
     var activeTheme: BrowserTheme {
         if themeID == "custom" { return customTheme.theme }
         if themeID.hasPrefix("user-") { return userTheme(id: themeID) ?? .midnight }
-        return (BrowserTheme.all + BrowserTheme.palettes + BrowserTheme.animated).first { $0.id == themeID } ?? .midnight
+        return (BrowserTheme.all + BrowserTheme.palettes + BrowserTheme.animated + BrowserTheme.photos).first { $0.id == themeID } ?? .midnight
     }
 
     var themeIsActive: Bool { themeID != "midnight" }
@@ -645,6 +668,7 @@ struct ThemesSection: View {
         Section {
             VStack(alignment: .leading, spacing: 14) {
                 gallery("Moods", BrowserTheme.all)
+                gallery("Photos", BrowserTheme.photos)
                 gallery("Animated", BrowserTheme.animated)
                 gallery("Classic palettes", BrowserTheme.palettes)
                 if !model.userThemes.isEmpty { gallery("Yours", model.userThemes.compactMap(\.theme)) }
@@ -788,5 +812,17 @@ extension View {
         Group {
             if let raised = ThemeState.raised { background(raised.opacity(ThemeState.animated ? 0.45 : 0.94)) } else { background(fallback) }
         }
+    }
+}
+
+
+/// The pictures bundled for the Photos themes, read once and kept.
+enum BundledBackdrops {
+    nonisolated(unsafe) private static var cache: [String: Data] = [:]
+    static func data(_ name: String) -> Data? {
+        if let hit = cache[name] { return hit }
+        guard let url = Bundle.main.url(forResource: name, withExtension: "jpg"), let data = try? Data(contentsOf: url) else { return nil }
+        cache[name] = data
+        return data
     }
 }
