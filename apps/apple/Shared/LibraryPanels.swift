@@ -279,7 +279,7 @@ struct DownloadsPanel: View {
 
     private var shown: [DownloadItem] {
         items.filter { item in
-            (kind == .all || Kind.of(item.filename) == kind) && (query.isEmpty || item.filename.localizedCaseInsensitiveContains(query) || item.url.localizedCaseInsensitiveContains(query))
+            (kind == .all || Kind.of(item.filename) == kind) && (query.isEmpty || item.filename.localizedCaseInsensitiveContains(query) || item.url.localizedCaseInsensitiveContains(query) || model.tags(forDownload: item.filename).contains { $0.contains(query.lowercased()) })
         }
     }
 
@@ -383,9 +383,14 @@ struct DownloadsPanel: View {
 
     private func completed(_ d: DownloadItem) -> some View {
         let date = Date(timeIntervalSince1970: TimeInterval(d.created)).formatted(date: .abbreviated, time: .shortened)
-        return PanelRow(title: d.filename, detail: displayHost(URL(string: d.url)) + " · " + date, action: nil) {
+        let tagText = model.tags(forDownload: d.filename).map { "#" + $0 }.joined(separator: " ")
+        return PanelRow(title: d.filename, detail: displayHost(URL(string: d.url)) + " · " + date + (tagText.isEmpty ? "" : " · " + tagText), action: nil) {
             fileIcon(d.filename)
         } trailing: {
+            Menu {
+                ForEach(model.tags(forDownload: d.filename), id: \.self) { tag in Button("Remove “\(tag)”") { model.removeDownloadTag(tag, from: d.filename) } }
+                Button("Add Tag…") { Task { @MainActor in if let t = await Dialogs.promptText(title: "Tag This File", message: d.filename, placeholder: "work, receipts…"), !t.isEmpty { model.addDownloadTag(t, to: d.filename) } } }
+            } label: { Image(systemName: model.tags(forDownload: d.filename).isEmpty ? "tag" : "tag.fill").accessibilityLabel("Tags") }.menuStyle(.borderlessButton).fixedSize()
             if let file = DownloadCoordinator.locate(filename: d.filename) { DownloadFileActions(url: file) }
             else { Text("Moved or deleted").font(.system(size: 11)).foregroundStyle(.tertiary) }
         }

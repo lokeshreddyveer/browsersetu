@@ -15,7 +15,7 @@ enum PanelMode: String, CaseIterable, Identifiable {
 }
 
 enum Sheet: String, Identifiable {
-    case bookmarks, history, downloads, bookmarkTools, compare, timeMachine, pdfEditor, summary, settings, layout, research, sitePrivacy, workbench, findAll, sessions, timeline, dashboard, readingList, note, qr, style, pageTools, selection, shareTabs, shopping, repair, devices, pageSearch, resources
+    case bookmarks, history, downloads, bookmarkTools, compare, timeMachine, toolkit, pdfEditor, summary, settings, layout, research, sitePrivacy, workbench, findAll, sessions, timeline, dashboard, readingList, note, qr, style, pageTools, selection, shareTabs, shopping, repair, devices, pageSearch, resources
     var id: String { rawValue }
 }
 
@@ -364,6 +364,8 @@ final class BrowserModel: ObservableObject {
 
     /// The windows' models, for the Dock menu and the Services menu to act on the right one. Weak, so a closed window is not kept alive.
     static let activeModels = NSHashTable<BrowserModel>.weakObjects()
+    /// Told of every Copy command in the app, for the clipboard history (which is off unless the person turns it on).
+    nonisolated(unsafe) static var copyObserver: ((String) -> Void)?
 
     #if DEBUG
     /// Every model made in this process, so a test run can close their pages when each test ends: pages a test left open would keep their web processes alive for the
@@ -439,6 +441,7 @@ final class BrowserModel: ObservableObject {
         observeNetwork()
         windows.add(self)
         Self.activeModels.add(self)
+        if !isSecondary { Self.copyObserver = { [weak self] text in Task { @MainActor in self?.recordCopy(text) } } }
         #if DEBUG
         Self.liveModels.add(self)
         #endif
@@ -851,6 +854,22 @@ final class BrowserModel: ObservableObject {
     @Published var maxDownloads = DownloadQueueRules.defaultConcurrent { didSet { saveSetting("download_concurrent", String(maxDownloads)); engine.downloads.maxConcurrent = maxDownloads } }
     /// A colour chosen for each website (hex by site), shown in place of the page's own colour.
     @Published var siteLooks: [String: String] = [:]
+    @Published var feeds: [Feed] = []
+    var lastPublished: SharedStore.Snapshot?
+    @Published var siteTasks: [SiteTask] = []
+    @Published var downloadTags: [String: [String]] = [:]
+    @Published var feedItems: [FeedItem] = []
+    @Published var refreshingFeeds = false
+    var feedsLoaded = false
+    @Published var siteTimeLog = SiteTimeLog()
+    @Published var trackTime = false { didSet { saveSetting("track_time", trackTime ? "1" : "0") } }
+    @Published var breakMinutes = 0 { didSet { saveSetting("break_minutes", String(breakMinutes)) } }
+    var lastTimeTick = Date()
+    var timeTicks = 0
+    var breakSite = ""
+    var breakStart: Date?
+    @Published var keepClipboardHistory = false { didSet { saveSetting("clipboard_history", keepClipboardHistory ? "1" : "0"); if !keepClipboardHistory { clipboardHistory = [] } } }
+    @Published var clipboardHistory: [ClipboardEntry] = []
     @Published var backdropIntensity: BackdropIntensity = .medium { didSet { ThemeState.intensity = backdropIntensity.value; saveSetting("backdrop_intensity", backdropIntensity.rawValue) } }
     @Published var iconWeight: IconWeight = .regular { didSet { IconWeight.current = iconWeight; LookState.shared.weight = iconWeight; saveSetting("icon_weight", iconWeight.rawValue) } }
     @Published var siteIconShape: SiteIconShape = .rounded { didSet { SiteIconShape.current = siteIconShape; LookState.shared.shape = siteIconShape; saveSetting("site_icon_shape", siteIconShape.rawValue) } }
@@ -2097,6 +2116,9 @@ final class BrowserModel: ObservableObject {
         fasterDownloads = get("download_segments") != "0"
         motionStyle = MotionStyle(rawValue: get("motion_style") ?? "") ?? .standard
         iconWeight = IconWeight(rawValue: get("icon_weight") ?? "") ?? .regular
+        trackTime = get("track_time") == "1"
+        breakMinutes = [0, 20, 30, 45, 60].contains(Int(get("break_minutes") ?? "") ?? -1) ? Int(get("break_minutes")!)! : 0
+        keepClipboardHistory = get("clipboard_history") == "1"
         backdropIntensity = BackdropIntensity(rawValue: get("backdrop_intensity") ?? "") ?? .medium
         siteIconShape = SiteIconShape(rawValue: get("site_icon_shape") ?? "") ?? .rounded
         siteLooks = Self.decodeMap(get("site_looks"), as: String.self)
@@ -2403,7 +2425,7 @@ final class BrowserModel: ObservableObject {
     static let backupSettingKeys: Set<String> = [
         "accent", "address_bar", "address_bar_items", "appearance", "density", "keep_pinned", "layout_preset", "memory_mode", "show_favorites", "show_continue",
         "show_frequent", "show_greeting", "show_recently_closed", "sidebar_autohide", "sidebar_position", "sidebar_rail",
-        "organize_downloads_domain", "download_notify", "last_split", "backdrop_intensity", "icon_weight", "site_icon_shape", "site_looks", "motion_style", "download_segments", "start_title", "start_font", "start_search_style", "start_width", "start_image_dim", "start_image_blur", "history_retention_days", "new_tab_mode", "new_tab_url", "start_color_a", "start_color_b", "reader_style", "media_history_on", "referrer_mode", "custom_keep", "custom_idle", "battery_aware", "security_events", "tab_schedules", "protect_pinned", "sidebar_width", "single_toolbar", "split_orientation", "start_background", "startup", "startup_workspace",
+        "organize_downloads_domain", "download_notify", "last_split", "track_time", "break_minutes", "clipboard_history", "feeds", "backdrop_intensity", "icon_weight", "site_icon_shape", "site_looks", "motion_style", "download_segments", "start_title", "start_font", "start_search_style", "start_width", "start_image_dim", "start_image_blur", "history_retention_days", "new_tab_mode", "new_tab_url", "start_color_a", "start_color_b", "reader_style", "media_history_on", "referrer_mode", "custom_keep", "custom_idle", "battery_aware", "security_events", "tab_schedules", "protect_pinned", "sidebar_width", "single_toolbar", "split_orientation", "start_background", "startup", "startup_workspace",
         "strip_tracking", "tab_groups", "tab_layout", "tab_previews", "tint_toolbar", "toolbar_autohide", "toolbar_items",
         "workspaces", "double_click", "collapse_on_scroll", "search_template", "search_suggestions", "speed_pill", "pill_collapsed", "site_icons", "shortcuts", "homepage", "saved_sessions", "organize_downloads", "site_notes", "search_shortcuts", "bookmark_tags", "site_styles", "phone_toolbar", "address_display", "address_icon", "search_panel_bottom", "search_panel_bottom2", "swipe_address", "app_links", "app_link_sites", "blur_private_switcher", "permission_expiry", "favorites_order", "overview_style", "overview_grouped", "overview_sort", "dark_pages", "dark_sites", "website_appearance", "site_appearance", "theme", "theme_custom", "low_power_memory", "clear_on_quit", "remember_reading", "keep_form_drafts", "site_zoom", "group_colors",
         "save_logins", "mouse_gestures", "mouse_gesture_map", "site_open_rules", "download_concurrent", "spotlight_bookmarks", "vim_on", "vim_keymap", "workflows", "download_rules", "extension_profiles", "site_delete_rules", "site_user_agents", "containers", "split_templates", "tab_tree", "block_webrtc", "webrtc_exceptions",
@@ -2621,6 +2643,10 @@ extension BrowserModel {
             .init(id: "reopen-split", title: "Reopen Last Split Layout", subtitle: "", symbol: "rectangle.split.2x1", shortcut: "") { [self] in reopenLastSplit() },
             .init(id: "compare-panels", title: "Compare the Two Split Pages", subtitle: "", symbol: "rectangle.split.2x1.fill", shortcut: "") { [self] in Task { await comparePanels() } },
             .init(id: "link-panels", title: "Link Scrolling in Split View", subtitle: "", symbol: "link", shortcut: "") { [self] in setLinkedPanes(!linkedPanes) },
+            .init(id: "screenshot-annotate", title: "Screenshot This Page and Mark It Up", subtitle: "Whole page, then draw, highlight, redact or sign", symbol: "camera.viewfinder", shortcut: "") { [self] in Task { await annotatePageScreenshot() } },
+            .init(id: "restore-last-session", title: "Reopen My Last Session", subtitle: "The pages from the newest checkpoint", symbol: "clock.arrow.circlepath", shortcut: "") { [self] in reopenLastSession() },
+            .init(id: "inbox", title: "Take In Items from the Share Sheet", subtitle: "", symbol: "tray.and.arrow.down", shortcut: "") { [self] in consumeSharedInbox() },
+            .init(id: "toolkit", title: "Feeds, Ask This Page, Time on Sites, Clipboard", subtitle: "", symbol: "square.grid.2x2", shortcut: "") { [self] in sheet = .toolkit },
             .init(id: "time-machine", title: "Session Time Machine: Go Back to Earlier Tabs", subtitle: "", symbol: "clock.arrow.circlepath", shortcut: "") { [self] in sheet = .timeMachine },
             .init(id: "diag-report", title: "Copy a Diagnostic Report", subtitle: "No addresses or titles", symbol: "stethoscope", shortcut: "") { [self] in
                 copyToPasteboard(ReliabilityStats.shared.report(tabs: tabs.count, sleeping: tabs.filter(\.isDiscarded).count, extensions: extensionCenter.extensions.filter(\.enabled).count)); notice = "Report copied."

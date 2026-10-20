@@ -265,6 +265,9 @@ extension BrowserModel {
                 try? await Task.sleep(for: .seconds(self?.governor.watchInterval ?? 3))
                 guard let self else { return }
                 if !self.isSecondary { self.openDueSchedules() }
+                self.trackSiteTime()
+                self.consumeSharedInbox()
+                if tickCount % 20 == 0 { self.publishSharedSnapshot() }
                 self.checkMediaSleepTimer()
                 await self.updateReadingProgress()
                 if tickCount % 3 == 0 { await self.watchResponsiveness() }
