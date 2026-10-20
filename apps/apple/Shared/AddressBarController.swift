@@ -98,6 +98,13 @@ final class AddressBarController: ObservableObject {
                 if result.count >= 9 { break }
             }
         }
+        // "pasta recipe last week": when the words name a time, the history from then that fits goes first, with no ">" needed.
+        if !query.hasPrefix(">"), let recall = model.plainRecall(query, limit: 3) {
+            let found = recall.items.filter { !seen.contains($0.url) }.map {
+                Suggestion(kind: .history, title: $0.title.isEmpty ? $0.url : $0.title, subtitle: "From \(recall.phrase) · " + displayHost(URL(string: $0.url)), target: $0.url)
+            }
+            result.insert(contentsOf: found, at: 0)
+        }
         // Words inside pages the person chose to keep a searchable copy of. At most three, after history, and never for private tabs.
         if model.indexPages, !model.activeIsPrivate, query.count >= 3, !query.hasPrefix(">") {
             for hit in (model.pageIndex?.search(query, limit: 3) ?? []) where !seen.contains(hit.url) {
