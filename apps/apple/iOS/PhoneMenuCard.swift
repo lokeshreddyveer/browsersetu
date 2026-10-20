@@ -59,6 +59,7 @@ struct PhoneMenuContent: View {
                     Button { model.togglePictureInPicture() } label: { Label("Picture in Picture", systemImage: "pip.enter") }
                 } label: { Label("Video", systemImage: "play.rectangle") }
             }
+            Menu { ToolsMenuItems(model: model) } label: { Label("Tools", systemImage: "wrench.and.screwdriver") }
             moreMenu
             extensionsMenu
             Button { model.sheet = .settings } label: { Label("Settings", systemImage: "gearshape") }

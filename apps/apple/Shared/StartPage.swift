@@ -66,6 +66,12 @@ struct StartPageView: View {
                     if !isPrivate {
                         HStack(spacing: 10) {
                             PrivacyLine()
+                            Menu { ToolsMenuItems(model: model) } label: {
+                                Label("Tools", systemImage: "wrench.and.screwdriver").font(.system(size: 11.5)).foregroundStyle(.secondary)
+                                    .padding(.horizontal, 12).frame(height: 28)
+                                    .background(Capsule().fill(Color.primary.opacity(0.06)))
+                            }
+                            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
                             CustomizeMenu()
                         }
                         .startEntrance(4)

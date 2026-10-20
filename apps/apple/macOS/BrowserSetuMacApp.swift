@@ -207,6 +207,9 @@ struct BrowserCommands: Commands {
             Button("Change Direction") { model.splitOrientation = model.splitOrientation == .sideBySide ? .stacked : .sideBySide }
                 .disabled(model.splitTabID == nil)
         }
+        CommandMenu("Tools") {
+            ToolsMenuItems(model: model)
+        }
         CommandMenu("Library") {
             Button("Bookmark This Page") { model.toggleBookmark() }.shortcut(.bookmarkPage, model.shortcuts)
             Button("Show Bookmarks") { model.sheet = .bookmarks }.shortcut(.showBookmarks, model.shortcuts)
