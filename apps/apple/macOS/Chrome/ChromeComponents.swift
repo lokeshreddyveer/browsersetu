@@ -137,10 +137,11 @@ struct ChromeButtonStyle: ButtonStyle {
         @Environment(\.isEnabled) private var enabled
         @Environment(\.isFocused) private var focused
         @State private var hovering = false
+        @ObservedObject private var look = LookState.shared
 
         var body: some View {
             configuration.label
-                .font(.system(size: iconSize, weight: IconWeight.current.weight))
+                .font(.system(size: iconSize, weight: look.weight.weight))
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(enabled ? Color.primary.opacity(0.85) : Color.primary.opacity(0.28))
                 .frame(width: iconSize > 13 ? 32 : 28, height: iconSize > 13 ? 32 : 28)

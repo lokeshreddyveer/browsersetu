@@ -68,7 +68,7 @@ final class LookTests: XCTestCase {
     func testAnimatedDecorationsAreTheOnesThatMove() {
         XCTAssertTrue(ThemeDecoration.aurora.isAnimated)
         XCTAssertFalse(ThemeDecoration.stars.isAnimated)
-        XCTAssertEqual(BrowserTheme.animated.count, 6)
+        XCTAssertEqual(BrowserTheme.animated.count, 16)
         XCTAssertTrue(BrowserTheme.animated.allSatisfy { $0.decoration.isAnimated })
     }
 

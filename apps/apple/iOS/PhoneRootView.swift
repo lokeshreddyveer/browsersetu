@@ -364,6 +364,7 @@ struct PhoneAddressBar: View {
 
 struct PhoneToolbar: View {
     @EnvironmentObject var model: BrowserModel
+    @ObservedObject private var look = LookState.shared
     @ObservedObject var tab: TabController
     @Environment(\.horizontalSizeClass) private var sizeClass
 
@@ -421,7 +422,7 @@ struct PhoneToolbar: View {
     }
 
     private func button(_ symbol: String, disabled: Bool, label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) { Image(systemName: symbol).frame(width: 44, height: 32) }
+        Button(action: action) { Image(systemName: symbol).fontWeight(look.weight.weight).frame(width: 44, height: 32) }
             .disabled(disabled).accessibilityLabel(label)
             // Press and hold Back or Forward for the pages behind or ahead.
             .contextMenu { if symbol == "chevron.left" { NavHistoryItems(tab: tab, back: true) } else if symbol == "chevron.right" { NavHistoryItems(tab: tab, back: false) } }
@@ -579,6 +580,7 @@ struct PhoneDock: View {
 /// One button of the toolbar. Forward only exists once there is somewhere to go forward to, as in Safari.
 struct DockActionButton: View {
     @EnvironmentObject var model: BrowserModel
+    @ObservedObject private var look = LookState.shared
     let action: PhoneAction
     @ObservedObject var tab: TabController
 
@@ -601,7 +603,7 @@ struct DockActionButton: View {
             let on = action.isToggle && action.isOn(model, tab)
             Button { action.run(model, tab) } label: {
                 Image(systemName: action.symbol(model, tab))
-                    .font(.system(size: PhoneChrome.icon, weight: .medium))
+                    .font(.system(size: PhoneChrome.icon, weight: look.weight == .regular ? .medium : look.weight.weight))
                     .foregroundStyle(on ? Theme.accent : (action.isEnabled(model, tab) ? Color.primary : Color.primary.opacity(0.28)))
                     .frame(width: PhoneChrome.target, height: PhoneChrome.target)
                     .contentShape(Rectangle())

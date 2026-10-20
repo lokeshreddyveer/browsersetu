@@ -169,3 +169,12 @@ extension BrowserModel {
         notice = hex == nil ? "\(key) uses the page's own colour again." : "\(key) now has its own colour."
     }
 }
+
+
+/// What the icon choices are right now, observable, so every icon redraws the moment a choice changes (a plain static would not tell the views).
+@MainActor
+final class LookState: ObservableObject {
+    static let shared = LookState()
+    @Published var weight = IconWeight.regular
+    @Published var shape = SiteIconShape.rounded
+}

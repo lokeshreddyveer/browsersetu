@@ -26,8 +26,9 @@ enum ThemeDecoration: String, Codable, CaseIterable {
     case none, fog, stars, grid, scanlines, embers, moon
     /// These move: they are drawn again about thirty times a second, unless motion is off (the Animation setting, Reduce Motion or Low Power Mode).
     case aurora, rain, snow, fireflies, waves, twinkle
+    case sakura, meteors, codeRain, synthwave, bubbles, lava, storm, clouds, confetti, arcade
 
-    var isAnimated: Bool { [.aurora, .rain, .snow, .fireflies, .waves, .twinkle].contains(self) }
+    var isAnimated: Bool { ![.none, .fog, .stars, .grid, .scanlines, .embers, .moon].contains(self) }
 }
 
 /// A look for the whole browser: the accent, the colour of the window and sidebar, the opening page's background and, if it needs one, a fixed
@@ -86,6 +87,26 @@ struct BrowserTheme: Identifiable, Equatable {
                      top: RGB(hex: 0x07110A), bottom: RGB(hex: 0x0A170D), glow: RGB(hex: 0x14291A), scheme: .dark, decoration: .fireflies, family: "Animated"),
         BrowserTheme(id: "deepsea", name: "Deep Sea", note: "Slow waves along the bottom", accent: RGB(hex: 0x4CC9F0), chrome: RGB(hex: 0x06141E),
                      top: RGB(hex: 0x03121C), bottom: RGB(hex: 0x05202E), glow: RGB(hex: 0x0A3A50), scheme: .dark, decoration: .waves, family: "Animated"),
+        BrowserTheme(id: "sakura", name: "Cherry Blossom", note: "Petals drifting down, in a soft anime style", accent: RGB(hex: 0xFF9EBB), chrome: RGB(hex: 0x1A1016),
+                     top: RGB(hex: 0x150C12), bottom: RGB(hex: 0x241520), glow: RGB(hex: 0x3A1D2D), scheme: .dark, decoration: .sakura, family: "Animated"),
+        BrowserTheme(id: "meteors", name: "Meteor Shower", note: "Shooting stars across a night sky", accent: RGB(hex: 0x9CC9FF), chrome: RGB(hex: 0x080B16),
+                     top: RGB(hex: 0x04060F), bottom: RGB(hex: 0x0A1020), glow: RGB(hex: 0x15213D), scheme: .dark, decoration: .meteors, family: "Animated"),
+        BrowserTheme(id: "coderain", name: "Code Rain", note: "Falling green characters, like a hacker film", accent: RGB(hex: 0x39FF7A), chrome: RGB(hex: 0x050A06),
+                     top: RGB(hex: 0x020603), bottom: RGB(hex: 0x06100A), glow: RGB(hex: 0x0B2A14), scheme: .dark, decoration: .codeRain, family: "Animated"),
+        BrowserTheme(id: "synthwave", name: "Synthwave", note: "A retro sun over a moving neon grid", accent: RGB(hex: 0xFF4FD8), chrome: RGB(hex: 0x12081C),
+                     top: RGB(hex: 0x0D0618), bottom: RGB(hex: 0x1E0A2E), glow: RGB(hex: 0x3A1457), scheme: .dark, decoration: .synthwave, family: "Animated"),
+        BrowserTheme(id: "bubbles", name: "Bubbles", note: "Bubbles rising through clear water", accent: RGB(hex: 0x7FDBFF), chrome: RGB(hex: 0x061620),
+                     top: RGB(hex: 0x04121C), bottom: RGB(hex: 0x082436), glow: RGB(hex: 0x0E3C57), scheme: .dark, decoration: .bubbles, family: "Animated"),
+        BrowserTheme(id: "lavalamp", name: "Lava Lamp", note: "Slow glowing blobs, in warm colours", accent: RGB(hex: 0xFF8A3D), chrome: RGB(hex: 0x180A06),
+                     top: RGB(hex: 0x120704), bottom: RGB(hex: 0x241008), glow: RGB(hex: 0x4A200C), scheme: .dark, decoration: .lava, family: "Animated"),
+        BrowserTheme(id: "storm", name: "Thunderstorm", note: "Rain and the odd flash of lightning", accent: RGB(hex: 0xA9C4FF), chrome: RGB(hex: 0x0A0C14),
+                     top: RGB(hex: 0x070910), bottom: RGB(hex: 0x10131E), glow: RGB(hex: 0x1B2236), scheme: .dark, decoration: .storm, family: "Animated"),
+        BrowserTheme(id: "clouds", name: "Cartoon Clouds", note: "Fluffy clouds drifting across a bright sky", accent: RGB(hex: 0xFFFFFF), chrome: RGB(hex: 0x1B4E7A),
+                     top: RGB(hex: 0x3A8FD6), bottom: RGB(hex: 0x8FD0F5), glow: RGB(hex: 0xBFE6FF), scheme: .dark, decoration: .clouds, family: "Animated"),
+        BrowserTheme(id: "confetti", name: "Party", note: "Confetti falling, in bright colours", accent: RGB(hex: 0xFF5C8A), chrome: RGB(hex: 0x14102A),
+                     top: RGB(hex: 0x100C24), bottom: RGB(hex: 0x1E1642), glow: RGB(hex: 0x32245F), scheme: .dark, decoration: .confetti, family: "Animated"),
+        BrowserTheme(id: "arcade", name: "Arcade", note: "Falling pixel blocks, like a retro game", accent: RGB(hex: 0xFFD23F), chrome: RGB(hex: 0x0C0A1A),
+                     top: RGB(hex: 0x08061A), bottom: RGB(hex: 0x120E2E), glow: RGB(hex: 0x241C58), scheme: .dark, decoration: .arcade, family: "Animated"),
         BrowserTheme(id: "starrynight", name: "Starry Night", note: "Stars that twinkle", accent: RGB(hex: 0xC3A6FF), chrome: RGB(hex: 0x0B0A18),
                      top: RGB(hex: 0x06050F), bottom: RGB(hex: 0x0C0A1A), glow: RGB(hex: 0x1C1640), scheme: .dark, decoration: .twinkle, family: "Animated"),
     ]
@@ -300,6 +321,116 @@ struct ThemeBackdrop: View {
                         path.closeSubpath()
                         context.fill(path, with: .color(tint.opacity(0.07 + 0.03 * l)))
                     }
+                case .sakura:
+                    var seed: UInt64 = 31
+                    func next() -> Double { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 33) / Double(1 << 31) }
+                    for _ in 0..<45 {
+                        let x0 = next() * size.width, speed = 26 + next() * 34, offset = next() * size.height, r = 3 + next() * 4, sway = 20 + next() * 40, phase = next() * 6.28
+                        let y: Double = (offset + t * speed).truncatingRemainder(dividingBy: size.height + 30) - 15
+                        let x: Double = x0 + sin(t * 0.7 + phase) * sway
+                        var petal = context
+                        petal.translateBy(x: x, y: y); petal.rotate(by: .radians(t * 0.8 + phase))
+                        petal.fill(Path(ellipseIn: CGRect(x: -r, y: -r * 0.55, width: r * 2, height: r * 1.1)), with: .color(tint.opacity(0.35 + next() * 0.3)))
+                    }
+                case .meteors:
+                    var seed: UInt64 = 17
+                    func next() -> Double { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 33) / Double(1 << 31) }
+                    for _ in 0..<70 { let x = next() * size.width, y = next() * size.height; context.fill(Path(ellipseIn: CGRect(x: x, y: y, width: 1.2, height: 1.2)), with: .color(.white.opacity(0.35))) }
+                    for i in 0..<5 {
+                        let period = 5.0 + Double(i) * 1.7, local = (t + Double(i) * 2.3).truncatingRemainder(dividingBy: period) / period
+                        guard local < 0.35 else { continue }
+                        let p = local / 0.35, startX = size.width * (0.2 + 0.18 * Double(i)), startY = size.height * 0.05
+                        let x = startX + p * size.width * 0.35, y = startY + p * size.height * 0.45
+                        var trail = Path(); trail.move(to: CGPoint(x: x, y: y)); trail.addLine(to: CGPoint(x: x - 70, y: y - 38))
+                        context.stroke(trail, with: .color(tint.opacity(0.6 * (1 - p))), lineWidth: 1.6)
+                    }
+                case .codeRain:
+                    let glyphs = Array("01ｱｲｳｴｵｶｷｸｹｺ{}<>/=+*#")
+                    var seed: UInt64 = 3
+                    func next() -> Double { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 33) / Double(1 << 31) }
+                    let columns = Int(size.width / 18)
+                    for c in 0..<columns {
+                        let speed = 60 + next() * 120, offset = next() * size.height, x = Double(c) * 18 + 6
+                        let head: Double = (offset + t * speed).truncatingRemainder(dividingBy: size.height + 220)
+                        for k in 0..<10 {
+                            let y = head - Double(k) * 16
+                            guard y > -16, y < size.height else { continue }
+                            let ch = glyphs[(c * 7 + k * 3 + Int(t * 4)) % glyphs.count]
+                            context.draw(Text(String(ch)).font(.system(size: 12, design: .monospaced)).foregroundColor(tint.opacity(k == 0 ? 0.9 : 0.5 - Double(k) * 0.045)), at: CGPoint(x: x, y: y))
+                        }
+                    }
+                case .synthwave:
+                    let horizon = size.height * 0.58
+                    context.fill(Path(ellipseIn: CGRect(x: size.width / 2 - 90, y: horizon - 150, width: 180, height: 180)), with: .linearGradient(Gradient(colors: [tint.opacity(0.55), Color(red: 1, green: 0.55, blue: 0.2).opacity(0.35)]), startPoint: CGPoint(x: 0, y: horizon - 150), endPoint: CGPoint(x: 0, y: horizon + 30)))
+                    context.fill(Path(CGRect(x: 0, y: horizon, width: size.width, height: size.height - horizon)), with: .color(Color.black.opacity(0.55)))
+                    var grid = Path()
+                    for i in -12...12 { let x = size.width / 2 + Double(i) * 70; grid.move(to: CGPoint(x: size.width / 2 + Double(i) * 8, y: horizon)); grid.addLine(to: CGPoint(x: x * 1.0 + Double(i) * 40, y: size.height)) }
+                    let shift = (t * 0.35).truncatingRemainder(dividingBy: 1)
+                    for j in 0..<10 { let f = pow((Double(j) + shift) / 10, 2.2); let y = horizon + (size.height - horizon) * f; grid.move(to: CGPoint(x: 0, y: y)); grid.addLine(to: CGPoint(x: size.width, y: y)) }
+                    context.stroke(grid, with: .color(tint.opacity(0.35)), lineWidth: 1)
+                case .bubbles:
+                    var seed: UInt64 = 23
+                    func next() -> Double { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 33) / Double(1 << 31) }
+                    for _ in 0..<36 {
+                        let x0 = next() * size.width, speed = 18 + next() * 40, offset = next() * size.height, r = 4 + next() * 14, sway = 6 + next() * 16, phase = next() * 6.28
+                        let y: Double = size.height + 20 - (offset + t * speed).truncatingRemainder(dividingBy: size.height + 40)
+                        let x: Double = x0 + sin(t * 0.9 + phase) * sway
+                        let rect = CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2)
+                        context.stroke(Path(ellipseIn: rect), with: .color(tint.opacity(0.35)), lineWidth: 1)
+                        context.fill(Path(ellipseIn: rect.insetBy(dx: r * 0.2, dy: r * 0.2).offsetBy(dx: -r * 0.25, dy: -r * 0.25).intersection(rect)), with: .color(.white.opacity(0.06)))
+                    }
+                case .lava:
+                    var layer = context
+                    layer.addFilter(.blur(radius: 30))
+                    var seed: UInt64 = 41
+                    func next() -> Double { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 33) / Double(1 << 31) }
+                    for i in 0..<7 {
+                        let r = 50 + next() * 70, speed = 0.12 + next() * 0.18, phase = next() * 6.28, cx = size.width * (0.15 + 0.7 * next())
+                        let y: Double = size.height * (0.5 + 0.42 * sin(t * speed + phase)), x: Double = cx + sin(t * speed * 0.7 + phase + Double(i)) * 60
+                        layer.fill(Path(ellipseIn: CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2)), with: .color(tint.opacity(0.28)))
+                    }
+                case .storm:
+                    var seed: UInt64 = 5
+                    func next() -> Double { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 33) / Double(1 << 31) }
+                    for _ in 0..<110 {
+                        let x = next() * size.width, speed = 520 + next() * 380, offset = next() * size.height, length = 12 + next() * 16
+                        let y: Double = (offset + t * speed).truncatingRemainder(dividingBy: size.height + 40) - 20
+                        var drop = Path(); drop.move(to: CGPoint(x: x, y: y)); drop.addLine(to: CGPoint(x: x - 4, y: y + length))
+                        context.stroke(drop, with: .color(tint.opacity(0.22)), lineWidth: 1)
+                    }
+                    let cycle = t.truncatingRemainder(dividingBy: 7)
+                    let flash: Double = cycle < 0.12 ? 0.22 : (cycle > 0.3 && cycle < 0.38 ? 0.12 : 0)
+                    if flash > 0 { context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(.white.opacity(flash))) }
+                case .clouds:
+                    for i in 0..<6 {
+                        let b = Double(i), speed = 8 + b * 3, w = 170 + b * 20
+                        let x: Double = ((t * speed + b * 260).truncatingRemainder(dividingBy: size.width + w * 2)) - w
+                        let y: Double = size.height * (0.12 + 0.13 * b)
+                        let c = Color.white.opacity(0.55)
+                        for (dx, dy, rr) in [(0.0, 0.0, 34.0), (38.0, -14.0, 42.0), (84.0, 0.0, 34.0), (46.0, 10.0, 36.0)] {
+                            context.fill(Path(ellipseIn: CGRect(x: x + dx - rr, y: y + dy - rr * 0.7, width: rr * 2, height: rr * 1.4)), with: .color(c))
+                        }
+                    }
+                case .confetti:
+                    var seed: UInt64 = 55
+                    func next() -> Double { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 33) / Double(1 << 31) }
+                    let palette: [Color] = [tint, .yellow, .cyan, .green, .orange, .purple]
+                    for _ in 0..<70 {
+                        let x0 = next() * size.width, speed = 40 + next() * 70, offset = next() * size.height, w = 4 + next() * 5, phase = next() * 6.28
+                        let y: Double = (offset + t * speed).truncatingRemainder(dividingBy: size.height + 20) - 10
+                        var piece = context
+                        piece.translateBy(x: x0 + sin(t + phase) * 14, y: y); piece.rotate(by: .radians(t * 2 + phase))
+                        piece.fill(Path(CGRect(x: -w / 2, y: -w, width: w, height: w * 2)), with: .color(palette[Int(phase * 10) % palette.count].opacity(0.75)))
+                    }
+                case .arcade:
+                    var seed: UInt64 = 71
+                    func next() -> Double { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 33) / Double(1 << 31) }
+                    let palette: [Color] = [tint, Color(red: 0.2, green: 0.8, blue: 1), Color(red: 1, green: 0.3, blue: 0.4), Color(red: 0.4, green: 1, blue: 0.5)]
+                    for _ in 0..<26 {
+                        let col = Double(Int(next() * size.width / 24)) * 24, speed = 40 + next() * 90, offset = next() * size.height, color = palette[Int(next() * 4) % 4]
+                        let y: Double = ((offset + t * speed).truncatingRemainder(dividingBy: size.height + 40) / 24).rounded(.down) * 24 - 20
+                        context.fill(Path(CGRect(x: col, y: y, width: 20, height: 20)), with: .color(color.opacity(0.28)))
+                    }
                 case .twinkle:
                     var seed: UInt64 = 7
                     func next() -> Double { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 33) / Double(1 << 31) }
@@ -506,6 +637,7 @@ extension BrowserModel {
 struct ThemesSection: View {
     @EnvironmentObject var model: BrowserModel
     @State private var choosingPhoto = false
+    @State private var expandedGroups: Set<String> = []
 
     private let columns = [GridItem(.adaptive(minimum: 104), spacing: 12)]
 
@@ -532,11 +664,31 @@ struct ThemesSection: View {
         }
     }
 
+    /// A long group shows its first few; "Show All" opens the rest. The chosen theme is always visible.
+    private func shown(_ themes: [BrowserTheme], title: String?) -> [BrowserTheme] {
+        guard let title, themes.count > Self.preview, !expandedGroups.contains(title) else { return themes }
+        let head = Array(themes.prefix(Self.preview))
+        if let chosen = themes.first(where: { $0.id == model.themeID }), !head.contains(chosen) { return Array(head.dropLast()) + [chosen] }
+        return head
+    }
+    private static let preview = 6
+
     @ViewBuilder private func gallery(_ title: String?, _ themes: [BrowserTheme]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            if let title { Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary) }
+            if let title {
+                HStack {
+                    Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    Spacer()
+                    if themes.count > Self.preview {
+                        Button(expandedGroups.contains(title) ? "Show Fewer" : "Show All \(themes.count)") {
+                            animated(.easeOut(duration: 0.25)) { if expandedGroups.contains(title) { expandedGroups.remove(title) } else { expandedGroups.insert(title) } }
+                        }
+                        .buttonStyle(.borderless).font(.caption)
+                    }
+                }
+            }
             LazyVGrid(columns: columns, spacing: 12) {
-                ForEach(themes) { theme in
+                ForEach(shown(themes, title: title)) { theme in
                     card(theme, selected: model.themeID == theme.id) { animated(.easeOut(duration: 0.2)) { model.chooseTheme(theme.id) } }
                         .contextMenu {
                             if theme.id != "custom" { Button("Edit as Custom") { model.editAsCustom(theme) } }

@@ -25,14 +25,15 @@ struct SiteTile: View {
     var size: CGFloat = 54
     /// Observed so a tile switches from its letter to the site's icon the moment the icon arrives.
     @ObservedObject private var icons = FaviconStore.shared
+    @ObservedObject private var look = LookState.shared
 
     var body: some View {
         if let icon = icons.image(forURL: url) {
             Image(platform: icon).resizable().interpolation(.high).scaledToFit()
                 .padding(size * 0.14)
                 .frame(width: size, height: size)
-                .background(Color(white: 0.96), in: RoundedRectangle(cornerRadius: size * SiteIconShape.current.corner, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: size * SiteIconShape.current.corner, style: .continuous).strokeBorder(Color.black.opacity(0.08), lineWidth: 0.5))
+                .background(Color(white: 0.96), in: RoundedRectangle(cornerRadius: size * look.shape.corner, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: size * look.shape.corner, style: .continuous).strokeBorder(Color.black.opacity(0.08), lineWidth: 0.5))
         } else {
             letterTile
         }
@@ -44,7 +45,7 @@ struct SiteTile: View {
             .foregroundStyle(.white)
             .frame(width: size, height: size)
             .background(Theme.tileColor(for: displayHost(URL(string: url)) + title),
-                        in: RoundedRectangle(cornerRadius: size * SiteIconShape.current.corner, style: .continuous))
+                        in: RoundedRectangle(cornerRadius: size * look.shape.corner, style: .continuous))
     }
 }
 
