@@ -212,7 +212,13 @@ final class WebKitEngine: BrowserEngine {
     }
 
     func removeProfileData(profile: String) async {
-        try? await WKWebsiteDataStore.remove(forIdentifier: ProfileIdentity.dataStoreID(for: profile))
+        // WebKit refuses while a web view or a store object that just read the profile is still being released, so ask again a few times.
+        let id = ProfileIdentity.dataStoreID(for: profile)
+        for attempt in 0..<5 {
+            if (try? await WKWebsiteDataStore.remove(forIdentifier: id)) != nil { return }
+            if !(await WKWebsiteDataStore.allDataStoreIdentifiers.contains(id)) { return }
+            try? await Task.sleep(nanoseconds: UInt64(200_000_000 * (attempt + 1)))
+        }
     }
 
     /// Identifiers of website data stores that still exist (diagnostics and tests).
@@ -279,6 +285,7 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = true
+        webView.allowsLinkPreview = true
         #if os(macOS)
         webView.allowsMagnification = true
         #endif
@@ -581,7 +588,7 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
           }
         })();
         """
-        _ = try? await webView.evaluateJavaScript(js)
+        _ = try? await webView.callAsyncJavaScript(js, contentWorld: .defaultClient)
     }
 
     func restoreScrollState() {
@@ -612,7 +619,7 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
           [100, 400, 1000].forEach(function (ms) { setTimeout(apply, ms); });
         })();
         """
-        webView.evaluateJavaScript(js, completionHandler: nil)
+        Task { _ = try? await webView.callAsyncJavaScript(js, contentWorld: .defaultClient) }
     }
 
     func audioPlaying() async -> Bool {
@@ -1555,12 +1562,12 @@ final class WebKitDownloads: NSObject, WKDownloadDelegate {
     /// Checks, without cookies, that the server really sends this file in pieces, then fetches it that way. False means WebKit carries on as usual.
     nonisolated private func takeOverInPieces(_ download: WKDownload, response: URLResponse, source: URL?, suggestedFilename: String) async -> Bool {
         guard await MainActor.run(body: { coordinator.segmentedEnabled }), let http = response as? HTTPURLResponse, let source,
-              SegmentPlan.eligible(response: http, request: download.originalRequest) else { return false }
+              PiecePlan.eligible(response: http, request: download.originalRequest) else { return false }
         let total = http.expectedContentLength
         let agent = await MainActor.run { download.webView?.customUserAgent }
-        let probe = SegmentedDownloader(url: source, userAgent: agent)
+        let probe = PieceDownloader(url: source, userAgent: agent)
         guard await probe.probe(expectedTotal: total) else { return false }
-        final class Current: @unchecked Sendable { var downloader: SegmentedDownloader?; var cancelled = false }
+        final class Current: @unchecked Sendable { var downloader: PieceDownloader?; var cancelled = false }
         let current = Current()
         await MainActor.run {
             let started = coordinator.begin(suggestedName: suggestedFilename, sourceHost: source.host, cancel: { current.cancelled = true; current.downloader?.cancel() })
@@ -1568,17 +1575,17 @@ final class WebKitDownloads: NSObject, WKDownloadDelegate {
             Task { @MainActor [coordinator] in
                 do {
                     // Six connections; a server that refuses that many gets three, and then one, so a limit never loses the download.
-                    var lastError: Error = SegmentedDownloadError.refused
+                    var lastError: Error = PieceDownloadError.refused
                     var finishedOK = false
-                    for pieces in [SegmentPlan.connections, 3, 1] where !finishedOK && !current.cancelled {
-                        let downloader = SegmentedDownloader(url: source, userAgent: agent, pieces: pieces)
+                    for pieces in [PiecePlan.connections, 3, 1] where !finishedOK && !current.cancelled {
+                        let downloader = PieceDownloader(url: source, userAgent: agent, pieces: pieces)
                         current.downloader = downloader
                         do {
                             try await downloader.run(total: total, to: started.destination) { done in
                                 Task { @MainActor in coordinator.update(started.id, fraction: min(1, Double(done) / Double(total)), completed: done, total: total) }
                             }
                             finishedOK = true
-                        } catch SegmentedDownloadError.refused { lastError = SegmentedDownloadError.refused; coordinator.note("Server refused \(pieces) connections") }
+                        } catch PieceDownloadError.refused { lastError = PieceDownloadError.refused; coordinator.note("Server refused \(pieces) connections") }
                     }
                     if !finishedOK { throw current.cancelled ? CancellationError() : lastError }
                     coordinator.finish(started.id, source: source)

@@ -233,7 +233,7 @@ struct BrowserCommands: Commands {
             Button("Search Everything…") { model.sheet = .workbench }.keyboardShortcut("k", modifiers: [.command, .option])
             Button("Bookmark Tools…") { model.sheet = .bookmarkTools }
             Button("Feeds and Tools…") { model.sheet = .toolkit }
-            Toggle("Search from the Menu Bar", isOn: Binding(get: { MenuBarSearch.shared.isOn }, set: { MenuBarSearch.shared.setOn($0) }))
+            Toggle("Search from the Menu Bar (Control-Option-Space)", isOn: Binding(get: { MenuBarSearch.shared.isOn }, set: { MenuBarSearch.shared.setOn($0) }))
             Button("Saved Sessions…") { model.sheet = .sessions }
             Button("Session Time Machine…") { model.sheet = .timeMachine }
             Button("Tab Activity…") { model.sheet = .timeline }

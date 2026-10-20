@@ -401,7 +401,7 @@ struct AppearanceSettingsSection: View {
                 }
                 Text("Which look websites are asked for. Theme above only changes the browser. “Follow System” lets each site choose its own design, light or dark.")
                     .font(.caption).foregroundStyle(.secondary)
-                Picker("Accent", selection: $model.accent) {
+                Picker("Accent", selection: Binding(get: { model.accent }, set: { model.accent = $0; model.accentChosen = true })) {
                     ForEach(AccentChoice.allCases) { choice in
                         Label { Text(choice.title) } icon: { Image(systemName: "circle.fill").foregroundStyle(choice.color) }.tag(choice)
                     }
@@ -482,7 +482,7 @@ struct AppearanceSettingsSection: View {
             }
             Section {
                 Button("Reset Appearance and Layout") {
-                    model.appearance = .system; model.accent = .teal; model.density = .comfortable
+                    model.appearance = .system; model.accent = .teal; model.accentChosen = false; model.density = .comfortable
                     model.layoutPreset = .classic; model.tabLayout = .separate; model.sidebarPosition = .left
                     model.sidebarWidth = 250; model.sidebarRail = false; model.addressBarPosition = .bottom
                     model.toolbarItems = ToolbarItemID.defaults

@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 
 /// The window the Dock menu and the Services menu act on: the first window that is not a guest or a secondary one.
 @MainActor
@@ -72,6 +73,7 @@ final class ServicesProvider: NSObject {
 // MARK: Menu-bar search
 
 import SwiftUI
+import Carbon.HIToolbox
 
 /// A small search window in the menu bar: type, press Return, and the search opens in the browser. Off unless it is turned on in the Library menu.
 @MainActor
@@ -90,8 +92,35 @@ final class MenuBarSearch: NSObject {
 
     func installIfWanted() { if isOn { install() } }
 
+    // Control-Option-Space opens the search from any app. Carbon's hot keys need no permission and work in the sandbox.
+    private var hotKey: EventHotKeyRef?
+    private var hotKeyHandler: EventHandlerRef?
+
+    private func registerHotKey() {
+        guard hotKey == nil else { return }
+        var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+        InstallEventHandler(GetApplicationEventTarget(), { _, _, _ in
+            DispatchQueue.main.async { MenuBarSearch.shared.showFromHotKey() }
+            return noErr
+        }, 1, &spec, nil, &hotKeyHandler)
+        let id = EventHotKeyID(signature: OSType(0x42535354), id: 1)
+        RegisterEventHotKey(UInt32(kVK_Space), UInt32(controlKey | optionKey), id, GetApplicationEventTarget(), 0, &hotKey)
+    }
+
+    private func unregisterHotKey() {
+        if let hotKey { UnregisterEventHotKey(hotKey) }
+        if let hotKeyHandler { RemoveEventHandler(hotKeyHandler) }
+        hotKey = nil; hotKeyHandler = nil
+    }
+
+    fileprivate func showFromHotKey() {
+        NSApp.activate(ignoringOtherApps: true)
+        if !popover.isShown { toggle() }
+    }
+
     private func install() {
         guard item == nil else { return }
+        registerHotKey()
         let status = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         status.button?.image = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: "Search with Browser Setu")
         status.button?.target = self
@@ -102,6 +131,7 @@ final class MenuBarSearch: NSObject {
     }
 
     private func remove() {
+        unregisterHotKey()
         popover.performClose(nil)
         if let item { NSStatusBar.system.removeStatusItem(item) }
         item = nil

@@ -839,12 +839,12 @@ struct PhoneSearchField: View {
                     .onSubmit(submit)
                     .accessibilityIdentifier("omnibox")
             }
-            .padding(.horizontal, 12).frame(height: 38)
+            .padding(.horizontal, 12).frame(height: model.density == .compact ? 33 : 38)
             .themedFill(in: Capsule(), fallback: .regularMaterial)
             .hairline(Capsule(), opacity: 0.08, width: 0.5)
             Button { model.cancelSearch() } label: {
                 Text("Cancel").scaledFont(15, weight: .medium).foregroundStyle(Color.primary.opacity(0.85))
-                    .padding(.horizontal, 14).frame(height: 38)
+                    .padding(.horizontal, 14).frame(height: model.density == .compact ? 33 : 38)
                     .themedFill(in: Capsule(), fallback: .regularMaterial)
                     .hairline(Capsule(), opacity: 0.08, width: 0.5)
             }
