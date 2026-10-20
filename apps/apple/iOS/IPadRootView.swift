@@ -162,6 +162,7 @@ private struct IPadToolbar: View {
                     Button { model.sheet = .downloads } label: { Label("Downloads", systemImage: "arrow.down.circle") }
                     Button { model.sheet = .readingList } label: { Label("Reading List", systemImage: "books.vertical") }
                 }
+                Menu { ToolsMenuItems(model: model) } label: { Label("Tools", systemImage: "wrench.and.screwdriver") }
             } label: {
                 Image(systemName: "ellipsis").font(.system(size: 18, weight: .medium)).frame(width: 44, height: 44).contentShape(Rectangle())
             }
