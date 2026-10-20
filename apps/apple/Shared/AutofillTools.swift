@@ -59,7 +59,7 @@ struct StrengthMeter: View {
             Text(password.isEmpty ? " " : r.label).font(.caption.weight(.medium)).foregroundStyle(color(r.score))
             ForEach(r.tips, id: \.self) { Text($0).font(.caption2).foregroundStyle(.secondary) }
         }
-        .animation(.easeOut(duration: 0.15), value: r.score)
+        .motion(.easeOut(duration: 0.15), value: r.score)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Password strength: \(password.isEmpty ? "none" : r.label)")
     }

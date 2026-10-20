@@ -22,7 +22,13 @@ struct RGB: Codable, Equatable, Hashable {
 }
 
 /// Something drawn over the theme's background, kept faint and still: it sets a mood without moving or getting in the way.
-enum ThemeDecoration: String, Codable, CaseIterable { case none, fog, stars, grid, scanlines, embers, moon }
+enum ThemeDecoration: String, Codable, CaseIterable {
+    case none, fog, stars, grid, scanlines, embers, moon
+    /// These move: they are drawn again about thirty times a second, unless motion is off (the Animation setting, Reduce Motion or Low Power Mode).
+    case aurora, rain, snow, fireflies, waves, twinkle
+
+    var isAnimated: Bool { [.aurora, .rain, .snow, .fireflies, .waves, .twinkle].contains(self) }
+}
 
 /// A look for the whole browser: the accent, the colour of the window and sidebar, the opening page's background and, if it needs one, a fixed
 /// light or dark appearance. Every one is drawn in code (no downloaded art), so each works offline and weighs nothing.
@@ -68,6 +74,22 @@ struct BrowserTheme: Identifiable, Equatable {
                      top: RGB(hex: 0x282C34), bottom: RGB(hex: 0x1B1F27), glow: RGB(hex: 0x3E4451), scheme: .dark, decoration: .none, family: "Palette"),
     ]
 
+    /// Themes whose background moves. Each is drawn in code, so it works offline and weighs nothing; it stands still when motion is off or the battery is low.
+    static let animated: [BrowserTheme] = [
+        BrowserTheme(id: "aurora", name: "Aurora", note: "Slow ribbons of green and violet light", accent: RGB(hex: 0x3DDC97), chrome: RGB(hex: 0x0A1218),
+                     top: RGB(hex: 0x050D14), bottom: RGB(hex: 0x07141C), glow: RGB(hex: 0x0B2A2C), scheme: .dark, decoration: .aurora, family: "Animated"),
+        BrowserTheme(id: "rainynight", name: "Rainy Night", note: "Rain falling past a blue window", accent: RGB(hex: 0x7AA2F7), chrome: RGB(hex: 0x0E1118),
+                     top: RGB(hex: 0x0A0C13), bottom: RGB(hex: 0x0F121B), glow: RGB(hex: 0x1A2438), scheme: .dark, decoration: .rain, family: "Animated"),
+        BrowserTheme(id: "snowfall", name: "Snowfall", note: "Soft snow drifting down", accent: RGB(hex: 0xBFD7FF), chrome: RGB(hex: 0x131824),
+                     top: RGB(hex: 0x0F1420), bottom: RGB(hex: 0x1A2030), glow: RGB(hex: 0x2E3A52), scheme: .dark, decoration: .snow, family: "Animated"),
+        BrowserTheme(id: "fireflies", name: "Fireflies", note: "Small lights drifting in a dark meadow", accent: RGB(hex: 0xE6F25C), chrome: RGB(hex: 0x0A130C),
+                     top: RGB(hex: 0x07110A), bottom: RGB(hex: 0x0A170D), glow: RGB(hex: 0x14291A), scheme: .dark, decoration: .fireflies, family: "Animated"),
+        BrowserTheme(id: "deepsea", name: "Deep Sea", note: "Slow waves along the bottom", accent: RGB(hex: 0x4CC9F0), chrome: RGB(hex: 0x06141E),
+                     top: RGB(hex: 0x03121C), bottom: RGB(hex: 0x05202E), glow: RGB(hex: 0x0A3A50), scheme: .dark, decoration: .waves, family: "Animated"),
+        BrowserTheme(id: "starrynight", name: "Starry Night", note: "Stars that twinkle", accent: RGB(hex: 0xC3A6FF), chrome: RGB(hex: 0x0B0A18),
+                     top: RGB(hex: 0x06050F), bottom: RGB(hex: 0x0C0A1A), glow: RGB(hex: 0x1C1640), scheme: .dark, decoration: .twinkle, family: "Animated"),
+    ]
+
     static let all: [BrowserTheme] = [
         midnight,
         BrowserTheme(id: "pureblack", name: "Pure Black", note: "True black everywhere, for OLED screens", accent: RGB(hex: 0x4DA3FF), chrome: RGB(hex: 0x000000),
@@ -103,13 +125,15 @@ struct CustomTheme: Codable, Equatable {
     var top = RGB(hex: 0x121826)
     var bottom = RGB(hex: 0x07090F)
     var hasPhoto = false
+    /// A moving backdrop for the custom theme (nil is still).
+    var decoration: ThemeDecoration?
     /// How dark the photo is made under the text, 0 to 0.8.
     var photoDim = 0.35
     var isLight: Bool { top.luminance > 0.6 }
 
     var theme: BrowserTheme {
         BrowserTheme(id: "custom", name: "Custom", note: "Your colours and photo", accent: accent, chrome: top.shifted(isLight ? -0.04 : -0.35),
-                     top: top, bottom: bottom, glow: accent.shifted(-0.55), scheme: isLight ? .light : .dark, decoration: .none)
+                     top: top, bottom: bottom, glow: accent.shifted(-0.55), scheme: isLight ? .light : .dark, decoration: decoration ?? .none)
     }
 }
 
@@ -143,11 +167,101 @@ struct ThemeBackdrop: View {
     private struct Decoration: View {
         let kind: ThemeDecoration
         let tint: Color
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+        /// Moving backdrops pause for Reduce Motion, for the Animation setting Off and for Low Power Mode, and draw one still frame instead.
+        private var moving: Bool { kind.isAnimated && !reduceMotion && MotionStyle.current != .off && !ProcessInfo.processInfo.isLowPowerModeEnabled }
 
         var body: some View {
+            TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !moving)) { timeline in
+                canvas(t: moving ? timeline.date.timeIntervalSinceReferenceDate : 4)
+            }
+            .allowsHitTesting(false)
+        }
+
+        private func canvas(t: Double) -> some View {
             Canvas { context, size in
                 switch kind {
                 case .none: break
+                case .aurora:
+                    var layer = context
+                    layer.addFilter(.blur(radius: 38))
+                    let colors: [Color] = [tint, Color(red: 0.35, green: 0.45, blue: 0.95), Color(red: 0.75, green: 0.35, blue: 0.85)]
+                    for band in 0..<3 {
+                        let b = Double(band)
+                        let baseY: Double = size.height * (0.28 + 0.14 * b)
+                        var path = Path()
+                        path.move(to: CGPoint(x: -20, y: size.height))
+                        var x = -20.0
+                        while x <= size.width + 20 {
+                            let slow: Double = sin(x / 170 + t * 0.35 + b * 1.9) * 38
+                            let fast: Double = sin(x / 90 - t * 0.5 + b) * 16
+                            path.addLine(to: CGPoint(x: x, y: baseY + slow + fast))
+                            x += 16
+                        }
+                        path.addLine(to: CGPoint(x: size.width + 20, y: size.height))
+                        path.closeSubpath()
+                        let fade = Gradient(colors: [colors[band].opacity(0.30), .clear])
+                        layer.fill(path, with: .linearGradient(fade, startPoint: CGPoint(x: 0, y: baseY - 50), endPoint: CGPoint(x: 0, y: baseY + 260)))
+                    }
+                case .rain:
+                    var seed: UInt64 = 5
+                    func next() -> Double { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 33) / Double(1 << 31) }
+                    for _ in 0..<80 {
+                        let x = next() * size.width, speed = 380 + next() * 320, offset = next() * size.height, length = 10 + next() * 14
+                        let y: Double = (offset + t * speed).truncatingRemainder(dividingBy: size.height + 40) - 20
+                        var drop = Path()
+                        drop.move(to: CGPoint(x: x, y: y))
+                        drop.addLine(to: CGPoint(x: x - 2, y: y + length))
+                        context.stroke(drop, with: .color(tint.opacity(0.22)), lineWidth: 1)
+                    }
+                case .snow:
+                    var seed: UInt64 = 9
+                    func next() -> Double { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 33) / Double(1 << 31) }
+                    for _ in 0..<90 {
+                        let x0 = next() * size.width, speed = 22 + next() * 40, offset = next() * size.height
+                        let r = 1.2 + next() * 2.4, sway = next() * 30, phase = next() * 6.28, alpha = 0.35 + next() * 0.4
+                        let y: Double = (offset + t * speed).truncatingRemainder(dividingBy: size.height + 20) - 10
+                        let x: Double = x0 + sin(t * 0.6 + phase) * sway
+                        context.fill(Path(ellipseIn: CGRect(x: x, y: y, width: r, height: r)), with: .color(.white.opacity(alpha)))
+                    }
+                case .fireflies:
+                    var seed: UInt64 = 13
+                    func next() -> Double { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 33) / Double(1 << 31) }
+                    for _ in 0..<30 {
+                        let cx = next() * size.width, cy = size.height * (0.3 + next() * 0.7), radius = 20 + next() * 60
+                        let speed = 0.15 + next() * 0.3, phase = next() * 6.28, rate = 0.8 + next()
+                        let x: Double = cx + cos(t * speed + phase) * radius
+                        let y: Double = cy + sin(t * speed * 1.3 + phase) * radius * 0.6
+                        let pulse: Double = 0.5 + 0.5 * sin(t * rate + phase)
+                        context.fill(Path(ellipseIn: CGRect(x: x - 7, y: y - 7, width: 14, height: 14)), with: .color(tint.opacity(0.10 * pulse)))
+                        context.fill(Path(ellipseIn: CGRect(x: x - 1.5, y: y - 1.5, width: 3, height: 3)), with: .color(tint.opacity(0.35 + 0.5 * pulse)))
+                    }
+                case .waves:
+                    for layer in 0..<4 {
+                        let l = Double(layer)
+                        var path = Path()
+                        path.move(to: CGPoint(x: 0, y: size.height))
+                        var x = 0.0
+                        while x <= size.width + 12 {
+                            let wavelength: Double = 140 + 30 * l
+                            let swing: Double = sin(x / wavelength + t * (0.5 + 0.15 * l) + l * 1.3) * (14 + 4 * l)
+                            path.addLine(to: CGPoint(x: x, y: size.height * (0.70 + 0.06 * l) + swing))
+                            x += 12
+                        }
+                        path.addLine(to: CGPoint(x: size.width, y: size.height))
+                        path.closeSubpath()
+                        context.fill(path, with: .color(tint.opacity(0.07 + 0.03 * l)))
+                    }
+                case .twinkle:
+                    var seed: UInt64 = 7
+                    func next() -> Double { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 33) / Double(1 << 31) }
+                    for _ in 0..<110 {
+                        let x = next() * size.width, y = next() * size.height, r = 0.6 + next() * 1.4
+                        let base = 0.25 + next() * 0.5, rate = 0.6 + next() * 1.8, phase = next() * 6.28
+                        let alpha: Double = base * (0.45 + 0.55 * (0.5 + 0.5 * sin(t * rate + phase)))
+                        context.fill(Path(ellipseIn: CGRect(x: x, y: y, width: r, height: r)), with: .color(.white.opacity(alpha)))
+                    }
                 case .fog:
                     for i in 0..<6 {
                         let t = Double(i)
@@ -194,7 +308,6 @@ struct ThemeBackdrop: View {
                     context.fill(Path(ellipseIn: CGRect(x: size.width * 0.5 - d * 0.32, y: size.height * 0.2 - d * 0.32, width: d * 0.64, height: d * 0.64)), with: .color(tint.opacity(0.14)))
                 }
             }
-            .allowsHitTesting(false)
         }
     }
 }
@@ -224,7 +337,7 @@ extension BrowserModel {
     var activeTheme: BrowserTheme {
         if themeID == "custom" { return customTheme.theme }
         if themeID.hasPrefix("user-") { return userTheme(id: themeID) ?? .midnight }
-        return (BrowserTheme.all + BrowserTheme.palettes).first { $0.id == themeID } ?? .midnight
+        return (BrowserTheme.all + BrowserTheme.palettes + BrowserTheme.animated).first { $0.id == themeID } ?? .midnight
     }
 
     var themeIsActive: Bool { themeID != "midnight" }
@@ -352,6 +465,7 @@ struct ThemesSection: View {
         Section {
             VStack(alignment: .leading, spacing: 14) {
                 gallery("Moods", BrowserTheme.all)
+                gallery("Animated", BrowserTheme.animated)
                 gallery("Classic palettes", BrowserTheme.palettes)
                 if !model.userThemes.isEmpty { gallery("Yours", model.userThemes.compactMap(\.theme)) }
                 gallery(nil, [model.customTheme.theme])
@@ -397,7 +511,7 @@ struct ThemesSection: View {
                         .foregroundStyle(theme.accent.luminance > 0.6 ? Color.black : Color.white, theme.accent.color)
                         .padding(5).opacity(selected ? 1 : 0).scaleEffect(selected ? 1 : 0.6)
                 }
-                .animation(.easeOut(duration: 0.18), value: selected)
+                .motion(.easeOut(duration: 0.18), value: selected)
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(selected ? theme.accent.color : Color.primary.opacity(0.12), lineWidth: selected ? 2 : 0.5))
                 Text(theme.name).font(.system(size: 11.5, weight: selected ? .semibold : .regular)).lineLimit(1).foregroundStyle(.primary)
@@ -420,6 +534,9 @@ struct ThemesSection: View {
                 Button("Fix It") { var v = model.customTheme; v.accent = v.accent.readable(against: v.top); model.setCustomTheme(v) }.buttonStyle(.borderless)
             }
             .transition(.opacity)
+        }
+        Picker("Backdrop", selection: Binding(get: { model.customTheme.decoration ?? .none }, set: { var v = model.customTheme; v.decoration = $0 == .none ? nil : $0; model.setCustomTheme(v) })) {
+            ForEach(ThemeDecoration.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
         }
         Button(model.customTheme.hasPhoto ? "Change Photo…" : "Choose a Photo…") { choosingPhoto = true }
         if model.customTheme.hasPhoto {

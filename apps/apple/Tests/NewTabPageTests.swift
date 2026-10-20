@@ -56,3 +56,28 @@ final class MotionStyleTests: XCTestCase {
         XCTAssertEqual(MotionStyle(rawValue: "standard"), .standard)
     }
 }
+
+final class LookTests: XCTestCase {
+    func testIconChoices() {
+        XCTAssertEqual(SiteIconShape.circle.corner, 0.5)
+        XCTAssertLessThan(SiteIconShape.square.corner, SiteIconShape.rounded.corner)
+        XCTAssertEqual(IconWeight.allCases.count, 4)
+        XCTAssertEqual(IconWeight(rawValue: "bold")?.weight, .bold)
+    }
+
+    func testAnimatedDecorationsAreTheOnesThatMove() {
+        XCTAssertTrue(ThemeDecoration.aurora.isAnimated)
+        XCTAssertFalse(ThemeDecoration.stars.isAnimated)
+        XCTAssertEqual(BrowserTheme.animated.count, 6)
+        XCTAssertTrue(BrowserTheme.animated.allSatisfy { $0.decoration.isAnimated })
+    }
+
+    func testAnOldCustomThemeStillReadsAndCanBeAnimated() throws {
+        let old = #"{"accent":{"r":0.3,"g":0.5,"b":1},"top":{"r":0.07,"g":0.09,"b":0.15},"bottom":{"r":0.03,"g":0.03,"b":0.06},"hasPhoto":false,"photoDim":0.35}"#
+        var theme = try JSONDecoder().decode(CustomTheme.self, from: Data(old.utf8))
+        XCTAssertNil(theme.decoration)
+        XCTAssertEqual(theme.theme.decoration, ThemeDecoration.none)
+        theme.decoration = .rain
+        XCTAssertEqual(theme.theme.decoration, .rain)
+    }
+}

@@ -284,7 +284,7 @@ struct PrivacyPopover: View {
             } label: {
                 HStack(spacing: 6) {
                     Text(count.formatted()).font(.system(size: 13.5, weight: .semibold)).foregroundStyle(.white).monospacedDigit()
-                        .contentTransition(.numericText()).animation(.easeOut(duration: 0.35), value: count)
+                        .contentTransition(MotionStyle.current == .off ? .identity : .numericText()).motion(.easeOut(duration: 0.35), value: count)
                     Text(choice.title).font(.system(size: 12)).foregroundStyle(.white.opacity(0.5))
                     Image(systemName: "chevron.up.chevron.down").font(.system(size: 8, weight: .bold)).foregroundStyle(.white.opacity(0.5))
                 }

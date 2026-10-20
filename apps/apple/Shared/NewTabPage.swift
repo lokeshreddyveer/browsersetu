@@ -122,3 +122,43 @@ enum StartWidth: String, CaseIterable, Identifiable {
     /// Relative to the standard width.
     var factor: CGFloat { self == .narrow ? 0.78 : (self == .wide ? 1.25 : 1) }
 }
+
+
+/// How icons look: the weight of the strokes in the toolbar and the shape of the site icons.
+enum IconWeight: String, CaseIterable, Identifiable {
+    case light, regular, semibold, bold
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
+    var weight: Font.Weight { switch self { case .light: .light; case .regular: .regular; case .semibold: .semibold; case .bold: .bold } }
+    nonisolated(unsafe) static var current = IconWeight.regular
+}
+
+enum SiteIconShape: String, CaseIterable, Identifiable {
+    case rounded, circle, square
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
+    /// The corner radius as a share of the icon's size.
+    var corner: CGFloat { switch self { case .rounded: 0.26; case .circle: 0.5; case .square: 0.08 } }
+    nonisolated(unsafe) static var current = SiteIconShape.rounded
+}
+
+@MainActor
+extension BrowserModel {
+    // MARK: A colour for one website
+
+    func siteLookKey(_ host: String?) -> String? { FaviconStore.key(forHost: host) }
+
+    /// The colour chosen for a website, which stands in for the colour the page itself asks for.
+    func siteLook(forHost host: String?) -> PageTint? {
+        guard let key = siteLookKey(host), let hex = siteLooks[key], let c = StartColor.components(hex) else { return nil }
+        return PageTint(red: c.r, green: c.g, blue: c.b)
+    }
+
+    func setSiteLook(host: String?, hex: String?) {
+        guard let key = siteLookKey(host) else { return }
+        if let hex { siteLooks[key] = hex } else { siteLooks[key] = nil }
+        saveSetting("site_looks", encodedMap(siteLooks))
+        for tab in tabs where siteLookKey(tab.url?.host) == key { tab.applySiteLook() }
+        notice = hex == nil ? "\(key) uses the page's own colour again." : "\(key) now has its own colour."
+    }
+}

@@ -261,7 +261,7 @@ struct HorizontalTabStrip: View {
                         .motion(.spring(response: 0.34, dampingFraction: 0.86), value: pinned.map(\.id))
                         .padding(.leading, 8).padding(.trailing, 2)
                     }
-                    .onChange(of: model.activeID) { _, id in if let id { withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id) } } }
+                    .onChange(of: model.activeID) { _, id in if let id { animated(.easeOut(duration: 0.15)) { proxy.scrollTo(id) } } }
                 }
                 newTabButton.padding(.trailing, 6)
             }

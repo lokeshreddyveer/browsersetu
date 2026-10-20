@@ -228,7 +228,7 @@ struct SettlesBeforeShowing: ViewModifier {
             .opacity(ready ? 1 : 0)
             .task {
                 try? await Task.sleep(for: .milliseconds(70))
-                withAnimation(.easeOut(duration: 0.16)) { ready = true }
+                animated(.easeOut(duration: 0.16)) { ready = true }
             }
     }
 }

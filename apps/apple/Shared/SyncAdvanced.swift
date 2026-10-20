@@ -315,7 +315,7 @@ struct SyncStatusRow: View {
             }
         }
         .padding(.vertical, 2)
-        .animation(.easeOut(duration: 0.2), value: health)
+        .motion(.easeOut(duration: 0.2), value: health)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("sync-status")
     }

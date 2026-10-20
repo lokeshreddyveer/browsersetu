@@ -45,7 +45,7 @@ struct WorkbenchView: View {
             }
             .transition(.opacity)
         }
-        .animation(.easeOut(duration: 0.18), value: part)
+        .motion(.easeOut(duration: 0.18), value: part)
         #if DEBUG
         .onAppear { if let name = UserDefaults.standard.string(forKey: "ShotPart"), let wanted = Part(rawValue: name) { part = wanted } }
         #endif

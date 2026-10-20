@@ -216,7 +216,7 @@ private struct IPadTabStrip: View {
                 .padding(.horizontal, 12)
             }
             .frame(height: 46)
-            .onChange(of: model.activeID) { _, id in if let id { withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(id) } } }
+            .onChange(of: model.activeID) { _, id in if let id { animated(.easeOut(duration: 0.2)) { proxy.scrollTo(id) } } }
         }
     }
 }

@@ -354,7 +354,7 @@ struct DownloadsPanel: View {
             ZStack {
                 Circle().stroke(Color.primary.opacity(0.12), lineWidth: 3)
                 Circle().trim(from: 0, to: max(0.02, d.fraction)).stroke(Theme.accent, style: StrokeStyle(lineWidth: 3, lineCap: .round)).rotationEffect(.degrees(-90))
-                    .animation(.easeOut(duration: 0.3), value: d.fraction)
+                    .motion(.easeOut(duration: 0.3), value: d.fraction)
             }
             .frame(width: 30, height: 30)
             VStack(alignment: .leading, spacing: 3) {

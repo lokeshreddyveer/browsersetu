@@ -31,8 +31,8 @@ struct SiteTile: View {
             Image(platform: icon).resizable().interpolation(.high).scaledToFit()
                 .padding(size * 0.14)
                 .frame(width: size, height: size)
-                .background(Color(white: 0.96), in: RoundedRectangle(cornerRadius: size * 0.26, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: size * 0.26, style: .continuous).strokeBorder(Color.black.opacity(0.08), lineWidth: 0.5))
+                .background(Color(white: 0.96), in: RoundedRectangle(cornerRadius: size * SiteIconShape.current.corner, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: size * SiteIconShape.current.corner, style: .continuous).strokeBorder(Color.black.opacity(0.08), lineWidth: 0.5))
         } else {
             letterTile
         }
@@ -44,7 +44,7 @@ struct SiteTile: View {
             .foregroundStyle(.white)
             .frame(width: size, height: size)
             .background(Theme.tileColor(for: displayHost(URL(string: url)) + title),
-                        in: RoundedRectangle(cornerRadius: size * 0.26, style: .continuous))
+                        in: RoundedRectangle(cornerRadius: size * SiteIconShape.current.corner, style: .continuous))
     }
 }
 
@@ -82,6 +82,15 @@ struct TabMenuItems: View {
                         if let url = tab.url { model.schedule(url: url, title: tab.displayTitle, at: SnoozeChoice.tomorrow.date(), repeats: r) }
                     }
                 }
+            }
+        }
+        if !tab.isPrivate && !tab.isBlank, let host = tab.url?.host {
+            Menu("Site Colour") {
+                ForEach(GroupColor.allCases) { c in
+                    Button(c.title) { model.setSiteLook(host: host, hex: StartColor.hex(of: c.color)) }
+                }
+                Divider()
+                Button("Use the Page's Own Colour") { model.setSiteLook(host: host, hex: nil) }
             }
         }
         Button("Put Tab to Sleep") { Task { await model.hibernate(tab) } }

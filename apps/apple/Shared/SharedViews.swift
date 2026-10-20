@@ -383,6 +383,8 @@ struct AppearanceSettingsSection: View {
     var body: some View {
         Group {
             Section("Appearance") {
+                Picker("Toolbar icons", selection: $model.iconWeight) { ForEach(IconWeight.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented)
+                Picker("Site icons", selection: $model.siteIconShape) { ForEach(SiteIconShape.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented)
                 Picker("Animation", selection: $model.motionStyle) { ForEach(MotionStyle.allCases) { Text($0.title).tag($0) } }
                 Text(model.motionStyle.summary).font(.caption).foregroundStyle(.secondary)
                 Picker("Theme", selection: $model.appearance) {
@@ -646,7 +648,7 @@ private struct WorkspaceSettingsRow: View {
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .animation(.easeOut(duration: 0.2), value: expanded)
+        .motion(.easeOut(duration: 0.2), value: expanded)
     }
 
     private var summary: String {

@@ -99,6 +99,15 @@ enum MotionStyle: String, CaseIterable, Identifiable {
     }
 }
 
+/// An SF Symbol bounce each time `value` changes, unless motion is off (the app's Animation setting, or the system's Reduce Motion).
+struct BounceOnChange<V: Equatable>: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let value: V
+    @ViewBuilder func body(content: Content) -> some View {
+        if reduceMotion || MotionStyle.current == .off { content } else { content.symbolEffect(.bounce, value: value) }
+    }
+}
+
 struct MotionModifier<V: Equatable>: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let animation: Animation

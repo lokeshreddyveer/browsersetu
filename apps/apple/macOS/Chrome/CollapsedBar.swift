@@ -122,7 +122,7 @@ struct PillHandle: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: hovering)
+        .motion(.spring(response: 0.3, dampingFraction: 0.8), value: hovering)
         .help("Show the toolbar")
         .accessibilityLabel("Show the toolbar")
         .accessibilityIdentifier("pill-handle")
@@ -193,7 +193,7 @@ struct FloatingPillContent: View {
         }
         .scaleEffect(hovering ? 1.015 : 1)
         .frame(maxWidth: 480)
-        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: hovering)
+        .motion(.spring(response: 0.3, dampingFraction: 0.8), value: hovering)
         .contextMenu { PillMenu() }
         .onHover { inside in
             hovering = inside
@@ -322,7 +322,7 @@ struct FloatingSearchPill: View {
         }
         .frame(width: expanded ? expandedWidth : Self.collapsedWidth, height: Self.height)
         // Only the width and the faces' opacity animate: this modifier covers what is above it, and nothing below.
-        .animation(.spring(response: 0.34, dampingFraction: 0.92), value: expanded)
+        .motion(.spring(response: 0.34, dampingFraction: 0.92), value: expanded)
         .environment(\.colorScheme, .dark)
         .background(Capsule(style: .continuous).fill(Obsidian.fill.opacity(0.96)))
         .overlay(Capsule(style: .continuous).strokeBorder(expanded ? Theme.accent.opacity(0.7) : Color.clear, lineWidth: 1).allowsHitTesting(false))

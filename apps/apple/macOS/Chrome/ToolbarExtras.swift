@@ -142,6 +142,6 @@ struct DownloadsToolbarButton: View {
         .help(items.isEmpty ? "Downloads" : "Downloading… \(Int((average * 100).rounded()))%")
         .accessibilityLabel(items.isEmpty ? "Downloads" : "Downloads, \(Int((average * 100).rounded())) percent")
         .accessibilityIdentifier("downloads-button")
-        .animation(.easeOut(duration: 0.2), value: items.isEmpty)
+        .motion(.easeOut(duration: 0.2), value: items.isEmpty)
     }
 }

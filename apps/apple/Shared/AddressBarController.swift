@@ -272,7 +272,7 @@ private struct SuggestionPressStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.985 : 1)
-            .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
+            .motion(.easeOut(duration: 0.1), value: configuration.isPressed)
     }
 }
 

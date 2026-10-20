@@ -267,12 +267,22 @@ extension BrowserModel {
                 if !self.isSecondary { self.openDueSchedules() }
                 self.checkMediaSleepTimer()
                 await self.updateReadingProgress()
-                await self.watchResponsiveness()
+                if tickCount % 3 == 0 { await self.watchResponsiveness() }
                 tickCount += 1
                 if tickCount % 40 == 0 { self.checkpointTick() }
-                for tab in self.tabs { await tab.refreshAudio() }
+                await self.pollAudio(tick: tickCount)
             }
         }
+    }
+
+    /// Looks for sound in the tab in front and any tab already known to be playing, and in one other tab each time round, so a hundred open tabs are
+    /// not all asked a question every few seconds.
+    func pollAudio(tick: Int) async {
+        let live = tabs.filter { !$0.isDiscarded && !$0.isBlank }
+        var chosen = live.filter { $0.id == activeID || $0.playingAudio }
+        let others = live.filter { tab in !chosen.contains { $0.id == tab.id } }
+        if !others.isEmpty { chosen.append(others[tick % others.count]) }
+        for tab in chosen { await tab.refreshAudio() }
     }
 
     /// Mutes or unmutes every tab that is playing sound.
@@ -285,13 +295,14 @@ extension BrowserModel {
 /// A speaker on a tab that is playing sound, crossed out when the tab is muted. Tapping it mutes or unmutes.
 struct AudioBadge: View {
     @ObservedObject var tab: TabController
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         if tab.playingAudio || tab.muted {
             Button { tab.setMuted(!tab.muted) } label: {
                 Image(systemName: tab.muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
                     .font(.system(size: 9, weight: .semibold)).foregroundStyle(tab.muted ? Color.secondary : Theme.accent)
-                    .symbolEffect(.variableColor.iterative, isActive: !tab.muted)
+                    .symbolEffect(.variableColor.iterative, isActive: !tab.muted && !reduceMotion && MotionStyle.current != .off)
                     .frame(width: 16, height: 16).contentShape(Rectangle())
             }
             .buttonStyle(.plain)

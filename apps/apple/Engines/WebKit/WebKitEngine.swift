@@ -564,9 +564,12 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
     func saveScrollState() async {
         let js = """
         (function () {
+          var go = function () { save(); };
+          if (window.requestIdleCallback) { requestIdleCallback(go, { timeout: 800 }); } else { setTimeout(go, 60); }
           function path(el) { var p = []; while (el && el !== document.body && el.parentElement) { p.unshift(el.tagName + ':' + Array.prototype.indexOf.call(el.parentElement.children, el)); el = el.parentElement; } return p.join('/'); }
-          var out = [], all = document.body ? document.body.querySelectorAll('*') : [];
-          for (var i = 0; i < all.length && out.length < 30; i++) {
+          function save() {
+          var out = [], all = document.body ? document.body.querySelectorAll('div, main, section, ul, ol, article') : [];
+          for (var i = 0; i < all.length && i < 1500 && out.length < 30; i++) {
             var e = all[i];
             if (e.clientHeight > 120 && e.scrollHeight > e.clientHeight + 40 && e.scrollTop >= 0) {
               var oy = getComputedStyle(e).overflowY;
@@ -575,6 +578,7 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
           }
           var de = document.documentElement;
           window.__bsScrollState = { w: { top: window.scrollY, bottom: (de.scrollHeight - window.innerHeight - window.scrollY) < 8 && de.scrollHeight > window.innerHeight + 40 }, c: out };
+          }
         })();
         """
         _ = try? await webView.evaluateJavaScript(js)

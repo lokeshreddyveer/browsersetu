@@ -81,8 +81,8 @@ struct SidebarLayoutPanel: View {
                 groupsSection(all)
             }
             .padding(.horizontal, 12).padding(.top, 2).padding(.bottom, 14)
-            .animation(.easeOut(duration: 0.18), value: all.map(\.id))
-            .animation(.easeOut(duration: 0.18), value: collapsed)
+            .motion(.easeOut(duration: 0.18), value: all.map(\.id))
+            .motion(.easeOut(duration: 0.18), value: collapsed)
         }
     }
 
