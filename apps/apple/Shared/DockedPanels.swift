@@ -49,7 +49,7 @@ struct DockedPanelView: View {
             .themedSurface()
             .frame(width: model.dockWidth)
         }
-        .background(Color.platformBackground)
+        .chromeFill()
     }
 }
 

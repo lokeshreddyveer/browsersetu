@@ -143,6 +143,32 @@ enum ThemeState {
     nonisolated(unsafe) static var raised: Color?
     /// The theme in use has a moving backdrop, so the bars let it show through instead of covering it.
     nonisolated(unsafe) static var animated = false
+    /// How strong the moving backdrop is on the browser's surfaces, 0.35 to 1.
+    nonisolated(unsafe) static var intensity = 0.7
+}
+
+/// A pane that used to be solid. With an animated theme it is see-through, over a copy of the moving backdrop when it sits in a window of its own; otherwise it is the
+/// plain system background, as before.
+struct ChromeFill: ViewModifier {
+    @EnvironmentObject var model: BrowserModel
+    var ownBackdrop = false
+
+    func body(content: Content) -> some View {
+        if model.themeIsActive, ThemeState.animated {
+            content.background {
+                ZStack {
+                    if ownBackdrop { ChromeBackdrop() }
+                    (ThemeState.raised ?? Color.clear).opacity(0.5)
+                }
+            }
+        } else {
+            content.background(Color.platformBackground)
+        }
+    }
+}
+
+extension View {
+    func chromeFill(ownBackdrop: Bool = false) -> some View { modifier(ChromeFill(ownBackdrop: ownBackdrop)) }
 }
 
 /// The colour of the browser's own surfaces (window, toolbar, tabs, sidebar). With an animated theme it also holds the moving backdrop, which
@@ -155,6 +181,7 @@ struct ChromeBackdrop: View {
             ThemeState.chrome ?? Color.clear
             if model.themeIsActive, model.activeTheme.decoration.isAnimated {
                 ThemeBackdrop.Decoration(kind: model.activeTheme.decoration, tint: model.activeTheme.accent.color)
+                    .opacity(model.backdropIntensity.value)
                     .transition(.opacity)
             }
         }
@@ -189,7 +216,8 @@ struct ThemeBackdrop: View {
         @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
         /// Moving backdrops pause for Reduce Motion, for the Animation setting Off and for Low Power Mode, and draw one still frame instead.
-        private var moving: Bool { kind.isAnimated && !reduceMotion && MotionStyle.current != .off && !ProcessInfo.processInfo.isLowPowerModeEnabled }
+        @Environment(\.scenePhase) private var scenePhase
+        private var moving: Bool { kind.isAnimated && !reduceMotion && MotionStyle.current != .off && !ProcessInfo.processInfo.isLowPowerModeEnabled && scenePhase == .active }
 
         var body: some View {
             TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !moving)) { timeline in

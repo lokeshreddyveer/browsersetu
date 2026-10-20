@@ -48,8 +48,8 @@ struct IPadTabOverview: View {
             Text("Press and hold a card for more. Tap the cross to close it.")
                 .font(.system(size: 12.5)).foregroundStyle(.secondary).padding(.bottom, 16)
         }
-        .background(.regularMaterial)
-        .background((ThemeState.chrome ?? Color(.systemBackground)).opacity(0.6))
+        .background(ThemeState.animated ? AnyShapeStyle(Color.clear) : AnyShapeStyle(.regularMaterial))
+        .background((ThemeState.chrome ?? Color(.systemBackground)).opacity(ThemeState.animated ? 0.35 : 0.6))
     }
 
     private func pill(_ title: String, symbol: String?, tinted: Bool, action: @escaping () -> Void) -> some View {

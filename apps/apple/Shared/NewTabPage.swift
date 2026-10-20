@@ -133,6 +133,13 @@ enum IconWeight: String, CaseIterable, Identifiable {
     nonisolated(unsafe) static var current = IconWeight.regular
 }
 
+enum BackdropIntensity: String, CaseIterable, Identifiable {
+    case subtle, medium, strong
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
+    var value: Double { self == .subtle ? 0.4 : (self == .medium ? 0.7 : 1) }
+}
+
 enum SiteIconShape: String, CaseIterable, Identifiable {
     case rounded, circle, square
     var id: String { rawValue }

@@ -162,7 +162,7 @@ struct MacSettingsView: View {
                     }
                 }
                 .padding(.horizontal, 24).padding(.top, 18).padding(.bottom, 12)
-                .background(.ultraThinMaterial)
+                .background(ThemeState.animated ? AnyShapeStyle(Color.clear) : AnyShapeStyle(.ultraThinMaterial))
                 .overlay(alignment: .bottom) { Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 0.5) }
                 .id(panel.rawValue)
             }
@@ -172,7 +172,7 @@ struct MacSettingsView: View {
         .frame(minWidth: inline ? 0 : 880, maxWidth: inline ? .infinity : 880,
                minHeight: inline ? 0 : min(680, max(420, (NSScreen.main?.visibleFrame.height ?? 900) - 100)),
                maxHeight: inline ? .infinity : min(680, max(420, (NSScreen.main?.visibleFrame.height ?? 900) - 100)))
-        .background(Color.platformBackground)
+        .chromeFill(ownBackdrop: !inline)
         // The menu bar's Settings item can open this window even when Settings is set to be a tab: it hands over to the tab and closes itself.
         .background(SettingsWindowGuard(enabled: !inline && model.settingsInTab))
         .preferredColorScheme(model.appearance.colorScheme ?? (model.themeIsActive ? model.activeTheme.scheme?.colorScheme : nil))
