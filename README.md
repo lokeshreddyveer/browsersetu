@@ -3,7 +3,7 @@
 A native, security-first web browser for **macOS** and **iPhone/iPad**. It renders with the system's own WebKit, keeps everything on your device, and
 puts a small Rust core (tabs, address-bar logic, permission and navigation rules, per-profile SQLite storage) under a SwiftUI interface.
 
-> **Status: release candidate, in the production-hardening phase (0.3.3, build 16).** It is a real, working browser with a large automated test suite (about 750 tests), but
+> **Status: release candidate, in the production-hardening phase (0.3.3, build 17).** It is a real, working browser with a large automated test suite (about 750 tests), but
 > it is **not yet called production grade**: that needs the evidence in [`docs/RELEASE-BAR.md`](docs/RELEASE-BAR.md) to be complete and recorded. [`docs/capabilities.md`](docs/capabilities.md)
 > lists every feature as *Checked*, *Built* (compiled, not exercised end to end) or *Parked* (switched off), with the evidence and the limits. Read both before you rely on anything.
 
@@ -153,11 +153,12 @@ Every one can be changed in Settings › Shortcuts. The defaults:
 
 ### Safety, daily digest and sharing
 
+- **Tools menu.** iPhone menu, iPad ⋮ menu, the Mac menu bar and a button on the new tab page open the Daily Digest, Feeds / Tasks / Vault / Clipboard, Reading List, the privacy grade and Clear Everything Now.
 - **Look-alike address warning.** Before a page opens, its address is compared with about sixty well-known sites. Swapped letters and digits (paypa1), letters from other alphabets (including addresses written as `xn--`), a name one letter off, a famous name placed in front of a different site (`paypal.com.example.net`) and bait words such as `secure-paypal-login` stop the page with a warning that names the site it imitates. You can go back or continue. It runs on the address alone, on the device; Settings › Privacy has the switch.
 - **Privacy grade.** *This site…* in the shield card opens an A to F grade for the page in front, with the reasons listed: secure connection, how many other sites it loaded from, trackers stopped, permissions you gave it, and a look-alike notice. Worked out on the device from what the page just did.
 - **Everything for one site in one place.** The same panel also holds zoom, the site's own light or dark look, "always open in a private tab" and the permissions you allowed there, each with a *Take Back* button.
-- **Clear Everything Now** (command palette, and Settings › Privacy) asks once, then closes every tab including locked and private ones and erases history, the downloads list, website data, copied text and what the widgets and share sheet hold. Bookmarks, passwords and settings stay.
-- **Daily Digest** (command palette): your unread reading list, the newest feed items, open tasks, today's time on sites and the blocked count, in one list.
+- **Clear Everything Now** (Tools menu, command palette, and Settings › Privacy) asks once, then closes every tab including locked and private ones and erases history, the downloads list, website data, copied text and what the widgets and share sheet hold. Bookmarks, passwords and settings stay.
+- **Daily Digest** (Tools menu, or the command palette): your unread reading list, the newest feed items, open tasks, today's time on sites and the blocked count, in one list.
 - **Automatic switching.** Settings › Workspaces (Mac) takes time rules, such as weekdays 9 to 17 in the Work workspace. A rule is applied once as its time begins; a switch you make by hand afterwards is left alone.
 - **Ask in plain words.** Type something like `pasta recipe last week` or `bank 3 days ago` in the command palette and the pages from your history that fit appear first. Worked out on the device.
 - **Tab groups travel.** The tab list from another device now carries each tab's group; one tap opens a whole group here.
