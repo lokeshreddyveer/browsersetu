@@ -852,8 +852,8 @@ final class BrowserModel: ObservableObject {
     /// A colour chosen for each website (hex by site), shown in place of the page's own colour.
     @Published var siteLooks: [String: String] = [:]
     @Published var backdropIntensity: BackdropIntensity = .medium { didSet { ThemeState.intensity = backdropIntensity.value; saveSetting("backdrop_intensity", backdropIntensity.rawValue) } }
-    @Published var iconWeight: IconWeight = .regular { didSet { IconWeight.current = iconWeight; saveSetting("icon_weight", iconWeight.rawValue) } }
-    @Published var siteIconShape: SiteIconShape = .rounded { didSet { SiteIconShape.current = siteIconShape; saveSetting("site_icon_shape", siteIconShape.rawValue) } }
+    @Published var iconWeight: IconWeight = .regular { didSet { IconWeight.current = iconWeight; LookState.shared.weight = iconWeight; saveSetting("icon_weight", iconWeight.rawValue) } }
+    @Published var siteIconShape: SiteIconShape = .rounded { didSet { SiteIconShape.current = siteIconShape; LookState.shared.shape = siteIconShape; saveSetting("site_icon_shape", siteIconShape.rawValue) } }
     @Published var motionStyle: MotionStyle = .standard { didSet { MotionStyle.current = motionStyle; saveSetting("motion_style", motionStyle.rawValue) } }
     @Published var fasterDownloads = true { didSet { saveSetting("download_segments", fasterDownloads ? "1" : "0"); engine.downloads.segmentedEnabled = fasterDownloads } }
     @Published var organizeByDomain = false { didSet { saveSetting("organize_downloads_domain", organizeByDomain ? "1" : "0"); engine.downloads.organizeByDomain = organizeByDomain } }
