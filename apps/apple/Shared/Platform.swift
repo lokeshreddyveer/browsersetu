@@ -118,6 +118,13 @@ func revealInSystem(_ url: URL) {
 
 /// A small tap felt on the iPhone for the things that matter (a tab opened, closed or pinned). Nothing on the Mac.
 enum Haptics {
+    /// The light tick of a selection changing, such as switching tab.
+    @MainActor static func selection() {
+        #if os(iOS)
+        UISelectionFeedbackGenerator().selectionChanged()
+        #endif
+    }
+
     @MainActor static func tap() {
         #if os(iOS)
         UIImpactFeedbackGenerator(style: .light).impactOccurred()

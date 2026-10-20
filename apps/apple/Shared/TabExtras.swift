@@ -291,6 +291,7 @@ struct AudioBadge: View {
             Button { tab.setMuted(!tab.muted) } label: {
                 Image(systemName: tab.muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
                     .font(.system(size: 9, weight: .semibold)).foregroundStyle(tab.muted ? Color.secondary : Theme.accent)
+                    .symbolEffect(.variableColor.iterative, isActive: !tab.muted)
                     .frame(width: 16, height: 16).contentShape(Rectangle())
             }
             .buttonStyle(.plain)

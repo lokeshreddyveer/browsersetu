@@ -52,7 +52,7 @@ struct PhoneRootView: View {
             }
             .motion(.easeOut(duration: 0.22), value: model.dockedPanel)
             if model.overviewVisible {
-                TabOverview().transition(.opacity)
+                TabOverview().transition(.opacity.combined(with: .scale(scale: 0.96)))
             }
             // A download is never silent: progress while it runs, a card when it is done.
             if model.showSetup { SetupAssistantView().transition(.opacity).zIndex(10) }
