@@ -170,7 +170,7 @@ final class Workbench: ObservableObject {
     // MARK: Automation
 
     /// Commands a workflow or an outside link may run. Anything that deletes or changes settings is left out on purpose.
-    static let safeCommands: Set<String> = ["new-tab", "new-private", "reopen", "sidebar", "overview", "bookmarks", "history", "downloads", "restore-layout", "group-by-site", "scratch-tab", "research", "site-privacy", "layout-research", "layout-writing", "layout-media", "layout-minimal"]
+    static let safeCommands: Set<String> = ["inbox", "restore-last-session", "screenshot-annotate", "toolkit", "new-tab", "new-private", "reopen", "sidebar", "overview", "bookmarks", "history", "downloads", "restore-layout", "group-by-site", "scratch-tab", "research", "site-privacy", "layout-research", "layout-writing", "layout-media", "layout-minimal"]
 
     func setWorkflows(_ list: [Workflow]) { workflows = list; saveMap("workflows", "list", list) }
 

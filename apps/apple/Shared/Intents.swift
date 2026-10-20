@@ -60,10 +60,22 @@ struct RunWorkflowIntent: AppIntent {
     }
 }
 
+struct ReopenLastSessionIntent: AppIntent {
+    static let title: LocalizedStringResource = "Reopen My Last Session"
+    static let description = IntentDescription("Opens again the pages from your most recent saved checkpoint.")
+    static let openAppWhenRun = true
+
+    @MainActor func perform() async throws -> some IntentResult {
+        IntentInbox.send(.command("restore-last-session"))
+        return .result()
+    }
+}
+
 struct BrowserSetuShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(intent: OpenPageIntent(), phrases: ["Open a page in \(.applicationName)"], shortTitle: "Open a Page", systemImageName: "safari")
         AppShortcut(intent: SearchWebIntent(), phrases: ["Search the web in \(.applicationName)"], shortTitle: "Search the Web", systemImageName: "magnifyingglass")
+        AppShortcut(intent: ReopenLastSessionIntent(), phrases: ["Reopen my last session in \(.applicationName)"], shortTitle: "Reopen Last Session", systemImageName: "clock.arrow.circlepath")
         AppShortcut(intent: RunWorkflowIntent(), phrases: ["Run a workflow in \(.applicationName)"], shortTitle: "Run a Workflow", systemImageName: "list.bullet.rectangle")
     }
 }

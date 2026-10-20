@@ -26,6 +26,7 @@ struct SheetContainer: View {
                 case .bookmarkTools: BookmarkToolsView()
                 case .compare: ComparePagesView()
                 case .timeMachine: TimeMachineView()
+                case .toolkit: ToolkitView()
                 case .history: HistoryPanel()
                 case .downloads: DownloadsPanel(coordinator: model.downloads)
                 case .settings: SettingsView()
@@ -84,6 +85,7 @@ struct SheetContainer: View {
         case .bookmarkTools: "Bookmark Tools"
         case .compare: "Compare Pages"
         case .timeMachine: "Session Time Machine"
+        case .toolkit: "Feeds and Tools"
         case .findAll: "Find in All Tabs"
         case .sessions: "Saved Sessions"
         case .timeline: "Tab Activity"

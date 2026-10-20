@@ -4,7 +4,15 @@ import WidgetKit
 
 @main
 struct SpeedWidgetBundle: WidgetBundle {
-    var body: some Widget { SpeedLiveActivity() }
+    var body: some Widget {
+        SpeedLiveActivity()
+        #if APP_GROUP
+        SearchWidget()
+        FavoritesWidget()
+        BlockedWidget()
+        ReadingListWidget()
+        #endif
+    }
 }
 
 /// The live network speed in the Dynamic Island (and on the Lock Screen while the browser is open).

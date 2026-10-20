@@ -179,10 +179,34 @@ targets:
       configs:
         Release:
           CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
+  BrowserSetuShare:
+    type: app-extension
+    platform: iOS
+    sources: [ShareExtension, Shared/SharedStore.swift]
+    info:
+      path: ShareExtension/Info.plist
+      properties:
+        CFBundleDisplayName: Browser Setu
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+    # entitlements:
+    #   path: ShareExtension/ShareExtension.entitlements
+    #   properties: { com.apple.security.application-groups: [group.com.browsersetu.shared] }
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.browsersetu.ios.share
+        PRODUCT_NAME: BrowserSetuShare
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SKIP_INSTALL: YES
+        EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64
   BrowserSetuSpeedWidget:
     type: app-extension
     platform: iOS
-    sources: [LiveActivity, SpeedWidget]
+    sources: [LiveActivity, SpeedWidget, Shared/SharedStore.swift]
+    # To turn on the widgets: register the App Group (docs/app-group.md), then uncomment the next three lines and the same pair on the app and on BrowserSetuShare.
+    # entitlements:
+    #   path: SpeedWidget/SpeedWidget.entitlements
+    #   properties: { com.apple.security.application-groups: [group.com.browsersetu.shared] }
     info:
       path: SpeedWidget/Info.plist
       properties:
@@ -195,7 +219,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.browsersetu.ios.speedwidget
         PRODUCT_NAME: BrowserSetuSpeedWidget
-        TARGETED_DEVICE_FAMILY: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
         SKIP_INSTALL: YES
         EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64
   BrowserSetuiOS:
@@ -204,6 +228,7 @@ targets:
     sources: [Shared, Engines, iOS, LiveActivity, Generated/browser_core.swift]
     dependencies:
       - target: BrowserSetuSpeedWidget
+      # - target: BrowserSetuShare   (turn on with the App Group, see docs/app-group.md)
       - package: SetuPrivacyKit
         product: SetuPrivacyCore
       - package: SetuPrivacyKit
@@ -214,6 +239,7 @@ targets:
       path: iOS/BrowserSetu.entitlements
       properties:
         com.apple.developer.ubiquity-kvstore-identifier: $(TeamIdentifierPrefix)com.browsersetu.sync
+        # com.apple.security.application-groups: [group.com.browsersetu.shared]   (see docs/app-group.md)
     info:
       path: iOS/Info.plist
       properties:

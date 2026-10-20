@@ -13,6 +13,7 @@ final class MacAppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.servicesProvider = ServicesProvider.shared
         NSUpdateDynamicServices()
+        MenuBarSearch.shared.installIfWanted()
     }
 
     func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
@@ -65,5 +66,90 @@ final class ServicesProvider: NSObject {
             _ = model.openTab(url: url, isPrivate: false)
             NSApp.activate(ignoringOtherApps: true)
         }
+    }
+}
+
+// MARK: Menu-bar search
+
+import SwiftUI
+
+/// A small search window in the menu bar: type, press Return, and the search opens in the browser. Off unless it is turned on in the Library menu.
+@MainActor
+final class MenuBarSearch: NSObject {
+    static let shared = MenuBarSearch()
+    private var item: NSStatusItem?
+    private let popover = NSPopover()
+    static let key = "MenuBarSearchOn"
+
+    var isOn: Bool { UserDefaults.standard.bool(forKey: Self.key) }
+
+    func setOn(_ on: Bool) {
+        UserDefaults.standard.set(on, forKey: Self.key)
+        on ? install() : remove()
+    }
+
+    func installIfWanted() { if isOn { install() } }
+
+    private func install() {
+        guard item == nil else { return }
+        let status = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        status.button?.image = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: "Search with Browser Setu")
+        status.button?.target = self
+        status.button?.action = #selector(toggle)
+        item = status
+        popover.behavior = .transient
+        popover.contentSize = NSSize(width: 340, height: 300)
+    }
+
+    private func remove() {
+        popover.performClose(nil)
+        if let item { NSStatusBar.system.removeStatusItem(item) }
+        item = nil
+    }
+
+    @objc private func toggle() {
+        guard let button = item?.button, let model = frontModel() else { return }
+        if popover.isShown { popover.performClose(nil); return }
+        popover.contentViewController = NSHostingController(rootView: MenuBarSearchView(close: { [weak self] in self?.popover.performClose(nil) }).environmentObject(model))
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        popover.contentViewController?.view.window?.makeKey()
+    }
+}
+
+private struct MenuBarSearchView: View {
+    @EnvironmentObject var model: BrowserModel
+    let close: () -> Void
+    @State private var text = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Search or enter address", text: $text).textFieldStyle(.plain).focused($focused).onSubmit(go)
+            }
+            .padding(10).background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.08)))
+            Text("Favorites").font(.caption).foregroundStyle(.secondary)
+            ScrollView {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 70), spacing: 8)], spacing: 8) {
+                    ForEach(model.orderedFavorites.prefix(12), id: \.url) { fav in
+                        Button { model.open(urlString: fav.url, newTab: true); NSApp.activate(ignoringOtherApps: true); close() } label: {
+                            VStack(spacing: 4) { SiteTile(url: fav.url, title: fav.title, size: 36); Text(fav.title.isEmpty ? displayHost(URL(string: fav.url)) : fav.title).font(.caption2).lineLimit(1) }
+                        }.buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .onAppear { focused = true }
+    }
+
+    private func go() {
+        let input = text.trimmingCharacters(in: .whitespaces)
+        guard !input.isEmpty else { return }
+        _ = model.newTab()
+        model.navigate(input: input)
+        NSApp.activate(ignoringOtherApps: true)
+        close()
     }
 }

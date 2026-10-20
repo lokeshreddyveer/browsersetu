@@ -106,6 +106,7 @@ extension BrowserModel {
 }
 
 @MainActor func copyToPasteboard(_ text: String) {
+    BrowserModel.copyObserver?(text)
     #if os(macOS)
     NSPasteboard.general.clearContents()
     NSPasteboard.general.setString(text, forType: .string)

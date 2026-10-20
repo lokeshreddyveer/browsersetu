@@ -257,9 +257,15 @@ extension BrowserModel {
 struct SavedPagesSection: View {
     @EnvironmentObject var model: BrowserModel
     @State private var files: [URL] = []
+    @State private var query = ""
+    @State private var hits: [(file: URL, snippet: String)] = []
 
     var body: some View {
         Section {
+            TextField("Search inside saved pages", text: $query).textFieldStyle(.roundedBorder).onSubmit { search() }
+            ForEach(hits, id: \.file.path) { hit in
+                Button { model.openSavedPage(hit.file); model.sheet = nil } label: { VStack(alignment: .leading) { Text(SavedPages.title(hit.file)).fontWeight(.medium); Text(hit.snippet).font(.caption).foregroundStyle(.secondary).lineLimit(2) } }.buttonStyle(.plain)
+            }
             if files.isEmpty { Label("No saved pages", systemImage: "square.and.arrow.down").foregroundStyle(.secondary) }
             ForEach(files, id: \.path) { file in
                 HStack {
@@ -273,5 +279,18 @@ struct SavedPagesSection: View {
             Text("A page saved as a web archive opens without a connection. It shows the page as it was and runs none of its scripts.")
         }
         .onAppear { files = SavedPages.list() }
+        .onChange(of: query) { _, q in if q.isEmpty { hits = [] } }
+    }
+
+    private func search() {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        guard q.count >= 2 else { hits = []; return }
+        let list = files
+        Task {
+            let found = await Task.detached(priority: .userInitiated) { () -> [(file: URL, snippet: String)] in
+                list.prefix(200).compactMap { f in WebArchiveText.snippet(in: WebArchiveText.extract(from: f), for: q).map { (f, $0) } }
+            }.value
+            hits = found
+        }
     }
 }
