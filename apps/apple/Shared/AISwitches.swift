@@ -9,6 +9,7 @@ final class AISwitches: ObservableObject {
     static let shared = AISwitches()
     static let masterKey = "AIFeaturesOn"
     static let toolsKey = "AIToolsOn"
+    static let linksKey = "AILinksFree"
 
     @Published var aiEnabled: Bool {
         didSet {
@@ -28,7 +29,13 @@ final class AISwitches: ObservableObject {
         }
     }
 
+    /// Off by default: even an ordinary link asks, because a site can put a logout or a delete behind one.
+    @Published var linksWithoutAsking: Bool {
+        didSet { UserDefaults.standard.set(linksWithoutAsking, forKey: Self.linksKey) }
+    }
+
     private init() {
+        linksWithoutAsking = UserDefaults.standard.bool(forKey: Self.linksKey)
         aiEnabled = UserDefaults.standard.object(forKey: Self.masterKey) as? Bool ?? true
         toolsOn = UserDefaults.standard.bool(forKey: Self.toolsKey)
     }

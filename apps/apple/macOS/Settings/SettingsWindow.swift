@@ -134,7 +134,7 @@ struct MacSettingsView: View {
     /// The panels in three groups down a rail of our own, with the panel's name large above its settings: a window that is
     /// Browser Setu's, not a copy of a system preferences window.
     private static let groups: [(title: String, panels: [SettingsPanel])] = [
-        ("Browser", [.general, .appearance, .tabs, .search]),
+        ("Browser", [.general, .appearance, .tabs, .search, .ai]),
         ("Protection", [.privacy, .websites, .profiles]),
         ("More", [.performance, .extensions, .shortcuts, .advanced])
     ]

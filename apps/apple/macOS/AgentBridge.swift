@@ -17,8 +17,13 @@ final class AgentBridge: ObservableObject, AgentHost {
     static let shared = AgentBridge()
 
     @Published private(set) var log: [AgentLogEntry] = []
-    @Published private(set) var sharedTabs = Set<UInt64>()
-    @Published private(set) var ownedTabs = Set<UInt64>()
+    /// Tabs are named to AI tools by a number this bridge hands out, not by the browser's own tab id: two windows can both have a tab 3, and the
+    /// bridge can then tell them apart and look in every window.
+    @Published private(set) var sharedTabs = Set<Int>()
+    @Published private(set) var ownedTabs = Set<Int>()
+    private final class WeakTab { weak var tab: TabController?; init(_ tab: TabController) { self.tab = tab } }
+    private var handles: [Int: WeakTab] = [:]
+    private var nextHandle = 0
     /// Origins (scheme, host and port) where clicking and typing are allowed this session.
     @Published private(set) var allowedOrigins = Set<String>()
     /// Origins a shared tab was on when the person shared it: reading them is allowed, acting on them is not until they are in `allowedOrigins`.
@@ -114,15 +119,34 @@ final class AgentBridge: ObservableObject, AgentHost {
     }
 
     /// Whether a call that began at `started` may still change anything: the switch is on and nothing has been stopped since.
-    private func live(_ started: Int) -> Bool { started == generation && AISwitches.shared.toolsActive }
+    /// A request whose connection was closed (the client left, it timed out, or Stop was pressed) is cancelled, and cancellation counts here too.
+    private func live(_ started: Int) -> Bool { started == generation && AISwitches.shared.toolsActive && !Task.isCancelled }
 
     // MARK: Sharing
 
-    func isShared(_ tab: TabController) -> Bool { sharedTabs.contains(tab.id) || ownedTabs.contains(tab.id) }
+    private func handle(for tab: TabController) -> Int? { handles.first(where: { $0.value.tab === tab })?.key }
 
+    private func makeHandle(for tab: TabController) -> Int {
+        if let existing = handle(for: tab) { return existing }
+        handles = handles.filter { $0.value.tab != nil }
+        nextHandle += 1
+        handles[nextHandle] = WeakTab(tab)
+        return nextHandle
+    }
+
+    func isShared(_ tab: TabController) -> Bool {
+        guard let h = handle(for: tab) else { return false }
+        return sharedTabs.contains(h) || ownedTabs.contains(h)
+    }
+
+    /// Shares a tab, or stops sharing it (whether the person shared it or a tool opened it).
     func toggleShare(_ tab: TabController) {
         if tab.isPrivate { return }
-        if sharedTabs.contains(tab.id) { sharedTabs.remove(tab.id); note("Unshared", tab.displayTitle, .done); return }
+        if isShared(tab), let h = handle(for: tab) {
+            sharedTabs.remove(h); ownedTabs.remove(h)
+            note("Unshared", tab.displayTitle, .done)
+            return
+        }
         Task { @MainActor in
             if !sharingNoticeSeen {
                 let choice = await Dialogs.choose(
@@ -132,7 +156,7 @@ final class AgentBridge: ObservableObject, AgentHost {
                 guard choice == 0 else { return }
                 sharingNoticeSeen = true
             }
-            sharedTabs.insert(tab.id)
+            sharedTabs.insert(makeHandle(for: tab))
             if let origin = AgentPolicy.origin(of: tab.url) { readableOrigins.insert(origin) }
             note("Shared", tab.displayTitle, .done)
         }
@@ -140,10 +164,14 @@ final class AgentBridge: ObservableObject, AgentHost {
 
     // MARK: The browser behind the tools
 
+    /// The window that opens new tabs for a tool.
     private var model: BrowserModel? {
         let all = BrowserModel.activeModels.allObjects
         return all.first(where: { !$0.isSecondary && !$0.isGuest }) ?? all.first(where: { !$0.isGuest })
     }
+
+    /// Every window, because a tab may be shared in any of them.
+    private var allModels: [BrowserModel] { BrowserModel.activeModels.allObjects.filter { !$0.isGuest } }
 
     private func note(_ tool: String, _ detail: String, _ outcome: AgentLogEntry.Outcome) {
         log.append(AgentLogEntry(tool: tool, detail: String(detail.prefix(160)), outcome: outcome))
@@ -180,11 +208,10 @@ final class AgentBridge: ObservableObject, AgentHost {
     }
 
     /// A tab the person shared (or one a tool opened), never a private one.
-    private func sharedTab(_ arguments: [String: Any], _ model: BrowserModel) -> TabController? {
-        let raw = arguments["tab_id"]
-        guard let id = (raw as? Int) ?? (raw as? Double).map(Int.init) ?? (raw as? String).flatMap(Int.init), id >= 0,
-              let found = model.tabs.first(where: { $0.id == UInt64(id) }), !found.isPrivate, isShared(found) else { return nil }
-        return found
+    private func sharedTab(_ arguments: [String: Any]) -> (tab: TabController, window: BrowserModel)? {
+        guard let id = number(arguments["tab_id"]), let found = handles[id]?.tab, !found.isPrivate, isShared(found),
+              let window = allModels.first(where: { $0.tabs.contains(where: { $0 === found }) }) else { return nil }
+        return (found, window)
     }
 
     private func perform(_ name: String, _ args: [String: Any], _ model: BrowserModel, _ started: Int) async -> AgentToolResult {
@@ -194,8 +221,9 @@ final class AgentBridge: ObservableObject, AgentHost {
 
         switch name {
         case "list_tabs":
-            let rows = model.tabs.filter { !$0.isPrivate && isShared($0) && !$0.isBlank }.map {
-                "[\($0.id)] \(AgentPolicy.prepare(pageText: $0.displayTitle, limit: 120)) — \(AgentPolicy.safeURL($0.url?.absoluteString ?? ""))"
+            let rows = allModels.flatMap { $0.tabs }.filter { !$0.isPrivate && isShared($0) && !$0.isBlank }.compactMap { tab -> String? in
+                guard let h = handle(for: tab) else { return nil }
+                return "[\(h)] \(AgentPolicy.prepare(pageText: tab.displayTitle, limit: 120)) — \(AgentPolicy.safeURL(tab.url?.absoluteString ?? ""))"
             }
             note(name, "\(rows.count) tab(s)", .done)
             return AgentToolResult(text: rows.isEmpty ? "No tabs are shared. Ask the person to share a tab (Tools › Share This Tab with AI Tools), or use open_url." : rows.joined(separator: "\n"))
@@ -205,13 +233,14 @@ final class AgentBridge: ObservableObject, AgentHost {
             guard await allowOrigin(url, wanting: "open pages and then click or type on") else { return fail("The person did not allow \(host).", .denied) }
             guard live(started) else { return fail(stopped, .refused) }
             let opened = model.openTab(url: url, isPrivate: false, select: false)
-            ownedTabs.insert(opened.id)
+            let openedHandle = makeHandle(for: opened)
+            ownedTabs.insert(openedHandle)
             if let origin = AgentPolicy.origin(of: url) { readableOrigins.insert(origin) }
             note(name, AgentPolicy.safeURL(url.absoluteString), .done)
-            return AgentToolResult(text: "Opened in tab \(opened.id). Call read_page with tab_id \(opened.id) once it has loaded.")
+            return AgentToolResult(text: "Opened in tab \(openedHandle). Call read_page with tab_id \(openedHandle) once it has loaded.")
 
         case "read_page":
-            guard let target = sharedTab(args, model) else { return fail(missing, .refused) }
+            guard let (target, window) = sharedTab(args) else { return fail(missing, .refused) }
             // The tab may have moved to another website since it was shared: that website is checked now, not the one it was on before.
             guard await mayRead(target) else { return fail("The person did not allow this website.", .denied) }
             guard live(started) else { return fail(stopped, .refused) }
@@ -222,12 +251,12 @@ final class AgentBridge: ObservableObject, AgentHost {
             return AgentToolResult(text: describe(snapshot))
 
         case "click":
-            guard let target = sharedTab(args, model) else { return fail(missing, .refused) }
+            guard let (target, window) = sharedTab(args) else { return fail(missing, .refused) }
             guard let index = number(args["element"]) else { return fail("element must be a number from read_page.") }
             guard let host = target.url?.host?.lowercased(), await allowOrigin(target.url, wanting: "click and type on") else { return fail("The person did not allow this website.", .denied) }
             guard let info = await target.engine.agentInspect(index) else { return fail("That element is no longer on the page. Call read_page again.") }
             let element = Self.element(from: info)
-            switch AgentPolicy.click(element, pageHost: host) {
+            switch AgentPolicy.click(element, pageHost: host, trustLinks: AISwitches.shared.linksWithoutAsking) {
             case .refuse(let why): return fail(why, .refused)
             case .confirm(let question):
                 note(name, question, .asked)
@@ -245,7 +274,7 @@ final class AgentBridge: ObservableObject, AgentHost {
             return AgentToolResult(text: "Clicked. Call read_page again to see the result.")
 
         case "type_text":
-            guard let target = sharedTab(args, model) else { return fail(missing, .refused) }
+            guard let (target, window) = sharedTab(args) else { return fail(missing, .refused) }
             guard let index = number(args["element"]), let text = args["text"] as? String else { return fail("element and text are required.") }
             let enter = (args["press_enter"] as? Bool) ?? false
             guard let host = target.url?.host?.lowercased(), await allowOrigin(target.url, wanting: "click and type on") else { return fail("The person did not allow this website.", .denied) }
@@ -254,12 +283,13 @@ final class AgentBridge: ObservableObject, AgentHost {
             switch AgentPolicy.type(element, text: text, pageHost: host) {
             case .refuse(let why): return fail(why, .refused)
             case .confirm(let question):
-                note(name, question, .asked)
+                // The question on screen shows what would be typed; the log does not.
+                note(name, "Asked before typing \(text.count) character(s) into [\(index)] on \(host)", .asked)
                 guard await confirm(question) else { return fail("The person said no.", .denied) }
             case .allow: break
             }
             if enter, case .confirm(let question) = AgentPolicy.pressEnter(element, pageHost: host) {
-                note(name, question, .asked)
+                note(name, "Asked before pressing Return in [\(index)] on \(host)", .asked)
                 guard await confirm(question) else { return fail("The person said no.", .denied) }
             }
             guard live(started), target.url?.host?.lowercased() == host else { return fail(stopped, .refused) }
@@ -269,24 +299,24 @@ final class AgentBridge: ObservableObject, AgentHost {
             return AgentToolResult(text: "Typed. Call read_page again to see the result.")
 
         case "scroll":
-            guard let target = sharedTab(args, model) else { return fail(missing, .refused) }
+            guard let (target, window) = sharedTab(args) else { return fail(missing, .refused) }
             guard live(started) else { return fail(stopped, .refused) }
             await target.engine.agentScroll(down: (args["direction"] as? String) != "up")
             note(name, target.displayTitle, .done)
             return AgentToolResult(text: "Scrolled. Call read_page again.")
 
         case "go_back":
-            guard let target = sharedTab(args, model) else { return fail(missing, .refused) }
+            guard let (target, window) = sharedTab(args) else { return fail(missing, .refused) }
             guard live(started) else { return fail(stopped, .refused) }
             target.goBack()
             note(name, target.displayTitle, .done)
             return AgentToolResult(text: "Went back. Call read_page after it loads.")
 
         case "close_tab":
-            guard let target = sharedTab(args, model), ownedTabs.contains(target.id) else { return fail("Only tabs you opened can be closed.", .refused) }
+            guard let (target, window) = sharedTab(args), let owned = handle(for: target), ownedTabs.contains(owned) else { return fail("Only tabs you opened can be closed.", .refused) }
             guard live(started) else { return fail(stopped, .refused) }
-            ownedTabs.remove(target.id)
-            model.closeTab(id: target.id, force: true)
+            ownedTabs.remove(owned)
+            window.closeTab(id: target.id, force: true)
             note(name, target.displayTitle, .done)
             return AgentToolResult(text: "Closed.")
 

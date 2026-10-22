@@ -46,6 +46,8 @@ struct AISettingsSection: View {
             Text(showToken ? bridge.token : String(repeating: "•", count: 16)).font(.system(.callout, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
             Button(showToken ? "Hide" : "Show") { showToken.toggle() }.buttonStyle(.borderless)
         }
+        Toggle("Follow ordinary links without asking", isOn: $switches.linksWithoutAsking)
+        Text("Off: every link an AI tool follows asks you first. A link can log you out or delete something.").font(.caption).foregroundStyle(.secondary)
         Menu("Copy Setup For…") {
             Button("Claude Code") { copy("claude mcp add --transport http browsersetu http://127.0.0.1:\(bridge.port)/mcp --header \"Authorization: Bearer \(bridge.token)\"", "Claude Code") }
             Button("Gemini CLI (settings.json)") {
