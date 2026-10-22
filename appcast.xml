@@ -4,6 +4,39 @@
     <title>Browser Setu</title>
     <item>
       <title>Browser Setu 0.3.3</title>
+      <pubDate>Thu, 22 Oct 2026 03:56:18 -0000</pubDate>
+      <sparkle:version>18</sparkle:version>
+      <sparkle:shortVersionString>0.3.3</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <description><![CDATA[Mac: notarized DMG. iPhone/iPad: TestFlight build 18. Same version, higher build number.
+
+## Added
+- **AI features switch** (Settings › AI): one switch that turns off page summaries, Ask This Page and the AI-tool connection.
+- **Use Browser Setu from AI tools and scripts** (downloadable Mac build only, off by default): a local Model Context Protocol connection for Claude Code, Claude Desktop, Gemini CLI, Codex, Cursor and others, and a `bsetu` shell script. You share tabs, allow sites, and are asked before most buttons are pressed, most typing, and anything that sends, pays or deletes.
+- **Coming from another browser** table in the README.
+
+## Safety rules for AI tools (checked in review)
+- What is typed into a field is never read.
+- Addresses are shown without query, fragment or token-like pieces.
+- A tab is read only on an allowed website; links to other sites ask first.
+- Typing asks unless it is a plain search box; most buttons ask.
+- Stop cuts every connection and cancels what is under way; a new token ends the old one at once.
+- At most 8 connections; a client that sends nothing in 10 seconds is dropped.
+
+## Also in this build
+- **Settings › AI** is its own panel in the Mac sidebar (under Browser). Clear Everything Now and the look-alike warning are under Privacy &amp; Security; time rules are under Tabs. Settings search finds all of them.
+- **Tools menu** everywhere (iPhone menu, iPad ⋮ menu, Mac menu bar, new tab page): Daily Digest, Feeds / Tasks / Vault / Clipboard, Reading List, Screenshot and Mark Up, Reopen My Last Session, Watch This Page, Privacy Grade, All Commands, Clear Everything Now.
+- **Plain-word history search** in the normal address bar (&quot;pasta recipe last week&quot;).
+- Every link an AI tool follows asks first unless you turn that off; Return asks except in a search box; typed text is never written to the activity log; shared tabs are found in every window; a dropped or stopped request cancels its work; tool arguments are checked before the browser sees them.
+- Card numbers, US social security numbers and IBANs are masked in page text. Names, emails, addresses, birth dates and other account numbers are not, and the documentation says so.
+
+## Know before you use it
+- The AI-tool connection is in the **downloadable Mac build only**. The App Store build and iPhone/iPad have the master AI switch but no tool connection.
+- It has been tested with unit tests and a real-socket test, not yet with a real AI tool in daily use.]]></description>
+      <enclosure url="https://github.com/lokeshreddyveer/browsersetu/releases/download/v0.3.3/BrowserSetu-0.3.3.dmg" type="application/octet-stream" sparkle:edSignature="tCIUG/V+z/C7KxpRucwl+7B2aAeEffHz2Ywv3EsalzSmsSG8zsMJl05J1bURrydhbELBKWrFyIalgF5bIDlMCg==" length="23127045"/>
+    </item>
+    <item>
+      <title>Browser Setu 0.3.3</title>
       <pubDate>Tue, 20 Oct 2026 05:39:12 -0000</pubDate>
       <sparkle:version>16</sparkle:version>
       <sparkle:shortVersionString>0.3.3</sparkle:shortVersionString>
@@ -141,5 +174,5 @@ Mac: notarized, stapled DMG (replaces the build 10 file on the same release). iP
       <description><![CDATA[First public release. A native WebKit browser for macOS with a Rust core: tabs, sidebar layouts, workspaces, content blocking, per-site privacy, saved passwords in your Keychain, web extensions, research collections, developer tools, and automatic updates. Early release: see docs/capabilities.md for what has been checked and what has not.]]></description>
       <enclosure url="https://github.com/lokeshreddyveer/browsersetu/releases/download/v0.2.0/BrowserSetu-0.2.0.dmg" type="application/octet-stream" sparkle:edSignature="grmp8aD3U/KjtKeEkUcI3ESkfohsFjkds81VYV6rBzRGW6/JUxDLtcQ1hg178QCZEWXFRCB4AwrzLHSqGC2VCw==" length="14528271"/>
     </item>
-                      </channel>
+                        </channel>
 </rss>
