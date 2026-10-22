@@ -74,9 +74,9 @@ enum AgentPolicy {
     static let harmlessLabels: Set<String> = ["next", "previous", "prev", "back", "more", "show more", "load more", "see more", "read more", "show all", "view all",
                                               "expand", "collapse", "close", "menu", "open menu", "details", "show details", "next page", "previous page", "page down", "page up"]
 
-    /// Everything a click can do is confirmed unless it is clearly harmless: following an ordinary web link, opening a tab or a disclosure, or a button
+    /// Everything a click can do is confirmed unless it is clearly harmless: opening a tab or a disclosure, a button
     /// whose whole label is on the short list above. A word list can not tell every button that changes something, so the default is to ask.
-    static func click(_ e: Element, pageHost: String) -> Verdict {
+    static func click(_ e: Element, pageHost: String, trustLinks: Bool = false) -> Verdict {
         let described = [e.text, e.label].joined(separator: " ")
         let name = shorten(described)
         if !e.href.isEmpty {
@@ -86,10 +86,12 @@ enum AgentPolicy {
         if e.isSubmit { return .confirm("Submit a form on \(pageHost): “\(name)”") }
         if e.insideForm, e.formHasSecret { return .confirm("Press “\(name)” in a form on \(pageHost) that asks for a password or card") }
         if let word = containsWord(described, from: sendingWords) { return .confirm("Press “\(name)” on \(pageHost) (\(word))") }
+        // A link is an ordinary web request, but a site can put a logout, an unsubscribe or a delete behind one, so links ask too unless the person
+        // chose, in Settings, to follow ordinary links without being asked.
         let plainLink = e.tag == "a" && !e.href.isEmpty && !e.insideForm
         let disclosure = e.tag == "summary" || e.role == "tab"
         let label = described.split(whereSeparator: \.isWhitespace).joined(separator: " ").lowercased()
-        if plainLink || disclosure || harmlessLabels.contains(label) { return .allow }
+        if (plainLink && trustLinks) || disclosure || harmlessLabels.contains(label) { return .allow }
         return .confirm("Press “\(name)” on \(pageHost)")
     }
 
@@ -110,10 +112,10 @@ enum AgentPolicy {
         return .confirm("Type “\(shorten(text, to: 80))” into the field “\(field)” on \(pageHost)")
     }
 
-    /// Pressing Return inside a field sends a form, so it is held to the same rule as a submit button.
+    /// Return fires the page's own key handlers and sends a form, so it asks everywhere except in a plain search box.
     static func pressEnter(_ e: Element, pageHost: String) -> Verdict {
-        if e.insideForm { return .confirm("Press Return in a form on \(pageHost), which sends it") }
-        return .allow
+        if isSearchField(e) { return .allow }
+        return .confirm(e.insideForm ? "Press Return in a form on \(pageHost), which sends it" : "Press Return in a field on \(pageHost), which the page may treat as a command")
     }
 
     /// The exact origin a permission belongs to: scheme, host and port. An approval for https://example.com says nothing about http://example.com or another port.
@@ -123,20 +125,43 @@ enum AgentPolicy {
         return "\(scheme)://\(host):\(port)"
     }
 
-    /// Hides numbers that look like a card number (13 to 19 digits that pass the Luhn check) or a US social security number, before page text is handed over.
+    /// Hides what it can recognise with certainty before page text is handed over: card numbers (13 to 19 digits that pass the Luhn check, with spaces
+    /// or hyphens), US social security numbers (written 123-45-6789 or 123 45 6789, or nine digits right after “SSN” or “social security”), and IBANs that pass
+    /// their own check. Names, email addresses, street addresses, birth dates, account and customer numbers are NOT recognised and are not hidden.
     static func redact(_ text: String) -> String {
         var out = text
-        if let ssn = try? NSRegularExpression(pattern: #"\b\d{3}-\d{2}-\d{4}\b"#) {
-            out = ssn.stringByReplacingMatches(in: out, range: NSRange(out.startIndex..., in: out), withTemplate: "[hidden number]")
+        func replace(_ pattern: String, _ template: String, options: NSRegularExpression.Options = []) {
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: options) else { return }
+            out = regex.stringByReplacingMatches(in: out, range: NSRange(out.startIndex..., in: out), withTemplate: template)
         }
-        guard let digits = try? NSRegularExpression(pattern: #"(?<![\d])(?:\d[ -]?){12,18}\d(?![\d])"#) else { return out }
-        let matches = digits.matches(in: out, range: NSRange(out.startIndex..., in: out)).reversed()
-        for m in matches {
-            guard let range = Range(m.range, in: out) else { continue }
-            let only = out[range].filter(\.isNumber)
-            if only.count >= 13, only.count <= 19, luhn(String(only)) { out.replaceSubrange(range, with: "[hidden card number]") }
+        replace(#"\b\d{3}[- ]\d{2}[- ]\d{4}\b"#, "[hidden number]")
+        replace(#"(?i)((?:ssn|social security(?: number)?)\s*(?:is|:|#)?\s*)\d{9}\b"#, "$1[hidden number]")
+        func mask(_ pattern: String, _ label: String, valid: (String) -> Bool) {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { return }
+            for m in regex.matches(in: out, range: NSRange(out.startIndex..., in: out)).reversed() {
+                guard let range = Range(m.range, in: out) else { continue }
+                if valid(String(out[range])) { out.replaceSubrange(range, with: label) }
+            }
         }
+        mask(#"(?<![\d])(?:\d[ -]?){12,18}\d(?![\d])"#, "[hidden card number]") { match in
+            let only = match.filter(\.isNumber)
+            return only.count >= 13 && only.count <= 19 && luhn(String(only))
+        }
+        mask(#"\b[A-Z]{2}\d{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,4})?\b"#, "[hidden account number]") { iban($0) }
         return out
+    }
+
+    /// The check every IBAN carries: move the first four characters to the end, read letters as 10 to 35, and the number must leave 1 when divided by 97.
+    static func iban(_ raw: String) -> Bool {
+        let compact = raw.replacingOccurrences(of: " ", with: "").uppercased()
+        guard compact.count >= 15, compact.count <= 34 else { return false }
+        let rearranged = compact.dropFirst(4) + compact.prefix(4)
+        var remainder = 0
+        for ch in rearranged {
+            guard let value = ch.isNumber ? ch.wholeNumberValue : (ch.isLetter ? Int(ch.asciiValue ?? 0) - 55 : nil), value >= 0, value <= 35 else { return false }
+            remainder = ((value > 9 ? remainder * 100 : remainder * 10) + value) % 97
+        }
+        return remainder == 1
     }
 
     static func luhn(_ digits: String) -> Bool {

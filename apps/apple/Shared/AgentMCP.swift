@@ -51,6 +51,8 @@ enum AgentMCP {
         switch method {
         case "initialize":
             let asked = params["protocolVersion"] as? String ?? ""
+            // The specification: answer with the requested version if it is supported, otherwise with the newest one supported, and the client decides
+            // whether it can use that or must disconnect.
             let version = supportedVersions.contains(asked) ? asked : supportedVersions[0]
             return result(id: id, ["protocolVersion": version, "capabilities": ["tools": ["listChanged": false]],
                                    "serverInfo": ["name": "Browser Setu", "version": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"],
@@ -59,10 +61,36 @@ enum AgentMCP {
         case "tools/list": return result(id: id, ["tools": tools])
         case "tools/call":
             guard let name = params["name"] as? String, tools.contains(where: { ($0["name"] as? String) == name }) else { return error(id: id, code: -32602, "Unknown tool") }
-            let outcome = await host.runTool(name, arguments: params["arguments"] as? [String: Any] ?? [:])
+            // The schemas the server publishes are enforced: a missing, unknown or wrongly typed argument never reaches the browser.
+            let arguments = params["arguments"] as? [String: Any] ?? [:]
+            if let problem = validate(arguments, for: name) { return error(id: id, code: -32602, problem) }
+            let outcome = await host.runTool(name, arguments: arguments)
             return result(id: id, ["content": [["type": "text", "text": outcome.text]], "isError": outcome.isError])
         default: return error(id: id, code: -32601, "Method not found")
         }
+    }
+
+    /// Checks arguments against the tool's own published schema. Nil means they are acceptable.
+    static func validate(_ arguments: [String: Any], for name: String) -> String? {
+        guard let tool = tools.first(where: { ($0["name"] as? String) == name }), let schema = tool["inputSchema"] as? [String: Any] else { return "Unknown tool" }
+        let properties = schema["properties"] as? [String: [String: Any]] ?? [:]
+        for key in arguments.keys.sorted() where properties[key] == nil { return "Unknown argument “\(key)”" }
+        for key in (schema["required"] as? [String]) ?? [] where arguments[key] == nil { return "Missing argument “\(key)”" }
+        for (key, value) in arguments {
+            guard let spec = properties[key] else { continue }
+            switch spec["type"] as? String {
+            case "integer":
+                guard let n = value as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID(), n.doubleValue == n.doubleValue.rounded(), abs(n.doubleValue) < 1e12 else { return "“\(key)” must be a whole number" }
+            case "boolean":
+                guard let n = value as? NSNumber, CFGetTypeID(n) == CFBooleanGetTypeID() else { return "“\(key)” must be true or false" }
+            case "string":
+                guard let text = value as? String else { return "“\(key)” must be text" }
+                if let allowed = spec["enum"] as? [String], !allowed.contains(text) { return "“\(key)” must be one of: " + allowed.joined(separator: ", ") }
+                if text.count > 8_000 { return "“\(key)” is too long" }
+            default: break
+            }
+        }
+        return nil
     }
 
     private static func result(id: Any?, _ value: [String: Any]) -> Data? {

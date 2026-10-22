@@ -73,6 +73,15 @@ final class AgentServer: @unchecked Sendable {
         var isSet: Bool { lock.lock(); defer { lock.unlock() }; return on }
     }
 
+    /// The task handling a request, so closing the connection can cancel the work and not only the socket.
+    private final class Work: @unchecked Sendable {
+        private let lock = NSLock()
+        private var task: Task<Void, Never>?
+        private var cancelled = false
+        func set(_ new: Task<Void, Never>) { lock.lock(); task = new; let already = cancelled; lock.unlock(); if already { new.cancel() } }
+        func cancel() { lock.lock(); cancelled = true; let t = task; lock.unlock(); t?.cancel() }
+    }
+
     private final class Buffer: @unchecked Sendable {
         private let lock = NSLock()
         private var data = Data()
@@ -93,7 +102,10 @@ final class AgentServer: @unchecked Sendable {
     private func accept(_ connection: NWConnection, tokenProvider: @escaping @Sendable () -> String?, port: UInt16, handle: @escaping @Sendable (Data) async -> Data?) {
         // Only a few connections at once, so nothing on this Mac can tie the server up.
         guard register(connection) else { connection.cancel(); return }
-        connection.stateUpdateHandler = { [weak self] state in if case .cancelled = state { self?.forget(connection) } }
+        let work = Work()
+        connection.stateUpdateHandler = { [weak self] state in
+            if case .cancelled = state { self?.forget(connection); work.cancel() }
+        }
         connection.start(queue: DispatchQueue(label: "browsersetu.agent.connection"))
         let buffer = Buffer()
         let accepted = Gate()
@@ -122,13 +134,14 @@ final class AgentServer: @unchecked Sendable {
                         send(AgentHTTP.response(status: status, reason: reason))
                     case .ok:
                         accepted.set()
-                        Task {
+                        work.set(Task {
                             let reply = await handle(request.body)
+                            if Task.isCancelled { connection.cancel(); return }
                             // Stopped while the request was being handled: nothing is sent.
                             if self.isStopped { connection.cancel(); return }
                             if let reply { send(AgentHTTP.response(status: 200, reason: "OK", body: reply)) }
                             else { send(AgentHTTP.response(status: 202, reason: "Accepted")) }
-                        }
+                        })
                     }
                 }
             }

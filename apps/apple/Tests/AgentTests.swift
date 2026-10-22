@@ -9,9 +9,17 @@ final class AgentPolicyTests: XCTestCase {
         AgentPolicy.Element(tag: "button", text: text, insideForm: form, formHasSecret: secret, isSubmit: submit)
     }
 
-    func testOrdinaryLinksAndHarmlessButtonsGoAheadButEverythingElseAsks() {
-        let link = AgentPolicy.Element(tag: "a", text: "About us", href: "https://example.com/about")
-        XCTAssertEqual(AgentPolicy.click(link, pageHost: "example.com"), .allow)
+    func testLinksAskUnlessThePersonChoseOtherwise() {
+        // A neutral-looking link can still log you out or unsubscribe you, so by default it asks like any other click.
+        let link = AgentPolicy.Element(tag: "a", text: "Continue", href: "https://example.com/account/leave")
+        if case .confirm = AgentPolicy.click(link, pageHost: "example.com") {} else { XCTFail("a link should ask by default") }
+        XCTAssertEqual(AgentPolicy.click(link, pageHost: "example.com", trustLinks: true), .allow)
+        // Even with that setting, a link whose words say it sends or deletes still asks.
+        let risky = AgentPolicy.Element(tag: "a", text: "Delete my account", href: "https://example.com/delete")
+        if case .confirm = AgentPolicy.click(risky, pageHost: "example.com", trustLinks: true) {} else { XCTFail("a delete link should always ask") }
+    }
+
+    func testHarmlessButtonsGoAheadButEverythingElseAsks() {
         XCTAssertEqual(AgentPolicy.click(button("Next"), pageHost: "example.com"), .allow)
         XCTAssertEqual(AgentPolicy.click(button("Show more"), pageHost: "example.com"), .allow)
         XCTAssertEqual(AgentPolicy.click(AgentPolicy.Element(tag: "summary", text: "Details"), pageHost: "example.com"), .allow)
@@ -61,10 +69,14 @@ final class AgentPolicyTests: XCTestCase {
         XCTAssertEqual(AgentPolicy.containsWord("Please pay now", from: ["pay"]), "pay")
     }
 
-    func testReturnInsideAFormAsks() {
-        let inForm = AgentPolicy.Element(tag: "input", type: "text", insideForm: true, editable: true)
-        if case .confirm = AgentPolicy.pressEnter(inForm, pageHost: "example.com") {} else { XCTFail("Return in a form sends it") }
-        XCTAssertEqual(AgentPolicy.pressEnter(AgentPolicy.Element(tag: "input", editable: true), pageHost: "example.com"), .allow)
+    func testReturnAsksEverywhereExceptInASearchBox() {
+        let inForm = AgentPolicy.Element(tag: "input", type: "text", label: "Name", insideForm: true, editable: true)
+        let loose = AgentPolicy.Element(tag: "input", type: "text", label: "Title", editable: true)
+        for field in [inForm, loose] {
+            if case .confirm = AgentPolicy.pressEnter(field, pageHost: "example.com") {} else { XCTFail("Return in \(field.label) should ask: pages attach their own key handlers") }
+        }
+        let search = AgentPolicy.Element(tag: "input", type: "search", label: "Search", editable: true)
+        XCTAssertEqual(AgentPolicy.pressEnter(search, pageHost: "example.com"), .allow)
     }
 
     func testPermissionBelongsToTheExactOrigin() {
@@ -87,6 +99,18 @@ final class AgentPolicyTests: XCTestCase {
 
     func testCardAndSocialSecurityNumbersAreHiddenFromPageText() {
         let text = "Card 4111 1111 1111 1111 and 4111-1111-1111-1111, ssn 123-45-6789, order 1234567890123 and phone 555-1234."
+        // More formats of the same things.
+        let more = AgentPolicy.redact("SSN 123 45 6789; Social Security number: 987654321; IBAN GB82 WEST 1234 5698 7654 32; plain 123456789 stays.")
+        XCTAssertFalse(more.contains("123 45 6789"))
+        XCTAssertFalse(more.contains("987654321"))
+        XCTAssertFalse(more.contains("WEST 1234"))
+        XCTAssertTrue(more.contains("plain 123456789 stays"), "a bare nine-digit number with no SSN words around it is not guessed at")
+        // What is not recognised is not hidden, and the documentation says so.
+        let kept = AgentPolicy.redact("Write to jane.doe@example.com, born 4 May 1980, passport X1234567, customer 5551234.")
+        XCTAssertTrue(kept.contains("jane.doe@example.com"))
+        XCTAssertTrue(kept.contains("4 May 1980"))
+        XCTAssertTrue(AgentPolicy.iban("GB82 WEST 1234 5698 7654 32"))
+        XCTAssertFalse(AgentPolicy.iban("GB82 WEST 1234 5698 7654 33"))
         let safe = AgentPolicy.redact(text)
         XCTAssertFalse(safe.contains("4111"))
         XCTAssertFalse(safe.contains("123-45-6789"))
@@ -218,6 +242,29 @@ final class AgentMCPTests: XCTestCase {
         let unknown = try XCTUnwrap(sent209)
         XCTAssertNotNil(unknown["error"])
         XCTAssertEqual(host.calls.count, 1, "an unknown tool must never reach the browser")
+    }
+
+    func testArgumentsAreCheckedAgainstTheSchemaBeforeTheBrowserSeesThem() async throws {
+        let host = FakeHost()
+        let bad = [
+            #"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"scroll","arguments":{"tab_id":1,"direction":"sideways"}}}"#,   // not in the enum
+            #"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"click","arguments":{"tab_id":1}}}"#,                           // missing element
+            #"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"click","arguments":{"tab_id":1,"elemnt":2}}}"#,                // misspelt, unknown
+            #"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"click","arguments":{"tab_id":true,"element":2}}}"#,            // a boolean is not a number
+            #"{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"click","arguments":{"tab_id":"1","element":2}}}"#,             // a string is not a number
+            #"{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"click","arguments":{"tab_id":1.5,"element":2}}}"#,             // not whole
+            #"{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"type_text","arguments":{"tab_id":1,"element":2,"text":"x","press_enter":"yes"}}}"#,
+            #"{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"open_url","arguments":{"url":7}}}"#,
+        ]
+        for message in bad {
+            let raw = await send(message, host)
+            let reply = try XCTUnwrap(raw)
+            XCTAssertNotNil(reply["error"], message)
+        }
+        XCTAssertEqual(host.calls.count, 0, "nothing invalid may reach the browser")
+        let good = await send(#"{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"type_text","arguments":{"tab_id":1,"element":2,"text":"x","press_enter":false}}}"#, host)
+        XCTAssertNil(try XCTUnwrap(good)["error"])
+        XCTAssertEqual(host.calls.count, 1)
     }
 
     func testBadMessages() async throws {
