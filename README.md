@@ -17,12 +17,12 @@ puts a small Rust core (tabs, address-bar logic, permission and navigation rules
 
 | Bring over | From | How |
 |---|---|---|
-| Bookmarks | Safari, Chrome, Edge, Brave, Firefox, Arc and any browser that exports bookmarks | the bookmarks HTML file every browser can export (Library › Bookmark Tools › Import) |
-| Passwords | Chrome, Firefox, Apple Passwords, Safari | the CSV file each one exports; insecure (plain http) entries are skipped and duplicates are not added twice |
-| History | Chrome, Firefox, Safari | their exported history files |
+| Bookmarks | any browser that exports bookmarks as an HTML file (Safari, Chrome, Edge, Brave and Firefox all do) | Settings › Bookmarks › Import Bookmarks… |
+| Passwords | Chrome, Firefox, Apple Passwords, Safari | the CSV file each one exports, in Settings › Passwords › Import Passwords…; insecure (plain http) entries are skipped and duplicates are not added twice |
+| History | Chrome (the "Browser History" file from Google Takeout), Safari (File › Export Browsing History) | Settings › Passwords › Import History… |
 | Extensions | Chrome Web Store | add by address; Manifest V3 extensions run where WebKit supports them (see Extensions) |
 
-Nothing is read from another browser's folders: you hand over the files yourself. The list is only what is in the app today; Arc's own tab and Space layout is not imported.
+Nothing is read from another browser's folders: you hand over the files yourself. This is only what the app does today; Firefox history, and Arc's own tabs and Spaces, are not imported.
 
 There is no Windows, Linux or Android version.
 
