@@ -3,7 +3,7 @@
 A native, security-first web browser for **macOS** and **iPhone/iPad**. It renders with the system's own WebKit, keeps everything on your device, and
 puts a small Rust core (tabs, address-bar logic, permission and navigation rules, per-profile SQLite storage) under a SwiftUI interface.
 
-> **Status: release candidate, in the production-hardening phase (0.3.3, build 17).** It is a real, working browser with a large automated test suite (about 750 tests), but
+> **Status: release candidate, in the production-hardening phase (0.3.3, build 18).** It is a real, working browser with a large automated test suite (about 750 tests), but
 > it is **not yet called production grade**: that needs the evidence in [`docs/RELEASE-BAR.md`](docs/RELEASE-BAR.md) to be complete and recorded. [`docs/capabilities.md`](docs/capabilities.md)
 > lists every feature as *Checked*, *Built* (compiled, not exercised end to end) or *Parked* (switched off), with the evidence and the limits. Read both before you rely on anything.
 
@@ -12,6 +12,17 @@ puts a small Rust core (tabs, address-bar logic, permission and navigation rules
 - **Mac (Apple Silicon, macOS 14 or later):** the notarized DMG on the [Releases](../../releases) page. The downloadable build updates itself (see
   [Updates](#updates)).
 - **iPhone and iPad (iOS 17 or later):** TestFlight. Ask the author for an invitation.
+
+### Coming from another browser
+
+| Bring over | From | How |
+|---|---|---|
+| Bookmarks | Safari, Chrome, Edge, Brave, Firefox, Arc and any browser that exports bookmarks | the bookmarks HTML file every browser can export (Library › Bookmark Tools › Import) |
+| Passwords | Chrome, Firefox, Apple Passwords, Safari | the CSV file each one exports; insecure (plain http) entries are skipped and duplicates are not added twice |
+| History | Chrome, Firefox, Safari | their exported history files |
+| Extensions | Chrome Web Store | add by address; Manifest V3 extensions run where WebKit supports them (see Extensions) |
+
+Nothing is read from another browser's folders: you hand over the files yourself. The list is only what is in the app today; Arc's own tab and Space layout is not imported.
 
 There is no Windows, Linux or Android version.
 
@@ -163,6 +174,10 @@ Every one can be changed in Settings › Shortcuts. The defaults:
 - **Ask in plain words.** Type something like `pasta recipe last week` or `bank 3 days ago` in the command palette and the pages from your history that fit appear first. Worked out on the device.
 - **Tab groups travel.** The tab list from another device now carries each tab's group; one tap opens a whole group here.
 - **Sleeping tabs say so.** A tab put to sleep shows a moon, and its tooltip gives the reason.
+- **AI features switch.** Settings › AI has one switch, **AI features**, that turns off everything AI-related: the on-device page summaries, Ask This Page and the AI-tool connection below. It is on by default for the on-device features and the tool connection is off by default.
+- **Use Browser Setu from an AI tool or a script (downloadable Mac build only).** Settings › AI › *Let AI tools use shared tabs* opens a connection on this Mac's own loopback address (127.0.0.1, behind a secret token) that speaks the Model Context Protocol, the open standard Claude Code, Claude Desktop, Gemini CLI, Codex and Cursor use for tools. *Copy Setup For…* gives the exact line or settings snippet for each. The `scripts/bsetu` shell script talks to the same connection (`bsetu tabs`, `read`, `click`, `type`, …). ChatGPT's own app cannot reach a local address, so it is not supported directly.
+  The rules are enforced in the browser, not left to the AI tool: it sees only tabs you **share** (Tools › Share This Tab with AI Tools) or that it opened itself, never private tabs; what is typed into a field is never read; addresses are shown without their query or fragment; a tab is read only while it is on a website you allowed, and a link to another site asks first; clicking and typing need you to allow the exact site (scheme, host and port) for the session, and **most buttons and most typing ask you every time**, while sending, paying, posting and deleting always do; password, card and one-time-code fields are never typed into; card and social security numbers are masked in page text; page text is handed over labelled as untrusted. **Stop AI Tools** cuts every connection and forgets what was shared; *Make a New Token* ends the old token at once; every action is in a log in Settings.
+  **Limit to understand:** the AI tool you connect usually sends what it reads to its own company's servers, which Browser Setu cannot see or control. The app says so before the feature is turned on and before the first tab is shared. It has been tested with a script and a socket test (`scripts/test-agent-server.sh`), not yet with a real AI tool in daily use, and it is not available on iPhone or iPad or in the App Store build.
 - **Share into Browser Setu.** iPhone and iPad: *Browser Setu* in the share sheet opens a link, saves it to the reading list or sends it to your other devices. Mac: *Browser Setu* in the Share menu of Safari and other apps (App Store build). Both hand over only the web address.
 
 ### Passwords
@@ -352,6 +367,7 @@ Browser Setu has no accounts, no analytics and no telemetry. The only network re
 | The downloadable Mac build checks for updates (daily, can be turned off) | the app's version | github.com |
 | The YouTube ad blocker and its update option are on (at most daily; "Check Now" any time) | one small rules file, no cookies or identifiers | raw.githubusercontent.com (this project) |
 | You start a network check, a response-headers view, the dead-link checker, a feed refresh, or a large download | one request each, with no cookies or referrer; a large download uses up to six connections to the same file | the address you chose |
+| You turn on AI tools and share a tab (downloadable Mac build only) | nothing from Browser Setu; the tool you run reads the shared tab over this Mac's loopback address and may send it on to its own company | the AI tool you chose, then its provider |
 | You press Check Passwords for Leaks | the first five characters of each password's SHA-1 hash, nothing else | haveibeenpwned.com |
 | You sync | an encrypted snapshot | your iCloud, or your own device over Wi-Fi |
 

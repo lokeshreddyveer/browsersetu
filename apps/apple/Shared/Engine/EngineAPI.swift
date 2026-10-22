@@ -140,6 +140,11 @@ extension TabEngine {
     func blockedAttempts() async -> Int { 0 }
     func selectedText() async -> String? { nil }
     func pageText() async -> String? { nil }
+    func agentSnapshot() async -> [String: Any]? { nil }
+    func agentInspect(_ index: Int) async -> [String: Any]? { nil }
+    func agentClick(_ index: Int) async -> Bool { false }
+    func agentType(_ index: Int, text: String, pressEnter: Bool) async -> Bool { false }
+    func agentScroll(down: Bool) async {}
     func screenshot(fullPage: Bool) async -> Data? { nil }
     func setDesktopMode(_ on: Bool) {}
     func setMobileSite(_ on: Bool) {}
@@ -271,6 +276,13 @@ protocol TabEngine: AnyObject {
     /// What the page says about itself (title, author, date, site) from its own tags; nil when it says nothing.
     func pageMetadata() async -> [String: String]?
     func pageText() async -> String?
+    /// For AI tools the person has allowed: the visible text and a numbered list of things to click or type into.
+    func agentSnapshot() async -> [String: Any]?
+    /// What the page says about one numbered element, read just before acting on it; nil when it is gone.
+    func agentInspect(_ index: Int) async -> [String: Any]?
+    func agentClick(_ index: Int) async -> Bool
+    func agentType(_ index: Int, text: String, pressEnter: Bool) async -> Bool
+    func agentScroll(down: Bool) async
     func screenshot(fullPage: Bool) async -> Data?
     /// URL of the page the engine actually committed (nil until something has loaded).
     var currentURL: URL? { get }

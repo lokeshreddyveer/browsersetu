@@ -1891,3 +1891,104 @@ final class UserTouchClock: NSObject, UIGestureRecognizerDelegate {
     func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
 }
 #endif
+
+
+// MARK: - Page actions for AI tools the person has allowed
+
+/// These run in the browser's own isolated script world, so the page cannot see or change them. The numbered elements live in that world and are
+/// forgotten when the page changes. Whether an action is allowed is decided before any of this is called (see AgentPolicy).
+extension WebKitTab {
+    static let agentCommon = """
+    const SELECTOR = 'a[href],button,input,select,textarea,summary,[role=button],[role=link],[role=checkbox],[role=tab],[role=menuitem],[contenteditable=""],[contenteditable="true"]';
+    function describe(e, i) {
+      const tag = e.tagName.toLowerCase();
+      const type = (e.getAttribute('type') || '').toLowerCase();
+      const form = e.closest ? e.closest('form') : null;
+      const isButtonish = tag === 'button' || (tag === 'input' && ['submit', 'image', 'button', 'reset'].indexOf(type) >= 0);
+      const submits = (tag === 'button' && (type === 'submit' || (!e.hasAttribute('type') && !!form))) || (tag === 'input' && (type === 'submit' || type === 'image'));
+      const textual = tag === 'textarea' || e.isContentEditable || (tag === 'input' && ['button', 'checkbox', 'radio', 'submit', 'file', 'hidden', 'image', 'reset', 'range', 'color'].indexOf(type) < 0);
+      // What is typed into a field is never read: not a password, not a name, not a code, not a draft. A field is described by its label alone.
+      // A button's own words (including an input button's value) are its label, so those are kept.
+      const own = (textual || tag === 'select') ? '' : ((isButtonish && tag === 'input') ? (e.value || '') : (e.innerText || ''));
+      const text = (own + '').replace(/\\s+/g, ' ').trim().slice(0, 100);
+      const label = (e.getAttribute('aria-label') || e.getAttribute('placeholder') || e.getAttribute('title') || (e.labels && e.labels[0] ? e.labels[0].innerText : '') || '').replace(/\\s+/g, ' ').trim().slice(0, 100);
+      return {
+        i: i, tag: tag, role: (e.getAttribute('role') || '').toLowerCase(), type: type, text: text, label: label,
+        name: ((e.getAttribute('name') || '') + ' ' + (e.id || '')).trim(),
+        autocomplete: (e.getAttribute('autocomplete') || ''),
+        href: tag === 'a' ? (e.href || '') : '',
+        insideForm: !!form,
+        formHasSecret: !!(form && form.querySelector('input[type=password],input[autocomplete^=cc-],input[autocomplete=one-time-code]')),
+        isSubmit: submits, editable: textual, button: isButtonish
+      };
+    }
+    function visible(e) {
+      const r = e.getBoundingClientRect();
+      if (r.width < 2 || r.height < 2) { return false; }
+      const s = getComputedStyle(e);
+      return s.visibility !== 'hidden' && s.display !== 'none' && r.bottom > -200 && r.top < innerHeight * 4;
+    }
+    """
+
+    /// The script that reads a page for an AI tool. Kept as a constant so a test can run exactly this text against a page.
+    static let agentSnapshotScript = agentCommon + """
+    const list = [];
+    for (const e of document.querySelectorAll(SELECTOR)) { if (list.length >= 150) { break; } if (visible(e)) { list.push(e); } }
+    window.__bsAgentEls = list;
+    const text = (document.body ? document.body.innerText : '').slice(0, 30000);
+    return { text: text, title: document.title || '', url: location.href, elements: list.map(describe) };
+    """
+
+    func agentSnapshot() async -> [String: Any]? {
+        (try? await webView.callAsyncJavaScript(Self.agentSnapshotScript, contentWorld: .defaultClient)) as? [String: Any]
+    }
+
+    func agentInspect(_ index: Int) async -> [String: Any]? {
+        let script = Self.agentCommon + """
+        const e = (window.__bsAgentEls || [])[index];
+        if (!e || !e.isConnected) { return null; }
+        return describe(e, index);
+        """
+        return (try? await webView.callAsyncJavaScript(script, arguments: ["index": index], contentWorld: .defaultClient)) as? [String: Any]
+    }
+
+    func agentClick(_ index: Int) async -> Bool {
+        let script = """
+        const e = (window.__bsAgentEls || [])[index];
+        if (!e || !e.isConnected) { return false; }
+        e.scrollIntoView({ block: 'center', inline: 'nearest' });
+        e.click();
+        return true;
+        """
+        return ((try? await webView.callAsyncJavaScript(script, arguments: ["index": index], contentWorld: .defaultClient)) as? Bool) ?? false
+    }
+
+    func agentType(_ index: Int, text: String, pressEnter: Bool) async -> Bool {
+        let script = """
+        const e = (window.__bsAgentEls || [])[index];
+        if (!e || !e.isConnected) { return false; }
+        e.scrollIntoView({ block: 'center', inline: 'nearest' });
+        e.focus();
+        if (e.isContentEditable) { e.textContent = text; }
+        else {
+          const proto = e.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+          const setter = Object.getOwnPropertyDescriptor(proto, 'value');
+          if (setter && setter.set) { setter.set.call(e, text); } else { e.value = text; }
+        }
+        e.dispatchEvent(new Event('input', { bubbles: true }));
+        e.dispatchEvent(new Event('change', { bubbles: true }));
+        if (enter) {
+          const form = e.closest ? e.closest('form') : null;
+          if (form && form.requestSubmit) { form.requestSubmit(); }
+          else { for (const kind of ['keydown', 'keypress', 'keyup']) { e.dispatchEvent(new KeyboardEvent(kind, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true })); } }
+        }
+        return true;
+        """
+        return ((try? await webView.callAsyncJavaScript(script, arguments: ["index": index, "text": text, "enter": pressEnter], contentWorld: .defaultClient)) as? Bool) ?? false
+    }
+
+    func agentScroll(down: Bool) async {
+        _ = try? await webView.callAsyncJavaScript("window.scrollBy({ top: (down ? 1 : -1) * Math.round(window.innerHeight * 0.85), behavior: 'instant' });",
+                                                   arguments: ["down": down], contentWorld: .defaultClient)
+    }
+}
