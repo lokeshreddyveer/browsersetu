@@ -15,6 +15,9 @@ final class MacAppDelegate: NSObject, NSApplicationDelegate {
         NSApp.servicesProvider = ServicesProvider.shared
         NSUpdateDynamicServices()
         MenuBarSearch.shared.installIfWanted()
+        #if DIRECT_BUILD
+        AgentBridge.shared.sync()
+        #endif
     }
 
     func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {

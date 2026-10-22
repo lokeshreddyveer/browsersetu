@@ -335,6 +335,8 @@ final class PrivacyIntegrationTests: XCTestCase {
                 if word == "NWConnection", file.lastPathComponent == "LocalLink.swift" { continue }
                 // The port and latency check is a tool the person runs themselves; it sends nothing in the background.
                 if word == "NWConnection", file.lastPathComponent == "NetworkTools.swift" { continue }
+                // The AI-tool connection listens on this Mac's loopback address only and is off until the person turns it on.
+                if word == "NWConnection", file.lastPathComponent == "AgentServer.swift" { continue }
                 // Only reads whether the connection is expensive or constrained, to pause heavy work; it sends nothing.
                 if word == "NWPathMonitor", file.lastPathComponent == "ResourceGovernor.swift" { continue }
                 XCTAssertFalse(text.contains(word), "\(file.lastPathComponent) contains \(word)")
@@ -393,6 +395,19 @@ final class PrivacyIntegrationTests: XCTestCase {
         XCTAssertNil(plist["com.apple.security.network.server"])
         XCTAssertNil(plist["com.apple.security.files.all"])
         XCTAssertFalse(plist.keys.contains { $0.localizedCaseInsensitiveContains("networking.networkextension") })
+        #endif
+    }
+
+    /// The loopback server for AI tools exists only in the downloadable build, so only that build asks for the entitlement.
+    func testOnlyTheDownloadableBuildCanRunTheAIToolServer() throws {
+        #if os(macOS)
+        let direct = try XCTUnwrap(NSDictionary(contentsOf: repoRoot().appendingPathComponent("apps/apple/Direct/BrowserSetuDirect.entitlements")) as? [String: Any])
+        XCTAssertEqual(direct["com.apple.security.network.server"] as? Bool, true)
+        XCTAssertEqual(direct["com.apple.security.app-sandbox"] as? Bool, true)
+        for name in ["AgentBridge.swift", "AgentServer.swift"] {
+            let text = try String(contentsOf: repoRoot().appendingPathComponent("apps/apple/macOS/\(name)"), encoding: .utf8)
+            XCTAssertTrue(text.hasPrefix("#if DIRECT_BUILD"), "\(name) must not compile into the App Store build")
+        }
         #endif
     }
 

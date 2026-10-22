@@ -29,6 +29,8 @@ enum PageSummary {
 
     /// Whether this device can write a summary, and why not if it cannot.
     static var unavailableReason: String? {
+        // The master AI switch in Settings turns summaries and Ask This Page off together.
+        if (UserDefaults.standard.object(forKey: "AIFeaturesOn") as? Bool) == false { return "AI features are turned off in Settings." }
         #if canImport(FoundationModels)
         if #available(macOS 26.0, iOS 26.0, *) {
             switch SystemLanguageModel.default.availability {

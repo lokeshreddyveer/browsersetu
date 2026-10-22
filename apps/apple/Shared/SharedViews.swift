@@ -719,6 +719,7 @@ struct PrivacySettingsSection: View {
             PageDefensesSection()
             SitePermissionsSection()
             SafetySettingsSection()
+            AISettingsSection()
             PopupSettingsSection()
             WebsiteDataSection()
             BrowsingDataSection()

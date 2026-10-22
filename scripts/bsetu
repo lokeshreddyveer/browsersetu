@@ -1,0 +1,57 @@
+#!/bin/bash
+# bsetu: use Browser Setu from a terminal or a script. It talks to the same local connection AI tools use, so everything here follows the same rules:
+# only tabs you shared, only websites you allowed, and the browser asks you before it presses most buttons or sends anything.
+#
+# Setup (the downloadable Mac build only): Settings › AI › "Let AI tools use shared tabs", then in your shell profile:
+#   export BSETU_URL="http://127.0.0.1:47615/mcp"          # the address shown in Settings › AI
+#   export BSETU_TOKEN="…"                                  # Settings › AI › Token › Show
+#
+#   bsetu tabs                         the tabs you shared, with their numbers
+#   bsetu open <address>               open a page (you are asked to allow the website)
+#   bsetu read <tab>                   the page's text and a numbered list of what can be used
+#   bsetu click <tab> <number>
+#   bsetu type <tab> <number> <text>   [--enter]
+#   bsetu scroll <tab> up|down
+#   bsetu back <tab>
+#   bsetu close <tab>                  (only tabs opened with "bsetu open")
+set -euo pipefail
+URL="${BSETU_URL:-http://127.0.0.1:47615/mcp}"
+TOKEN="${BSETU_TOKEN:-}"
+[ -n "$TOKEN" ] || { echo "Set BSETU_TOKEN first (Settings › AI › Token › Show)." >&2; exit 2; }
+
+# JSON string escaping with nothing but the shell.
+quote() { local s=$1; s=${s//\\/\\\\}; s=${s//\"/\\\"}; s=${s//$'\n'/\\n}; s=${s//$'\r'/\\r}; s=${s//$'\t'/\\t}; printf '"%s"' "$s"; }
+
+call() { # tool, arguments-as-json
+  local body reply
+  body=$(printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":%s,"arguments":%s}}' "$(quote "$1")" "$2")
+  reply=$(curl -sS -m 600 -X POST "$URL" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "$body") || { echo "Could not reach Browser Setu at $URL" >&2; exit 1; }
+  # plutil reads JSON, so no extra tools are needed.
+  local failed text
+  failed=$(printf '%s' "$reply" | plutil -extract result.isError raw -o - - 2>/dev/null || echo "")
+  text=$(printf '%s' "$reply" | plutil -extract result.content.0.text raw -o - - 2>/dev/null || true)
+  if [ -z "$text" ]; then
+    # An error from the connection itself (wrong token, switched off, and so on).
+    printf '%s' "$reply" | plutil -extract error.message raw -o - - 2>/dev/null || printf '%s\n' "$reply"
+    exit 1
+  fi
+  printf '%s\n' "$text"
+  [ "$failed" = "true" ] && exit 1
+  return 0
+}
+
+cmd="${1:-}"; shift || true
+case "$cmd" in
+  tabs)   call list_tabs '{}' ;;
+  open)   [ $# -ge 1 ] || { echo "usage: bsetu open <address>" >&2; exit 2; }; call open_url "{\"url\":$(quote "$1")}" ;;
+  read)   [ $# -ge 1 ] || { echo "usage: bsetu read <tab>" >&2; exit 2; }; call read_page "{\"tab_id\":$1}" ;;
+  click)  [ $# -ge 2 ] || { echo "usage: bsetu click <tab> <number>" >&2; exit 2; }; call click "{\"tab_id\":$1,\"element\":$2}" ;;
+  type)   [ $# -ge 3 ] || { echo "usage: bsetu type <tab> <number> <text> [--enter]" >&2; exit 2; }
+          enter=false; [ "${4:-}" = "--enter" ] && enter=true
+          call type_text "{\"tab_id\":$1,\"element\":$2,\"text\":$(quote "$3"),\"press_enter\":$enter}" ;;
+  scroll) [ $# -ge 2 ] || { echo "usage: bsetu scroll <tab> up|down" >&2; exit 2; }; call scroll "{\"tab_id\":$1,\"direction\":$(quote "$2")}" ;;
+  back)   [ $# -ge 1 ] || { echo "usage: bsetu back <tab>" >&2; exit 2; }; call go_back "{\"tab_id\":$1}" ;;
+  close)  [ $# -ge 1 ] || { echo "usage: bsetu close <tab>" >&2; exit 2; }; call close_tab "{\"tab_id\":$1}" ;;
+  ""|-h|--help|help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *) echo "Unknown command “$cmd”. Try: bsetu help" >&2; exit 2 ;;
+esac
