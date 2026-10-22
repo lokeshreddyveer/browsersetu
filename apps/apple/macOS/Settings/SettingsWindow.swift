@@ -3,7 +3,7 @@ import SwiftUI
 
 /// The panels of the Settings window, in toolbar order. Every panel holds only controls that change something real.
 enum SettingsPanel: String, CaseIterable, Identifiable {
-    case general, appearance, tabs, search, privacy, websites, profiles, performance, extensions, shortcuts, advanced
+    case general, appearance, tabs, search, privacy, ai, websites, profiles, performance, extensions, shortcuts, advanced
 
     var id: String { rawValue }
 
@@ -14,6 +14,7 @@ enum SettingsPanel: String, CaseIterable, Identifiable {
         case .tabs: "Tabs"
         case .search: "Search"
         case .privacy: "Privacy & Security"
+        case .ai: "AI"
         case .websites: "Websites"
         case .profiles: "Profiles"
         case .performance: "Performance"
@@ -33,6 +34,7 @@ enum SettingsPanel: String, CaseIterable, Identifiable {
         case .tabs: "square.on.square"
         case .search: "magnifyingglass"
         case .privacy: "hand.raised"
+        case .ai: "sparkles"
         case .websites: "globe"
         case .profiles: "person.crop.circle"
         case .performance: "speedometer"
@@ -49,7 +51,8 @@ enum SettingsPanel: String, CaseIterable, Identifiable {
         case .appearance: 620
         case .tabs: 720
         case .search: 260
-        case .privacy: 640
+        case .privacy: 700
+        case .ai: 640
         case .websites: 360
         case .profiles: 270
         case .performance: 540
@@ -314,6 +317,7 @@ struct SettingsPanelView: View {
             DockedPanelsSection()
             SplitAndWindowSettingsSection()
             WorkspacesSettingsSection()
+            FocusScheduleSection()
             WebPanelsSection()
             ContextMenusSection()
         case .search:
@@ -327,11 +331,14 @@ struct SettingsPanelView: View {
             ThreatListSection()
             ProxySection()
             PageDefensesSection()
+            SafetySettingsSection()
             SensitiveLockSection()
             ClearOnQuitSection()
             PageMemorySection()
             SearchableCopySection()
             BrowsingDataSection()
+        case .ai:
+            AISettingsSection()
         case .websites:
             SitePermissionsSection()
             PopupSettingsSection()
