@@ -4,6 +4,36 @@
     <title>Browser Setu</title>
     <item>
       <title>Browser Setu 0.3.3</title>
+      <pubDate>Fri, 23 Oct 2026 07:22:40 -0000</pubDate>
+      <sparkle:version>19</sparkle:version>
+      <sparkle:shortVersionString>0.3.3</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <description><![CDATA[Mac: notarized DMG. iPhone/iPad: TestFlight build 19. Same version, higher build number.
+
+## Fixed: windows (Mac)
+- **A link opened from another app no longer makes a new window.** Click Sign in in the Claude app, a link in Mail or a chat, and it opens as a **tab in the window in front**. Before, it opened a new window holding a blank &quot;New Tab&quot; beside the link&#x27;s tab.
+- **Quit and open again no longer multiplies windows.** macOS was restoring the windows and the app was restoring them too, so the count grew at every start. Your windows now come back once, each with its own tabs (at most 8 extra).
+- A Dock click with no window opens one window. Quitting is no longer treated as you closing windows.
+- Checked on the real app: three quit-and-open cycles and links sent with the app closed, open, and twice in a row all left the same number of windows.
+
+## Fixed: tabs
+- **A tab opened from a page** (a link, ⌘-click, a script) now sits **next to the tab that opened it**, like Chrome and Firefox. Several background tabs keep the order they were opened in. A New Tab still goes to the end, and pinned tabs stay first.
+- **Closing the selected tab** brings forward the tab on its right (the one on its left if it was last), or **the tab it was opened from** if you have not looked at anything else since. Before, the wrong neighbour could come forward when other workspaces or groups held tabs.
+
+## iPhone
+- Landscape bar: a **New Tab** button and a centred address field, like Safari on its side.
+
+## Also
+- How each window and tab action behaves, with its sources, is in `docs/windows.md`.
+- New tests for the window rules and the tab rules.
+
+## Not changed
+- Control-Tab does not switch tabs yet.
+- A window&#x27;s pop-ups (a sign-in box) still open as tabs joined to their page, not as small windows.]]></description>
+      <enclosure url="https://github.com/lokeshreddyveer/browsersetu/releases/download/v0.3.3/BrowserSetu-0.3.3.dmg" type="application/octet-stream" sparkle:edSignature="56U42uYgQ4Ug5y8UbzVls5bzjOyctL9hTEX6QC35ZGaLlJmTzhmSdLSnp5l8xeEabuVw6i09pXF2+ZKu3tC2Dg==" length="23154532"/>
+    </item>
+    <item>
+      <title>Browser Setu 0.3.3</title>
       <pubDate>Thu, 22 Oct 2026 03:56:18 -0000</pubDate>
       <sparkle:version>18</sparkle:version>
       <sparkle:shortVersionString>0.3.3</sparkle:shortVersionString>
@@ -174,5 +204,5 @@ Mac: notarized, stapled DMG (replaces the build 10 file on the same release). iP
       <description><![CDATA[First public release. A native WebKit browser for macOS with a Rust core: tabs, sidebar layouts, workspaces, content blocking, per-site privacy, saved passwords in your Keychain, web extensions, research collections, developer tools, and automatic updates. Early release: see docs/capabilities.md for what has been checked and what has not.]]></description>
       <enclosure url="https://github.com/lokeshreddyveer/browsersetu/releases/download/v0.2.0/BrowserSetu-0.2.0.dmg" type="application/octet-stream" sparkle:edSignature="grmp8aD3U/KjtKeEkUcI3ESkfohsFjkds81VYV6rBzRGW6/JUxDLtcQ1hg178QCZEWXFRCB4AwrzLHSqGC2VCw==" length="14528271"/>
     </item>
-                        </channel>
+                          </channel>
 </rss>
