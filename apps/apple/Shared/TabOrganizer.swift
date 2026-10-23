@@ -198,8 +198,22 @@ extension BrowserModel {
         if parent != tab.id { reorder(tab.id, before: next) }
     }
 
+    /// The tab to show when `id` closes, worked out from the strip as it is now. Kept out of `closeTab`, which is already very large.
+    @inline(never)
+    func tabToShowAfterClosing(_ id: UInt64) -> UInt64? {
+        let strip = visibleTabs.map { TabBehavior.Entry(id: $0.id, opener: tabMeta[$0.id]?.parent, pinned: $0.pinned) }
+        return TabBehavior.selectionAfterClosing(id, in: strip, returnTo: closeReturn[id])
+    }
+
+    @inline(never)
+    func forgetReturns(involving id: UInt64) {
+        closeReturn[id] = nil
+        closeReturn = closeReturn.filter { $0.value != id }
+    }
+
     /// A tab opened from a page sits next to the page's tab, as in Chrome and Firefox (see TabBehavior). A tab opened on its own stays at the end. With the tab
     /// tree on, the tree decides instead.
+    @inline(never)
     func placeNextToOpener(_ tab: TabController, opener: TabController?, foreground: Bool) {
         guard !tabTree, let opener, opener.id != tab.id else { return }
         let others = visibleTabs.filter { $0.id != tab.id }

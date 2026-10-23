@@ -1282,10 +1282,8 @@ final class BrowserModel: ObservableObject {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
         let wasActive = id == activeID
         // Which tab comes forward is decided from the strip as it is now (what the person sees), before the tab leaves it.
-        let strip = visibleTabs.map { TabBehavior.Entry(id: $0.id, opener: tabMeta[$0.id]?.parent, pinned: $0.pinned) }
-        let comeForward = TabBehavior.selectionAfterClosing(id, in: strip, returnTo: closeReturn[id])
-        closeReturn[id] = nil
-        for (child, owner) in closeReturn where owner == id { closeReturn[child] = nil }
+        let comeForward = tabToShowAfterClosing(id)
+        forgetReturns(involving: id)
         adoptChildren(ofClosing: id)
         let closing = tabs.remove(at: index)
         if !closing.isPrivate { extensionCenter.tabClosed(closing) }

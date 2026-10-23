@@ -3,7 +3,7 @@
 A native, security-first web browser for **macOS** and **iPhone/iPad**. It renders with the system's own WebKit, keeps everything on your device, and
 puts a small Rust core (tabs, address-bar logic, permission and navigation rules, per-profile SQLite storage) under a SwiftUI interface.
 
-> **Status: release candidate, in the production-hardening phase (0.3.3, build 18).** It is a real, working browser with a large automated test suite (about 750 tests), but
+> **Status: release candidate, in the production-hardening phase (0.3.3, build 19).** It is a real, working browser with a large automated test suite (about 750 tests), but
 > it is **not yet called production grade**: that needs the evidence in [`docs/RELEASE-BAR.md`](docs/RELEASE-BAR.md) to be complete and recorded. [`docs/capabilities.md`](docs/capabilities.md)
 > lists every feature as *Checked*, *Built* (compiled, not exercised end to end) or *Parked* (switched off), with the evidence and the limits. Read both before you rely on anything.
 
