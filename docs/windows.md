@@ -52,7 +52,7 @@ What the major browsers do, taken from Chromium's own source (`TabStripModelOrde
 | **Close the selected tab** | The tab that slides into its place (the one on its right); if it was last, the one on its left | **was: a position from the full list used on the visible one, which picked the wrong tab with other workspaces or groups open. Fixed** |
 | Close a tab opened from another, before looking at anything else | Back to the tab that opened it | **new** |
 | Look at any other tab first | That "back to the opener" is forgotten (Chromium: "to avoid confusing close sequences") | **new** |
-| Next / previous tab (⌃Tab, ⇧⌘[ ⇧⌘]) | In strip order, wrapping around at the ends | yes |
+| Next / previous tab (⇧⌘] and ⇧⌘[) | In strip order, wrapping around at the ends. Control-Tab is not bound in Browser Setu; Safari and Chrome use it too | partly |
 | ⌘1 to ⌘8, ⌘9 | The 1st to 8th tab; ⌘9 the last tab | yes |
 | Close the last tab | The window closes (a Mac browser's way); the first window of this app keeps one blank tab instead | unchanged |
 | Reopen Closed Tab | The most recent first | yes |
