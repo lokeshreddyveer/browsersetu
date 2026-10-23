@@ -627,6 +627,8 @@ final class BrowserModel: ObservableObject {
     /// All windows of this browser (this one included). Every window has its own model; they share the database, engine, privacy rules and extensions.
     var windows = WindowRegistry()
     var isSecondary = false
+    /// For a tab opened from a page and not left since: the tab to come back to when it closes. Cleared as soon as the person selects any other tab.
+    var closeReturn: [UInt64: UInt64] = [:]
     /// This window appeared without the app asking for it (see WindowRegistry.requestWindow). It is hidden and closed again unless it is all there is.
     var isUnrequestedWindow = false
     /// A guest window: every tab is private, nothing is remembered, and the person's bookmarks and passwords are not offered. Mac only.
@@ -1191,9 +1193,12 @@ final class BrowserModel: ObservableObject {
         }
         tabs.append(tab)
         placeAfterOpener(tab)
+        placeNextToOpener(tab, opener: opener, foreground: makeActive)
         if !isPrivate { extensionCenter.tabOpened(tab) }
         if separatesPrivate { privateMode = isPrivate }
         if makeActive { select(tab.id) }
+        // Closing it before looking at anything else goes back to the page it was opened from.
+        if makeActive, let opener { closeReturn[tab.id] = opener.id }
         if let url { tab.load(url) }
         else if makeActive && !openingFirstTab {
             #if os(macOS)
@@ -1225,6 +1230,7 @@ final class BrowserModel: ObservableObject {
 
     private func selectTab(id: UInt64) {
         if let previous = active, previous.id != id {
+            closeReturn[previous.id] = nil
             previous.lastActive = Date()
             Task { await previous.captureSnapshot() }
             // Chat pages scroll inside their own list; remember where, so coming back does not leave you at the first message.
@@ -1275,6 +1281,11 @@ final class BrowserModel: ObservableObject {
         if !force, needsPinnedConfirmation(id) { confirmClosePinned(id); return }
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
         let wasActive = id == activeID
+        // Which tab comes forward is decided from the strip as it is now (what the person sees), before the tab leaves it.
+        let strip = visibleTabs.map { TabBehavior.Entry(id: $0.id, opener: tabMeta[$0.id]?.parent, pinned: $0.pinned) }
+        let comeForward = TabBehavior.selectionAfterClosing(id, in: strip, returnTo: closeReturn[id])
+        closeReturn[id] = nil
+        for (child, owner) in closeReturn where owner == id { closeReturn[child] = nil }
         adoptChildren(ofClosing: id)
         let closing = tabs.remove(at: index)
         if !closing.isPrivate { extensionCenter.tabClosed(closing) }
@@ -1291,10 +1302,10 @@ final class BrowserModel: ObservableObject {
         if !closing.isPrivate { siteTabClosed(host: closedHost) }
         if !tabs.contains(where: \.isPrivate), !windows.anotherWindowHasPrivateTabs(besides: self) { engine.privateSessionEnded() }
         if wasActive || active == nil {
-            if let next = visibleTabs.first(where: { _ in true }) ?? tabs.first {
-                let neighbours = visibleTabs
-                select((neighbours.indices.contains(min(index, neighbours.count - 1)) && !neighbours.isEmpty
-                        ? neighbours[min(index, neighbours.count - 1)] : next).id)
+            if let target = comeForward, tabs.contains(where: { $0.id == target }) {
+                select(target)
+            } else if let next = visibleTabs.first ?? tabs.first {
+                select(next.id)
             } else if isSecondary {
                 activeID = nil
                 onWindowShouldClose?()       // a window with no tab left closes; the first window always keeps one

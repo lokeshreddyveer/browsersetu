@@ -198,6 +198,18 @@ extension BrowserModel {
         if parent != tab.id { reorder(tab.id, before: next) }
     }
 
+    /// A tab opened from a page sits next to the page's tab, as in Chrome and Firefox (see TabBehavior). A tab opened on its own stays at the end. With the tab
+    /// tree on, the tree decides instead.
+    func placeNextToOpener(_ tab: TabController, opener: TabController?, foreground: Bool) {
+        guard !tabTree, let opener, opener.id != tab.id else { return }
+        let others = visibleTabs.filter { $0.id != tab.id }
+        guard others.contains(where: { $0.id == opener.id }) else { return }
+        let order = others.map { TabBehavior.Entry(id: $0.id, opener: tabMeta[$0.id]?.parent, pinned: $0.pinned) }
+        let index = TabBehavior.insertionIndex(in: order, opener: opener.id, foreground: foreground)
+        guard index < order.count else { return }
+        reorder(tab.id, before: order[index].id)
+    }
+
     /// Puts every tab in tree order: each under the tab it was opened from.
     func arrangeAsTree() {
         let order = TabOrganizing.treeOrder(tabs.map { ($0.id, tabMeta[$0.id]?.parent) })

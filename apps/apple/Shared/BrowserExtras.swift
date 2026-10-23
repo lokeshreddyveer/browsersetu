@@ -444,8 +444,10 @@ extension BrowserModel {
         if !activeGroup.isEmpty, !isPrivate { try? core.setTabGroup(tabId: tab.id, group: activeGroup); tab.group = activeGroup }
         tabs.append(tab)
         placeAfterOpener(tab)
+        placeNextToOpener(tab, opener: opener, foreground: true)
         if !isPrivate { extensionCenter.tabOpened(tab) }
         select(tab.id)
+        closeReturn[tab.id] = opener.id
         saveSoon()
         return tab
     }
