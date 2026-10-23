@@ -13,16 +13,19 @@ enum WindowPolicy {
     /// At most this many extra windows are brought back at start.
     static let restoreCap = 8
 
+    @inline(never)
     static func live(_ requests: [Date], now: Date) -> [Date] {
         requests.filter { now.timeIntervalSince($0) < requestLifetime }
     }
 
+    @inline(never)
     static func isDuplicate(_ url: URL, last: (url: URL, at: Date)?, now: Date) -> Bool {
         guard let last else { return false }
         return last.url == url && now.timeIntervalSince(last.at) < duplicateWindow
     }
 
     /// The windows saved at the last quit, made safe to use: no empty window, no tab in two windows, no more than the cap.
+    @inline(never)
     static func restorable(_ stored: [[UInt64]]) -> [[UInt64]] {
         var seen = Set<UInt64>()
         var out: [[UInt64]] = []
@@ -44,6 +47,7 @@ enum WindowPolicy {
         var isPrimary: Bool
     }
 
+    @inline(never)
     static func externalTarget(among all: [Candidate]) -> Int? {
         let usable = all.filter { !$0.isGuest && !$0.isUnrequested }
         return usable.first(where: \.isFocused)?.id ?? usable.first(where: \.isPrimary)?.id ?? usable.first?.id

@@ -19,6 +19,7 @@ enum TabBehavior {
     ///   opened, so several tabs opened in a row stay in the order they were opened in.
     /// * Opened by itself (New Tab, a typed address, a link from another app): at the end of the strip.
     /// * Never among the pinned tabs, which always come first.
+    @inline(never)
     static func insertionIndex(in order: [Entry], opener: UInt64?, foreground: Bool) -> Int {
         let firstUnpinned = order.firstIndex(where: { !$0.pinned }) ?? order.count
         guard let opener, let at = order.firstIndex(where: { $0.id == opener }) else { return order.count }
@@ -32,6 +33,7 @@ enum TabBehavior {
     /// * If it was opened from a tab and you have not looked at any other tab since, back to that tab (Firefox "select owner on close", Chromium's opener rule).
     /// * Otherwise the tab that slides into its place, which is the one on its right; if it was the last, the one on its left.
     /// Nil when it was the only tab.
+    @inline(never)
     static func selectionAfterClosing(_ closing: UInt64, in order: [Entry], returnTo: UInt64?) -> UInt64? {
         let rest = order.filter { $0.id != closing }
         guard !rest.isEmpty else { return nil }
