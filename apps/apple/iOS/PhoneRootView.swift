@@ -247,11 +247,17 @@ struct PhoneLandscapeBar: View {
                     item("chevron.right", disabled: !tab.canGoForward, label: "Forward") { tab.goForward() }
                 }
             }
+            // As in Safari on its side: the address sits in the middle at a reasonable width, back and forward to its left, share, new tab and tabs to its right.
+            // While it is being edited it takes the whole row.
+            if !address.isEditing { Spacer(minLength: 0) }
             PhoneAddressBar(tab: tab, address: address, compact: true)
                 .modifier(TabSwipe(allowsOverview: !address.isEditing))
+                .frame(maxWidth: address.isEditing ? .infinity : 520)
                 .padding(.horizontal, 4)
+            if !address.isEditing { Spacer(minLength: 0) }
             if !address.isEditing {
                 if let url = tab.url, !tab.isBlank { ShareLink(item: url) { Image(systemName: "square.and.arrow.up").frame(width: 40, height: 30) }.accessibilityLabel("Share") }
+                Button { _ = model.newTab() } label: { Image(systemName: "plus").frame(width: 36, height: 30) }.accessibilityLabel("New tab")
                 Button { model.showOverview() } label: {
                     Text("\(model.visibleTabs.count)").font(.footnote.bold()).frame(width: 22, height: 22)
                         .overlay(RoundedRectangle(cornerRadius: 6).stroke(lineWidth: 1.5)).frame(width: 40, height: 30)
