@@ -10,6 +10,18 @@ struct BrowserSetuMacApp: App {
         #if DEBUG
         if UserDefaults.standard.bool(forKey: "SandboxProbe") { Self.runSandboxProbe() }
         #endif
+        Self.turnOffSystemWindowRestoration()
+    }
+
+    /// Browser Setu brings back its own windows, each with its own tabs, from what it saved. macOS would bring back the same windows a second time, empty, and
+    /// the two together grew the number of windows at every start. So the system's copy is switched off, and any it left from earlier runs is deleted.
+    private static func turnOffSystemWindowRestoration() {
+        let defaults = UserDefaults.standard
+        defaults.set(true, forKey: "ApplePersistenceIgnoreState")
+        defaults.set(false, forKey: "NSQuitAlwaysKeepsWindows")
+        if let library = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first, let id = Bundle.main.bundleIdentifier {
+            try? FileManager.default.removeItem(at: library.appendingPathComponent("Saved Application State/\(id).savedState"))
+        }
     }
 
     #if DEBUG
@@ -76,7 +88,7 @@ struct BrowserWindowHost: View {
             .focusedSceneObject(model)
             .background(WindowLifetime(model: model))
             .task {
-                model.windows.onNeedWindow = { openWindow(id: "browser") }
+                model.windows.onNeedWindow = { [weak model] in model?.windows.requestWindow(); openWindow(id: "browser") }
                 model.onWindowShouldClose = { dismiss() }
                 if model.isSecondary {
                     model.startSecondaryWindow()
@@ -86,10 +98,12 @@ struct BrowserWindowHost: View {
                     AppUpdater.shared.start()
                     #endif
                     // The extra windows the last session had are opened again, each taking its tabs back.
-                    for _ in model.windows.pendingRestores { openWindow(id: "browser") }
+                    for _ in model.windows.pendingRestores { model.windows.requestWindow(); openWindow(id: "browser") }
                 }
             }
             .onOpenURL { model.handleExternal($0) }
+            // A link another app opens belongs to a window that is already there; SwiftUI is told this window can take it so it does not make a new one.
+            .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
             .handoff(model)
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in model.downloads.suspendAllBeforeQuit(); model.saveNow() }
     }
@@ -99,7 +113,12 @@ struct BrowserWindowHost: View {
 final class WindowModelHolder: ObservableObject {
     let model: BrowserModel
     init(primary: BrowserModel) {
-        if !primary.windows.primaryClaimed { primary.windows.primaryClaimed = true; model = primary } else { model = BrowserModel(sharing: primary) }
+        if !primary.windows.primaryClaimed { primary.windows.primaryClaimed = true; model = primary }
+        else {
+            let extra = BrowserModel(sharing: primary)
+            extra.isUnrequestedWindow = !primary.windows.claimRequest()
+            model = extra
+        }
     }
 }
 
@@ -113,6 +132,12 @@ struct WindowLifetime: NSViewRepresentable {
             super.viewDidMoveToWindow()
             tokens.forEach { NotificationCenter.default.removeObserver($0) }; tokens = []
             guard let window else { return }
+            window.isRestorable = false
+            // A window nobody asked for stays invisible while it waits to be closed, so it never flashes on screen.
+            if model?.isUnrequestedWindow == true { window.alphaValue = 0; window.ignoresMouseEvents = true }
+            tokens.append(NotificationCenter.default.addObserver(forName: .browserWindowRevealed, object: model, queue: .main) { [weak window] _ in
+                MainActor.assumeIsolated { window?.alphaValue = 1; window?.ignoresMouseEvents = false }
+            })
             tokens.append(NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { if let model = self?.model { model.windows.focused = model } }
             })
@@ -138,7 +163,7 @@ struct BrowserCommands: Commands {
             Button("Settings…") { SettingsRouter.open() }.keyboardShortcut(",", modifiers: .command)
         }
         CommandGroup(replacing: .newItem) {
-            Button("New Window") { openWindow(id: "browser") }.keyboardShortcut("n", modifiers: .command)
+            Button("New Window") { model.windows.requestWindow(); openWindow(id: "browser") }.keyboardShortcut("n", modifiers: .command)
             Button("New Guest Window") { model.openGuestWindow() }.keyboardShortcut("n", modifiers: [.command, .shift, .option])
             Button("Reopen Closed Window") { model.reopenClosedWindow() }.disabled(model.windows.closedWindows.isEmpty)
             Button("Relaunch Without Extensions") { ExtensionSafeMode.relaunch() }

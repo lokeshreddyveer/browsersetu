@@ -20,6 +20,18 @@ final class MacAppDelegate: NSObject, NSApplicationDelegate {
         #endif
     }
 
+    /// Quitting: windows that close now are the app ending, not the person closing them, so what each held is kept for the next start.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        frontModel()?.windows.terminating = true
+        return .terminateNow
+    }
+
+    /// A click on the Dock icon with no window open brings one window back: one, and one the app asked for.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag { frontModel()?.windows.requestWindow() }
+        return true
+    }
+
     func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
         let menu = NSMenu()
         func add(_ title: String, _ symbol: String, _ action: @escaping @MainActor (BrowserModel) -> Void) {

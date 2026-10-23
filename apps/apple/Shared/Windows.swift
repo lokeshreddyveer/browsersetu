@@ -7,6 +7,11 @@ struct ClosedWindow: Equatable {
     var urls: [URL]
 }
 
+extension Notification.Name {
+    /// A window that was held back turned out to be needed and should now be shown.
+    static let browserWindowRevealed = Notification.Name("BrowserSetuWindowRevealed")
+}
+
 @MainActor
 final class WindowRegistry {
     private struct Box { weak var model: BrowserModel? }
@@ -27,6 +32,38 @@ final class WindowRegistry {
     var closedWindows: [ClosedWindow] = []
     /// Pages the next window to open should show, from a window being brought back.
     var reopening: [URL] = []
+    /// Windows the app itself asked for (New Window, a moved tab, a restored window, the Dock) that have not appeared yet. A window that appears without one
+    /// was made by the system, for a link another app opened or a window it remembered, and is not wanted.
+    private var requests: [Date] = []
+    /// The last link another app handed over, so the same event reaching two windows is acted on once.
+    private var lastExternal: (url: URL, at: Date)?
+    /// The whole app is quitting: windows closing now are not the person closing them, and nothing about them is forgotten.
+    var terminating = false
+
+    func requestWindow(now: Date = Date()) { requests = WindowPolicy.live(requests, now: now); requests.append(now) }
+
+    /// Called as a window appears: true if the app asked for it.
+    func claimRequest(now: Date = Date()) -> Bool {
+        requests = WindowPolicy.live(requests, now: now)
+        guard !requests.isEmpty else { return false }
+        requests.removeFirst()
+        return true
+    }
+
+    func acceptExternal(_ url: URL, now: Date = Date()) -> Bool {
+        if WindowPolicy.isDuplicate(url, last: lastExternal, now: now) { return false }
+        lastExternal = (url, now)
+        return true
+    }
+
+    /// The window a link from another app opens in, or nil when there is none that should take it.
+    func externalTarget() -> BrowserModel? {
+        let models = all
+        let candidates = models.enumerated().map { index, model in
+            WindowPolicy.Candidate(id: index, isGuest: model.isGuest, isUnrequested: model.isUnrequestedWindow, isFocused: model === focused, isPrimary: model === primary)
+        }
+        return WindowPolicy.externalTarget(among: candidates).map { models[$0] }
+    }
 
     var all: [BrowserModel] { boxes.compactMap(\.model) }
     var count: Int { all.count }
@@ -123,6 +160,9 @@ extension BrowserModel {
     func startSecondaryWindow() {
         guard isSecondary, !hasStarted else { return }
         hasStarted = true
+        // A window nobody asked for (a link another app opened, or a window the system remembered) gets no blank tab. A link that reaches it is passed on to
+        // the window in front, and the empty window then closes by itself.
+        if isUnrequestedWindow { discardUnrequestedWindow(); return }
         if lifecycle == nil { let manager = TabLifecycle(model: self); manager.start(); lifecycle = manager }
         var wanted: [UInt64] = []
         var reopened: [URL] = []
@@ -140,13 +180,31 @@ extension BrowserModel {
         windows.saveWindowLayout(in: self)
     }
 
+    /// Closes a window the app did not ask for, a moment later so a link that arrives with it can be handed on first. If it still has no home for the link
+    /// (there is no other window), it is kept and used.
+    private func discardUnrequestedWindow() {
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(450))
+            guard let self, isUnrequestedWindow, tabs.isEmpty else { return }
+            if windows.externalTarget() == nil {
+                // Nothing else can take it, so it becomes an ordinary window.
+                isUnrequestedWindow = false
+                NotificationCenter.default.post(name: .browserWindowRevealed, object: self)
+                if lifecycle == nil { let manager = TabLifecycle(model: self); manager.start(); lifecycle = manager }
+                _ = openTab(url: nil, isPrivate: false)
+                return
+            }
+            onWindowShouldClose?()
+        }
+    }
+
     /// The person closed this window: its tabs close with it (they can be reopened from Recently Closed), and the window leaves the list.
     /// This waits one turn of the run loop before it acts. When the whole app is quitting, every window closes at once and the process ends first, so the saved list of
     /// windows (and which tabs each held) is left as it was and the windows come back at the next start.
     func windowWillClose() {
         guard isSecondary else { return }
         Task { @MainActor [weak self] in
-            guard let self, windows.all.contains(where: { $0 === self }) else { return }
+            guard let self, !windows.terminating, windows.all.contains(where: { $0 === self }) else { return }
             onWindowShouldClose = nil
             // Remember what the window held, so it can be brought back (a guest window and private tabs are never kept).
             if !isGuest {
@@ -184,14 +242,16 @@ extension BrowserModel {
 extension WindowRegistry {
     /// The first window's tabs that other windows hold, remembered so a restart can give each window its tabs back.
     func saveWindowLayout(in model: BrowserModel) {
-        guard let primary else { return }
+        // Not before the first window has read the saved layout, and not while the windows it names are still coming back: an early save would replace the
+        // real layout with whatever blank windows happen to exist at that moment.
+        guard let primary, primary.hasStarted, pendingRestores.isEmpty, !terminating else { return }
         let groups = all.filter { $0 !== primary && !$0.isGuest }.map { $0.tabs.map(\.id) }.filter { !$0.isEmpty }
         model.saveSetting("window_tabs", model.encodedMap(["groups": groups]))
     }
 
     func loadPendingRestores(from model: BrowserModel) {
         let stored = BrowserModel.decodeMap((try? model.core.getSetting(key: "window_tabs")) ?? nil, as: [[UInt64]].self)["groups"] ?? []
-        pendingRestores = stored.prefix(8).map { $0 }
+        pendingRestores = WindowPolicy.restorable(stored)
     }
 }
 

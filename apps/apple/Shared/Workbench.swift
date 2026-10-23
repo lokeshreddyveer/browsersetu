@@ -469,6 +469,19 @@ extension BrowserModel {
 
     /// Every external action goes through here.
     func handleExternal(_ url: URL) {
+        #if os(macOS)
+        // The same link can reach more than one window; it is acted on once. It opens as a tab in the window in front, not in a window of its own, and not
+        // in the window the system just made for it.
+        guard windows.acceptExternal(url) else { return }
+        if let target = windows.externalTarget(), target !== self {
+            target.handleExternalHere(url)
+            return
+        }
+        #endif
+        handleExternalHere(url)
+    }
+
+    func handleExternalHere(_ url: URL) {
         if let action = URLAction.parse(url) { workbench.handle(action) } else { openIncoming(url) }
     }
 }

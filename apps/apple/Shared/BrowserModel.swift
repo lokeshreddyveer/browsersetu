@@ -627,6 +627,8 @@ final class BrowserModel: ObservableObject {
     /// All windows of this browser (this one included). Every window has its own model; they share the database, engine, privacy rules and extensions.
     var windows = WindowRegistry()
     var isSecondary = false
+    /// This window appeared without the app asking for it (see WindowRegistry.requestWindow). It is hidden and closed again unless it is all there is.
+    var isUnrequestedWindow = false
     /// A guest window: every tab is private, nothing is remembered, and the person's bookmarks and passwords are not offered. Mac only.
     @Published var isGuest = false
     /// A secondary window asks its screen to close when its last tab leaves or closes.
