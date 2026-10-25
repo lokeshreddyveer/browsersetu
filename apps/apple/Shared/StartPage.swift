@@ -519,8 +519,8 @@ private struct HistoryChips: View {
     struct OftenSite: Identifiable { let id: String; let title: String; let url: String; let isLocal: Bool }
 
     private func isLocal(_ host: String?) -> Bool {
-        guard let host = host?.lowercased() else { return false }
-        return host == "localhost" || host == "127.0.0.1" || host == "::1" || host.hasSuffix(".local") || host.hasPrefix("192.168.") || host.hasPrefix("10.")
+        guard let host else { return false }
+        return !PublicAddress.isPublicHost(host)   // one definition of "not on the public internet", shared with the lookups
     }
 
     /// One card per page (no repeats), local development addresses folded into a single "Local" card, readable titles.

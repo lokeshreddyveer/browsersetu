@@ -11,7 +11,7 @@ import Foundation
 /// This is the only file that makes these requests. Everything that can be worked out without a network (the requests, the reading of the answers, the
 /// citation text) is plain functions, so it is tested without one.
 enum ExternalLookup {
-    enum Failure: Error, Equatable { case busy, notFound, unavailable, unreadable, notPublic }
+    enum Failure: Error, Equatable { case busy, notFound, unavailable, unreadable }
 
     /// Refuses to follow a redirect to another host, so an answer can never send the request somewhere it was not meant to go.
     private final class StayOnHost: NSObject, URLSessionTaskDelegate {

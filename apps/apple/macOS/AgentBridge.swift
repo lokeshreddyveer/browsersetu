@@ -31,7 +31,7 @@ final class AgentBridge: ObservableObject, AgentHost {
     @Published private(set) var status = "Off"
     @Published private(set) var port: UInt16 = 47615
 
-    private static let service = "com.browsersetu.agent"
+    private nonisolated static let service = "com.browsersetu.agent"
     private static let portKey = "AIToolsPort"
     private var server: AgentServer?
     private var sharingNoticeSeen = false
@@ -240,7 +240,7 @@ final class AgentBridge: ObservableObject, AgentHost {
             return AgentToolResult(text: "Opened in tab \(openedHandle). Call read_page with tab_id \(openedHandle) once it has loaded.")
 
         case "read_page":
-            guard let (target, window) = sharedTab(args) else { return fail(missing, .refused) }
+            guard let (target, _) = sharedTab(args) else { return fail(missing, .refused) }
             // The tab may have moved to another website since it was shared: that website is checked now, not the one it was on before.
             guard await mayRead(target) else { return fail("The person did not allow this website.", .denied) }
             guard live(started) else { return fail(stopped, .refused) }
@@ -251,7 +251,7 @@ final class AgentBridge: ObservableObject, AgentHost {
             return AgentToolResult(text: describe(snapshot))
 
         case "click":
-            guard let (target, window) = sharedTab(args) else { return fail(missing, .refused) }
+            guard let (target, _) = sharedTab(args) else { return fail(missing, .refused) }
             guard let index = number(args["element"]) else { return fail("element must be a number from read_page.") }
             guard let host = target.url?.host?.lowercased(), await allowOrigin(target.url, wanting: "click and type on") else { return fail("The person did not allow this website.", .denied) }
             guard let info = await target.engine.agentInspect(index) else { return fail("That element is no longer on the page. Call read_page again.") }
@@ -274,7 +274,7 @@ final class AgentBridge: ObservableObject, AgentHost {
             return AgentToolResult(text: "Clicked. Call read_page again to see the result.")
 
         case "type_text":
-            guard let (target, window) = sharedTab(args) else { return fail(missing, .refused) }
+            guard let (target, _) = sharedTab(args) else { return fail(missing, .refused) }
             guard let index = number(args["element"]), let text = args["text"] as? String else { return fail("element and text are required.") }
             let enter = (args["press_enter"] as? Bool) ?? false
             guard let host = target.url?.host?.lowercased(), await allowOrigin(target.url, wanting: "click and type on") else { return fail("The person did not allow this website.", .denied) }
@@ -299,14 +299,14 @@ final class AgentBridge: ObservableObject, AgentHost {
             return AgentToolResult(text: "Typed. Call read_page again to see the result.")
 
         case "scroll":
-            guard let (target, window) = sharedTab(args) else { return fail(missing, .refused) }
+            guard let (target, _) = sharedTab(args) else { return fail(missing, .refused) }
             guard live(started) else { return fail(stopped, .refused) }
             await target.engine.agentScroll(down: (args["direction"] as? String) != "up")
             note(name, target.displayTitle, .done)
             return AgentToolResult(text: "Scrolled. Call read_page again.")
 
         case "go_back":
-            guard let (target, window) = sharedTab(args) else { return fail(missing, .refused) }
+            guard let (target, _) = sharedTab(args) else { return fail(missing, .refused) }
             guard live(started) else { return fail(stopped, .refused) }
             target.goBack()
             note(name, target.displayTitle, .done)

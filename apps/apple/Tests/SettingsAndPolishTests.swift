@@ -94,7 +94,7 @@ final class SettingsWindowTests: XCTestCase {
 
     func testPanelsAreTheImplementedOnesInSafariOrder() {
         XCTAssertEqual(SettingsPanel.allCases.map(\.rawValue),
-                       ["general", "appearance", "tabs", "search", "privacy", "websites", "profiles", "performance", "extensions", "shortcuts", "advanced"])
+                       ["general", "appearance", "tabs", "search", "privacy", "ai", "websites", "profiles", "performance", "extensions", "shortcuts", "advanced"])
         XCTAssertEqual(Set(SettingsPanel.allCases.map(\.symbol)).count, SettingsPanel.allCases.count, "each panel has its own icon")
         for panel in SettingsPanel.allCases {
             XCTAssertFalse(panel.title.isEmpty); XCTAssertGreaterThan(panel.height, 240); XCTAssertLessThan(panel.height, 800)

@@ -43,5 +43,4 @@ final class AISwitches: ObservableObject {
     /// Whether an outside AI tool may be connected right now.
     var toolsActive: Bool { aiEnabled && toolsOn }
 
-    static let offMessage = "AI features are turned off in Settings."
 }

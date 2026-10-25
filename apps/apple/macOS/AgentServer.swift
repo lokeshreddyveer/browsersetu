@@ -17,8 +17,6 @@ final class AgentServer: @unchecked Sendable {
     private var attempts = 0
     private var stopped = false
 
-    var connectionCount: Int { lock.lock(); defer { lock.unlock() }; return connections.count }
-
     func start(port: UInt16, tokenProvider: @escaping @Sendable () -> String?, onPort: @escaping @Sendable (UInt16) -> Void,
                onFailure: @escaping @Sendable (String) -> Void, handle: @escaping @Sendable (Data) async -> Data?) {
         lock.lock(); stopped = false; lock.unlock()

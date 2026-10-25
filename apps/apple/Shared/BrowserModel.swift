@@ -878,6 +878,8 @@ final class BrowserModel: ObservableObject {
     @Published var lookalikeGuard = true { didSet { saveSetting("lookalike_guard", lookalikeGuard ? "1" : "0") } }
     /// Hosts the person chose to open anyway, until the browser closes.
     var allowedLookalikes = Set<String>()
+    /// Hosts a look-alike question is already open for.
+    var lookalikePrompting = Set<String>()
     /// "On weekdays 9 to 17, use the Work workspace."
     @Published var focusRules: [FocusRule] = [] { didSet { saveSetting("focus_rules", encodedMap(["list": focusRules])) } }
     /// The rule already applied in its current time window, so a change made by hand afterwards is left alone.
@@ -2454,7 +2456,7 @@ final class BrowserModel: ObservableObject {
         "workspaces", "double_click", "collapse_on_scroll", "search_template", "search_suggestions", "speed_pill", "pill_collapsed", "site_icons", "shortcuts", "homepage", "saved_sessions", "organize_downloads", "site_notes", "search_shortcuts", "bookmark_tags", "site_styles", "phone_toolbar", "address_display", "address_icon", "search_panel_bottom", "search_panel_bottom2", "swipe_address", "app_links", "app_link_sites", "blur_private_switcher", "permission_expiry", "favorites_order", "overview_style", "overview_grouped", "overview_sort", "dark_pages", "dark_sites", "website_appearance", "site_appearance", "theme", "theme_custom", "low_power_memory", "clear_on_quit", "remember_reading", "keep_form_drafts", "site_zoom", "group_colors",
         "save_logins", "mouse_gestures", "mouse_gesture_map", "site_open_rules", "download_concurrent", "spotlight_bookmarks", "vim_on", "vim_keymap", "workflows", "download_rules", "extension_profiles", "site_delete_rules", "site_user_agents", "containers", "split_templates", "tab_tree", "block_webrtc", "webrtc_exceptions",
         "site_js_off", "never_sleep_sites", "fingerprint_noise", "fingerprint_exceptions", "de_amp", "video_ads", "cookie_banners", "user_themes", "start_tile", "block_autoplay", "autoplay_exceptions",
-        "block_popups", "popup_allowed_hosts", "youtube_rules_auto", "command_chains", "web_panels", "theme_schedule", "hidden_menu_items", "hover_previews", "hover_delay", "tab_stacks", "address_sources", "tab_tree", "sidebar_footer",
+        "block_popups", "popup_allowed_hosts", "youtube_rules_auto", "command_chains", "web_panels", "theme_schedule", "hidden_menu_items", "hover_previews", "hover_delay", "tab_stacks", "address_sources", "sidebar_footer",
     ]
 
     /// The same, with the slow key derivation and encryption on a background thread so the window never stalls.

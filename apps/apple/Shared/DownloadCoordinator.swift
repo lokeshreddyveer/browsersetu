@@ -173,6 +173,9 @@ final class DownloadCoordinator: ObservableObject {
     func downloadSucceeded(source: URL?) { if let source { attempts[source.absoluteString] = nil } }
 
     private var destinations: [UUID: URL] = [:]
+    /// Where a download that was just cancelled was writing. WebKit can write one more chunk, or report the failure, after the cancel has already been
+    /// handled; the file it leaves is removed when that happens. Forgotten after ten seconds, or when a new download takes the same name.
+    private var recentlyDiscarded: [UUID: URL] = [:]
     private var cancellers: [UUID: () -> Void] = [:]
     /// Stops a download in a way that hands back its resume data, so quitting the app does not lose what was already fetched.
     private var suspenders: [UUID: (@escaping (Data?) -> Void) -> Void] = [:]
@@ -319,6 +322,7 @@ final class DownloadCoordinator: ObservableObject {
         let dest = Self.uniqueURL(in: folder, name: name)
         let id = UUID()
         destinations[id] = dest
+        recentlyDiscarded = recentlyDiscarded.filter { $0.value != dest }   // a late cleanup of an old download must never touch this one's file
         settleReservation()
         cancellers[id] = cancel
         if let suspend { suspenders[id] = suspend }
@@ -385,7 +389,15 @@ final class DownloadCoordinator: ObservableObject {
 
     /// Failed or cancelled: the partial file is removed.
     func discard(_ id: UUID) {
-        if let dest = destinations[id] { try? FileManager.default.removeItem(at: dest) }
+        let known = destinations[id]
+        if let dest = known ?? recentlyDiscarded[id] { try? FileManager.default.removeItem(at: dest) }
+        if let known {
+            recentlyDiscarded[id] = known
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(10))
+                self?.recentlyDiscarded[id] = nil
+            }
+        }
         forget(id)
     }
 
