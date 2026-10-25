@@ -370,9 +370,9 @@ final class PrivacyIntegrationTests: XCTestCase {
                 .replacingOccurrences(of: "URLSession.AuthChallengeDisposition", with: "")
                 .contains("URLSession")
         }.map(\.lastPathComponent)
-        // Also allowed, each only when the person starts it: network checks (NetworkTools), a page's response headers (DevCapture), a feed they subscribed to
+        // Also allowed, each only when the person starts it (ExternalLookups: a saved copy, the security headers, a currency rate, a paper's reference): network checks (NetworkTools), a page's response headers (DevCapture), a feed they subscribed to
         // (ToolkitFeatures), the link checker (KnowledgeTools) and the downloader for a file they chose (PieceDownload). None sends anything in the background.
-        XCTAssertEqual(withSession.sorted(), ["BreachCheck.swift", "ChromeWebStore.swift", "DevCapture.swift", "FaviconStore.swift", "FilterListUpdater.swift", "KnowledgeTools.swift", "NetworkTools.swift", "PieceDownload.swift", "SearchSuggestions.swift", "ToolkitFeatures.swift"], "unexpected networking code: \(withSession)")
+        XCTAssertEqual(withSession.sorted(), ["BreachCheck.swift", "ChromeWebStore.swift", "DevCapture.swift", "ExternalLookups.swift", "FaviconStore.swift", "FilterListUpdater.swift", "KnowledgeTools.swift", "NetworkTools.swift", "PieceDownload.swift", "SearchSuggestions.swift", "ToolkitFeatures.swift"], "unexpected networking code: \(withSession)")
     }
 
     func testNoVPNDNSOrNetworkExtensionAnywhereInTheApp() throws {

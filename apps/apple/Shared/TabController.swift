@@ -457,7 +457,7 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
         failedURL = failed ?? url
         let problem = NetworkProblem(description: description)
         ReliabilityStats.shared.noteFailedNavigation(String(describing: problem))
-        engine.showErrorPage(title: problem.title, detail: problem.detail(raw: description), baseURL: failedURL)
+        engine.showErrorPage(title: problem.title, detail: problem.detail(raw: description), baseURL: failedURL, offersSavedCopy: PublicAddress.isPublicWeb(failedURL))
         if problem.retriesAutomatically, retryAttempt < 6 {
             retryAttempt += 1
             scheduleRetry(of: failedURL, after: Double(min(60, 5 * retryAttempt * retryAttempt)))
@@ -507,6 +507,15 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
         }
         // The one saved page the person just chose to open from the Saved Pages list.
         if mainFrame, target.isFileURL, let allowed = allowedLocalFile, target.standardizedFileURL == allowed.standardizedFileURL { allowedLocalFile = nil; return .allow }
+        // The "saved copy" link on a failed page. It is only honoured while this tab is showing its own error page, and it names no address.
+        if mainFrame, showingError, target.scheme == "browsersetu", target.host == "savedcopy" {
+            let page = failedURL
+            Task { @MainActor [weak self] in
+                guard let self, let model = self.owner else { return }
+                await model.openSavedCopy(of: page, in: self)
+            }
+            return .deny
+        }
         let decision = NavigationPolicy.decide(url: target, mainFrame: mainFrame)
         switch decision {
         case .allow: break

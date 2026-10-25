@@ -293,7 +293,7 @@ protocol TabEngine: AnyObject {
     func goBack()
     func goForward()
     /// Shows a local error page. Must bypass navigation policy (it is app-generated content).
-    func showErrorPage(title: String, detail: String, baseURL: URL?)
+    func showErrorPage(title: String, detail: String, baseURL: URL?, offersSavedCopy: Bool)
     /// Highlights the next match in the page; returns whether a match was found.
     func find(_ text: String, backwards: Bool) async -> Bool
     func clearFind()
@@ -340,6 +340,10 @@ protocol BrowserEngine: AnyObject {
     func setProxy(_ proxy: ProxyConfig?, password: String?)
 }
 
+extension TabEngine {
+    func showErrorPage(title: String, detail: String, baseURL: URL?) { showErrorPage(title: title, detail: detail, baseURL: baseURL, offersSavedCopy: false) }
+}
+
 extension BrowserEngine {
     func setUserScripts(_ scripts: [UserScript]) {}
     func setWebPolicy(_ policy: WebPolicy) {}
@@ -348,7 +352,8 @@ extension BrowserEngine {
 
 /// Engine-neutral error page markup shared by all engines.
 enum ErrorPage {
-    static func html(title: String, detail: String) -> String {
+    /// `offersSavedCopy` adds a link that asks the Internet Archive for a saved copy of the page. The link carries no address: the tab already knows which page failed.
+    static func html(title: String, detail: String, offersSavedCopy: Bool = false) -> String {
         func esc(_ s: String) -> String {
             s.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;")
                 .replacingOccurrences(of: ">", with: "&gt;")
@@ -357,7 +362,7 @@ enum ErrorPage {
         <!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
         <style>:root{color-scheme:light dark}body{font:16px -apple-system,system-ui;display:flex;align-items:center;
         justify-content:center;height:100vh;margin:0;text-align:center}div{max-width:30em;padding:1.5em}
-        h1{font-size:1.4em}p{opacity:.7}</style><div><h1>\(esc(title))</h1><p>\(esc(detail))</p></div>
+        h1{font-size:1.4em}p{opacity:.7}a{color:inherit;opacity:1}</style><div><h1>\(esc(title))</h1><p>\(esc(detail))</p>\(offersSavedCopy ? "<p><a href=\"browsersetu://savedcopy\">Look for a saved copy on the Internet Archive</a></p>" : "")</div>
         """
     }
 }
