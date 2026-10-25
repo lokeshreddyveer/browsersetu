@@ -7,6 +7,12 @@ struct ToolsMenuItems: View {
         Button { model.sheet = .digest } label: { Label("Daily Digest", systemImage: "newspaper") }
         Button { model.sheet = .toolkit } label: { Label("Feeds, Tasks, Vault, Clipboard…", systemImage: "square.grid.2x2") }
         Button { model.sheet = .readingList } label: { Label("Reading List", systemImage: "books.vertical") }
+        Menu {
+            Button("APA") { Task { await model.copyCitationFromDOI(.apa) } }
+            Button("MLA") { Task { await model.copyCitationFromDOI(.mla) } }
+            Button("Plain") { Task { await model.copyCitationFromDOI(.plain) } }
+        } label: { Label("Copy Citation from DOI", systemImage: "quote.opening") }
+            .disabled(model.active?.isBlank ?? true)
         Button { Task { await model.annotatePageScreenshot() } } label: { Label("Screenshot and Mark Up", systemImage: "camera.viewfinder") }
             .disabled(model.active?.isBlank ?? true)
         Button { model.reopenLastSession() } label: { Label("Reopen My Last Session", systemImage: "clock.arrow.circlepath") }

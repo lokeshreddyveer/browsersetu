@@ -124,9 +124,9 @@ struct SmartSelectionView: View {
                     ForEach(conversions) { item in
                         HStack { Text(item.source); Image(systemName: "arrow.right").foregroundStyle(.secondary); Text(item.result).fontWeight(.medium) }
                     }
-                    Text("Unit conversions work offline. Currency needs a live rate, which Browser Setu does not fetch.")
-                        .font(.caption).foregroundStyle(.secondary)
+                    Text("Unit conversions work offline.").font(.caption).foregroundStyle(.secondary)
                 }
+                CurrencySection(text: text)
                 let details = DetailExtractor.find(in: text)
                 if !details.isEmpty {
                     Divider()

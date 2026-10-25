@@ -198,6 +198,7 @@ struct SiteControlsView: View {
                     get: { model.neverSleeps(host: host) },
                     set: { model.setNeverSleeps(host: host, $0) }))
             }
+            SecurityHeadersSection(host: host)
             lookSection
             permissionsSection
             Section {

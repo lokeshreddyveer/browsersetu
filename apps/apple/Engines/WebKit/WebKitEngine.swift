@@ -825,7 +825,9 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
             }
           } catch (e) {}
         }
-        return { title: meta('og:title') || document.title || '', author: author || '', published: published || '', site: meta('og:site_name') || location.hostname.replace(/^www\\./, '') };
+        const doiIn = (t) => { const m = (t || '').match(/10\\.\\d{4,9}\\/[^\\s"'<>]+/); return m ? m[0] : ''; };
+        const doi = doiIn(meta('citation_doi')) || doiIn(meta('prism.doi')) || doiIn(meta('dc.identifier')) || doiIn(meta('dc.Identifier')) || doiIn(meta('bepress_citation_doi')) || doiIn(location.href);
+        return { title: meta('og:title') || document.title || '', author: author || '', published: published || '', doi: doi, site: meta('og:site_name') || location.hostname.replace(/^www\\./, '') };
         """
         guard let result = try? await webView.callAsyncJavaScript(script, contentWorld: .defaultClient) as? [String: Any] else { return nil }
         return result.compactMapValues { ($0 as? String).map { String($0.prefix(300)) } }
@@ -1111,8 +1113,8 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
         }.value
     }
 
-    func showErrorPage(title: String, detail: String, baseURL: URL?) {
-        webView.loadHTMLString(ErrorPage.html(title: title, detail: detail), baseURL: baseURL)
+    func showErrorPage(title: String, detail: String, baseURL: URL?, offersSavedCopy: Bool) {
+        webView.loadHTMLString(ErrorPage.html(title: title, detail: detail, offersSavedCopy: offersSavedCopy), baseURL: baseURL)
     }
 
     private func observe() {

@@ -2657,6 +2657,7 @@ extension BrowserModel {
             .init(id: "snooze-tab", title: "Snooze This Tab Until Tomorrow", subtitle: "", symbol: "zzz", shortcut: "") { [self] in if let tab = active { snooze(tab, until: SnoozeChoice.tomorrow.date()) } },
             .init(id: "reader-bigger", title: "Reader: Larger Text", subtitle: "", symbol: "textformat.size.larger", shortcut: "") { [self] in changeReaderSize(by: 2) },
             .init(id: "reader-smaller", title: "Reader: Smaller Text", subtitle: "", symbol: "textformat.size.smaller", shortcut: "") { [self] in changeReaderSize(by: -2) },
+            .init(id: "cite-doi", title: "Copy Citation from the Page's DOI (Crossref)", subtitle: "Exact authors, journal, year and pages", symbol: "quote.opening", shortcut: "") { [self] in Task { await copyCitationFromDOI(.apa) } },
             .init(id: "cite-apa", title: "Copy Citation (APA)", subtitle: "", symbol: "quote.opening", shortcut: "") { [self] in copyCitation(.apa) },
             .init(id: "cite-mla", title: "Copy Citation (MLA)", subtitle: "", symbol: "quote.opening", shortcut: "") { [self] in copyCitation(.mla) },
             .init(id: "copy-highlights", title: "Copy Highlights with Citation", subtitle: "", symbol: "highlighter", shortcut: "") { [self] in copyHighlights() },
