@@ -4,6 +4,32 @@
     <title>Browser Setu</title>
     <item>
       <title>Browser Setu 0.3.3</title>
+      <pubDate>Sun, 25 Oct 2026 03:59:53 -0000</pubDate>
+      <sparkle:version>20</sparkle:version>
+      <sparkle:shortVersionString>0.3.3</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <description><![CDATA[Mac: notarized DMG. iPhone/iPad: TestFlight build 20. Same version, higher build number.
+
+## Added: four lookups, each only when you press its button
+- **Saved copy of a page that will not load.** The error page now has &quot;Look for a saved copy on the Internet Archive&quot;. It sends the page&#x27;s address **without its query or fragment** and opens the copy in the same tab. Addresses on a private network are never sent.
+- **Security headers.** The site panel has &quot;Check Security Headers with Mozilla&quot; (HTTP Observatory). It sends only the site&#x27;s name and shows the grade, the tests passed and a link to what to fix.
+- **Currency.** Select an amount ($250, €40, 40 €, ₹1,200, USD 250) and press Convert in the selection actions: your currency, dollars and euros at the European Central Bank&#x27;s rate (frankfurter.dev). Only currency codes are sent. A &quot;$&quot; is read as US dollars.
+- **Citation from a paper&#x27;s DOI.** Tools › Copy Citation from DOI (APA, MLA or Plain), and the command palette. Finds the DOI on the page and copies the exact reference from Crossref.
+
+None runs by itself, none sends a cookie or a referrer, and each is listed in the README&#x27;s &quot;What leaves your device&quot; table and the privacy audit&#x27;s allowed list.
+
+## Also in this build
+- Windows: a link opened from another app opens as a tab in the window in front; windows come back once at the next start (build 19).
+- Tabs open next to the tab they came from and close back to it (build 19).
+
+## Known limits
+- The services are crowd-sourced public ones: the Internet Archive rate-limits quick repeated use (&quot;busy, try again in a minute&quot;), and Mozilla and Crossref can be slow.
+- European number formats (1.299,99 €) are not read as amounts; &quot;1,299.99&quot; and &quot;1 299&quot; are.
+- Currency covers the 30 or so currencies the European Central Bank publishes (no rouble).]]></description>
+      <enclosure url="https://github.com/lokeshreddyveer/browsersetu/releases/download/v0.3.3/BrowserSetu-0.3.3.dmg" type="application/octet-stream" sparkle:edSignature="HRXfKpJq67PRm2xqxL2gCrXNxNJH/Z2F+LMZAXqmtY/Qd3a/ExZVq8q4RXMge6yCAfj2MF11od73wknOOQkABA==" length="23234300"/>
+    </item>
+    <item>
+      <title>Browser Setu 0.3.3</title>
       <pubDate>Fri, 23 Oct 2026 07:22:40 -0000</pubDate>
       <sparkle:version>19</sparkle:version>
       <sparkle:shortVersionString>0.3.3</sparkle:shortVersionString>
@@ -204,5 +230,5 @@ Mac: notarized, stapled DMG (replaces the build 10 file on the same release). iP
       <description><![CDATA[First public release. A native WebKit browser for macOS with a Rust core: tabs, sidebar layouts, workspaces, content blocking, per-site privacy, saved passwords in your Keychain, web extensions, research collections, developer tools, and automatic updates. Early release: see docs/capabilities.md for what has been checked and what has not.]]></description>
       <enclosure url="https://github.com/lokeshreddyveer/browsersetu/releases/download/v0.2.0/BrowserSetu-0.2.0.dmg" type="application/octet-stream" sparkle:edSignature="grmp8aD3U/KjtKeEkUcI3ESkfohsFjkds81VYV6rBzRGW6/JUxDLtcQ1hg178QCZEWXFRCB4AwrzLHSqGC2VCw==" length="14528271"/>
     </item>
-                          </channel>
+                            </channel>
 </rss>
