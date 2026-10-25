@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import Combine
 import SwiftUI
 #if os(macOS)
 import AppKit
@@ -188,8 +189,8 @@ struct VaultView: View {
                             }
                             Spacer()
                             Text(TOTP.code(secret: entry.secret, at: now).map { $0.prefix(3) + " " + $0.suffix(3) } ?? "Invalid secret").font(.system(.title3, design: .monospaced)).textSelection(.enabled)
-                            Button("Copy") { copyToPasteboard(TOTP.code(secret: entry.secret, at: now) ?? "") }.buttonStyle(.borderless)
-                            Button(role: .destructive) { codes.removeAll { $0.id == entry.id }; VaultStore.save(codes, "codes", profile: model.profileName) } label: { Image(systemName: "trash").accessibilityLabel("Delete") }.buttonStyle(.borderless)
+                            Button("Copy") { copySecretToPasteboard(TOTP.code(secret: entry.secret, at: now) ?? "", clearAfter: 30) }.buttonStyle(.borderless)
+                            Button(role: .destructive) { codes.removeAll { $0.id == entry.id }; persist() } label: { Image(systemName: "trash").accessibilityLabel("Delete") }.buttonStyle(.borderless)
                         }
                     }
                     TextField("Name (the site or account)", text: $label).textFieldStyle(.roundedBorder)
@@ -197,7 +198,7 @@ struct VaultView: View {
                     if let problem { Text(problem).font(.caption).foregroundStyle(.red) }
                     Button("Add Code") {
                         guard !label.isEmpty, let s = TOTP.secret(from: secret) else { problem = "That is not a valid secret key."; return }
-                        codes.append(TwoFactorEntry(label: String(label.prefix(60)), secret: s)); VaultStore.save(codes, "codes", profile: model.profileName); label = ""; secret = ""; problem = nil
+                        codes.append(TwoFactorEntry(label: String(label.prefix(60)), secret: s)); persist(); label = ""; secret = ""; problem = nil
                     }.disabled(label.isEmpty || secret.isEmpty)
                 }
                 Section("Secure Notes") {
@@ -205,14 +206,14 @@ struct VaultView: View {
                         HStack {
                             Button { editing = note } label: { VStack(alignment: .leading) { Text(note.title.isEmpty ? "Untitled" : note.title).fontWeight(.medium); Text(note.body).font(.caption).foregroundStyle(.secondary).lineLimit(1) } }.buttonStyle(.plain)
                             Spacer()
-                            Button(role: .destructive) { notes.removeAll { $0.id == note.id }; VaultStore.save(notes, "notes", profile: model.profileName) } label: { Image(systemName: "trash").accessibilityLabel("Delete") }.buttonStyle(.borderless)
+                            Button(role: .destructive) { notes.removeAll { $0.id == note.id }; persist() } label: { Image(systemName: "trash").accessibilityLabel("Delete") }.buttonStyle(.borderless)
                         }
                     }
                     TextField("Title", text: $noteTitle).textFieldStyle(.roundedBorder)
                     TextEditor(text: $noteBody).frame(height: 80).overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.primary.opacity(0.15)))
                     Button("Save Note") {
                         notes.insert(SecureNote(title: String(noteTitle.prefix(80)), body: String(noteBody.prefix(5000))), at: 0)
-                        VaultStore.save(notes, "notes", profile: model.profileName); noteTitle = ""; noteBody = ""
+                        persist(); noteTitle = ""; noteBody = ""
                     }.disabled(noteTitle.isEmpty && noteBody.isEmpty)
                 }
                 Section { Button("Lock") { unlocked = false; codes = []; notes = [] } }
@@ -224,9 +225,15 @@ struct VaultView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text(note.title.isEmpty ? "Untitled" : note.title).font(.headline)
                 ScrollView { Text(note.body).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
-                HStack { Button("Copy") { copyToPasteboard(note.body) }; Spacer(); Button("Done") { editing = nil } }
+                HStack { Button("Copy") { copySecretToPasteboard(note.body, clearAfter: 90) }; Spacer(); Button("Done") { editing = nil } }
             }.padding(20).frame(minWidth: 360, minHeight: 240)
         }
+    }
+
+    /// Writes both lists to the Keychain. If it refuses, the person is told: the lists on screen are then not stored and would be gone at the next unlock.
+    private func persist() {
+        let saved = VaultStore.save(codes, "codes", profile: model.profileName) && VaultStore.save(notes, "notes", profile: model.profileName)
+        if !saved { model.notice = "The Keychain would not store this, so it will be gone when the vault is locked." }
     }
 
     private func load() {

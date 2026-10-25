@@ -42,6 +42,10 @@ enum LookalikeCheck {
     private static let secondLevel: Set<String> = ["co", "com", "org", "net", "gov", "ac", "edu", "or", "ne", "go"]
 
     /// The part of an address a person registers: `mail.example.com` gives `example.com`, `shop.example.co.uk` gives `example.co.uk`.
+    ///
+    /// This is deliberately not the Public Suffix List the privacy package uses. That list treats hosting services such as `blogspot.com` as suffixes, so
+    /// `paypal.blogspot.com` would count as its own site named "paypal" and slip through. Here it counts as `blogspot.com` with "paypal" placed in front, which
+    /// is exactly what this check is meant to catch.
     static func registrable(_ host: String) -> String {
         let parts = host.lowercased().split(separator: ".").map(String.init)
         guard parts.count > 2 else { return parts.joined(separator: ".") }
@@ -227,7 +231,7 @@ enum PlainRecall {
     static func parse(_ text: String, now: Date = Date(), calendar: Calendar = .current) -> Request? {
         var words = text.lowercased()
         let today = calendar.startOfDay(for: now)
-        func day(_ offset: Int) -> Date { calendar.date(byAdding: .day, value: offset, to: today)! }
+        func day(_ offset: Int) -> Date { calendar.date(byAdding: .day, value: offset, to: today) ?? today.addingTimeInterval(Double(offset) * 86_400) }
         var range: (Date, Date)?
         var phrase = ""
         func take(_ p: String, _ r: (Date, Date)) { if range == nil, words.contains(p) { range = r; phrase = p; words = words.replacingOccurrences(of: p, with: " ") } }
@@ -235,13 +239,13 @@ enum PlainRecall {
         let monthStart = calendar.dateInterval(of: .month, for: now)?.start ?? day(-29)
         take("day before yesterday", (day(-2), day(-1)))
         take("yesterday", (day(-1), today))
-        take("last week", (calendar.date(byAdding: .day, value: -7, to: weekStart)!, weekStart))
+        take("last week", (calendar.date(byAdding: .day, value: -7, to: weekStart) ?? weekStart.addingTimeInterval(-7 * 86_400), weekStart))
         take("this week", (weekStart, day(1)))
-        take("last month", (calendar.date(byAdding: .month, value: -1, to: monthStart)!, monthStart))
+        take("last month", (calendar.date(byAdding: .month, value: -1, to: monthStart) ?? monthStart.addingTimeInterval(-30 * 86_400), monthStart))
         take("this month", (monthStart, day(1)))
         take("today", (today, day(1)))
-        take("this morning", (today, calendar.date(byAdding: .hour, value: 12, to: today)!))
-        take("last night", (calendar.date(byAdding: .hour, value: -6, to: today)!, calendar.date(byAdding: .hour, value: 4, to: today)!))
+        take("this morning", (today, today.addingTimeInterval(12 * 3_600)))
+        take("last night", (today.addingTimeInterval(-6 * 3_600), today.addingTimeInterval(4 * 3_600)))
         if range == nil, let match = words.range(of: #"\b(\d{1,3}) (day|days|week|weeks|month|months) ago\b"#, options: .regularExpression) {
             let bits = words[match].split(separator: " ")
             if let n = Int(bits[0]) {
@@ -254,6 +258,8 @@ enum PlainRecall {
         guard let range else { return nil }
         let filler: Set<String> = ["the", "a", "an", "that", "this", "i", "saw", "read", "found", "visited", "opened", "from", "on", "in", "at", "of", "my", "me", "was", "were", "where", "what", "which", "site", "page", "pages", "website", "article", "about", "show", "find", "looking", "for", "had", "went", "to", "and", "it"]
         let terms = words.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init).filter { !filler.contains($0) && $0.count > 1 }
+        // A time with no words ("yesterday") is an ordinary search, not a request to list a whole day of history.
+        guard !terms.isEmpty else { return nil }
         return Request(terms: terms, from: range.0, to: range.1, phrase: phrase)
     }
 
@@ -288,6 +294,15 @@ struct FocusRule: Codable, Equatable, Identifiable {
 }
 
 enum FocusSchedule {
+    /// Names the stretch of time a rule is in force, by the day it began. A rule that runs past midnight is the same stretch before and after midnight, so
+    /// it is applied once, not again at 00:00.
+    static func windowKey(_ rule: FocusRule, at date: Date, calendar: Calendar = .current) -> String {
+        let minute = calendar.component(.hour, from: date) * 60 + calendar.component(.minute, from: date)
+        let overnight = rule.startMinute > rule.endMinute && minute < rule.endMinute
+        let began = overnight ? (calendar.date(byAdding: .day, value: -1, to: date) ?? date.addingTimeInterval(-86_400)) : date
+        return rule.id.uuidString + SiteTimeLog.day(began, calendar: calendar)
+    }
+
     /// The rule in force now, the first one that matches.
     static func current(_ rules: [FocusRule], at date: Date = Date(), calendar: Calendar = .current) -> FocusRule? {
         rules.first { $0.isActive(at: date, calendar: calendar) }

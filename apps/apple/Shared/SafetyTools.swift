@@ -9,8 +9,9 @@ extension BrowserModel {
     }
 
     func presentLookalikeWarning(_ finding: LookalikeCheck.Finding, for url: URL, in tab: TabController) {
-        guard let host = url.host?.lowercased() else { return }
+        guard let host = url.host?.lowercased(), lookalikePrompting.insert(host).inserted else { return }   // a redirect chain must not stack the same question
         Task { @MainActor [self] in
+            defer { lookalikePrompting.remove(host) }
             let choice = await Dialogs.choose(
                 title: "This address may be a fake",
                 message: "“\(host)” looks like \(finding.imitates.capitalized), but it is not. \(finding.reason) Do not enter a password or payment details here.",
@@ -24,19 +25,28 @@ extension BrowserModel {
 
     // MARK: Panic
 
-    /// One step that leaves nothing behind: every tab closed (locked and private ones too), history, downloads list, website data, clipboard history and
-    /// what the widgets and share sheet hold are erased. Bookmarks, passwords and settings stay.
+    /// Closes every tab of this window, locked and private ones too, and forgets what was recently closed.
+    func closeEverythingInThisWindow() {
+        privateMode = false
+        for tab in tabs { closeTab(id: tab.id, force: true) }
+        closedTabs = []
+    }
+
+    /// One step that leaves nothing behind: every tab in every window closed (locked and private ones too), the lists of recently closed tabs and windows,
+    /// history, the downloads list, website data, time on sites, clipboard history and what the widgets and share sheet hold are erased. Bookmarks, passwords
+    /// and settings stay.
     func panic() async {
         let choice = await Dialogs.choose(
             title: "Clear everything now?",
-            message: "Closes every tab, including locked and private ones, and erases history, the downloads list, website data and cookies, copied text and the shared inbox. Bookmarks, passwords and settings stay.",
+            message: "Closes every tab in every window, including locked and private ones, and erases history, recently closed tabs, the downloads list, website data and cookies, time on sites, copied text and the shared inbox. Bookmarks, passwords and settings stay.",
             buttons: ["Cancel", "Clear Everything"])
         guard choice == 1 else { return }
-        privateMode = false
-        for tab in tabs { closeTab(id: tab.id, force: true) }
+        for window in windows.all { window.closeEverythingInThisWindow() }
+        windows.closedWindows = []
         await clearBrowsingData()
         clipboardHistory = []
         feedItems = []
+        clearSiteTime()
         SharedStore.eraseAll()
         if visibleTabs.isEmpty { newTab() }
         notice = "Everything was cleared."
@@ -46,6 +56,9 @@ extension BrowserModel {
 
     /// Opens a group another device sent as a group here, with its tabs inside it.
     func adoptSyncedGroup(_ name: String, tabs list: [BackupPayload.Tab]) {
+        let name = String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(40))
+        guard !name.isEmpty else { return }
+        if !groupNames.contains(name) { createGroup(name) }
         var opened = 0
         for item in list.prefix(40) {
             guard let url = URL(string: item.url), ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { continue }
@@ -61,7 +74,7 @@ extension BrowserModel {
     /// Moves to the workspace of the rule whose time has just begun. A rule is applied once per window, so a switch made by hand afterwards stays.
     func applyFocusSchedule(now: Date = Date()) {
         guard let rule = FocusSchedule.current(focusRules, at: now) else { focusAppliedKey = ""; return }
-        let key = rule.id.uuidString + SiteTimeLog.day(now)
+        let key = FocusSchedule.windowKey(rule, at: now)
         guard key != focusAppliedKey else { return }
         focusAppliedKey = key
         guard rule.workspace.isEmpty || workspaces.contains(where: { $0.name == rule.workspace }), activeWorkspace != rule.workspace else { return }

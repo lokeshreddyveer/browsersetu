@@ -45,6 +45,7 @@ struct SecurityHeadersSection: View {
     @State private var scanning = false
 
     private var scannable: Bool { PublicAddress.isPublicHost(host) }
+    private func forgetResult() { outcome = nil; scanning = false }
 
     var body: some View {
         Section {
@@ -69,6 +70,7 @@ struct SecurityHeadersSection: View {
             Text(scannable ? "Sends only the site’s name, \(host ?? ""), to Mozilla’s HTTP Observatory, and only when you press the button. It grades the headers the site sends, such as Content-Security-Policy and Strict-Transport-Security; it says nothing about the page’s content."
                            : "Only sites on the public internet can be checked.")
         }
+        .onChange(of: host) { _, _ in forgetResult() }
     }
 }
 

@@ -435,6 +435,25 @@ struct ToolkitView: View {
     }
 }
 
+/// For a secret (a password, a two-factor code, a private note): it is kept out of the clipboard history, marked as concealed so clipboard managers skip it,
+/// kept off the other devices' shared clipboard on iPhone, and, when `clearAfter` is given, removed again after that many seconds unless something else was
+/// copied in the meantime.
+@MainActor func copySecretToPasteboard(_ text: String, clearAfter seconds: TimeInterval? = nil) {
+    #if os(macOS)
+    let board = NSPasteboard.general
+    board.clearContents()
+    board.setString(text, forType: .string)
+    board.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
+    guard let seconds else { return }
+    let mine = board.changeCount
+    DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { if NSPasteboard.general.changeCount == mine { NSPasteboard.general.clearContents() } }
+    #else
+    var options: [UIPasteboard.OptionsKey: Any] = [.localOnly: true]
+    if let seconds { options[.expirationDate] = Date().addingTimeInterval(seconds) }
+    UIPasteboard.general.setItems([["public.utf8-plain-text": text]], options: options)
+    #endif
+}
+
 @MainActor func copyToPasteboardQuietly(_ text: String) {
     #if os(macOS)
     NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)

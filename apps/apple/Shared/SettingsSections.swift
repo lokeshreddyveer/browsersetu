@@ -355,7 +355,7 @@ struct SavedSignInsSection: View {
                         }
                     }
                     Spacer()
-                    Button("Copy") { Task { if await model.requireAuthentication("Copy a saved password") { copyToPasteboard(login.password); model.notice = "Password copied." } } }.buttonStyle(.borderless)
+                    Button("Copy") { Task { if await model.requireAuthentication("Copy a saved password") { copySecretToPasteboard(login.password, clearAfter: 90); model.notice = "Password copied. It clears from the clipboard in 90 seconds." } } }.buttonStyle(.borderless)
                     Button("Edit") { editing = login }.buttonStyle(.borderless)
                     Button(role: .destructive) {
                         Task { if await model.requireAuthentication("Remove a saved password") { WebLoginVault.forget(login, profile: model.profileName); load() } }
@@ -761,7 +761,7 @@ struct ImportExportSection: View {
             Button("Import Passwords…") { importingPasswords = true }
             Button("Export Passwords…") { confirmExport = true }
             Button("Import History…") { importingHistory = true }
-            Button("Copy a New Strong Password") { copyToPasteboard(PasswordGenerator.make()); model.notice = "A new password was copied. It stays on the clipboard until something else replaces it." }
+            Button("Copy a New Strong Password") { copySecretToPasteboard(PasswordGenerator.make()); model.notice = "A new password was copied. It stays on the clipboard until something else replaces it." }
         } header: { Text("Import and Export") } footer: {
             Text("Passwords: the CSV file from Chrome, Edge, Brave, Firefox or Apple's Passwords app. Sites that start with http (not https) are never imported. History: the JSON file from a Google Takeout \"Browser History\" export or Safari's Export Browsing History. A password file holds every password as plain text: delete it as soon as you have used it.")
         }
