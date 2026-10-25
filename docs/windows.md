@@ -68,3 +68,16 @@ By the web standard a `window.open` call with size or "no toolbar" features is a
 small window for the first kind and a tab for the second. Browser Setu opens **both as tabs** joined to the page that opened them, so a sign-in box can
 still talk back to its page, and when the box closes itself the page comes back to the front. This is a deliberate difference: a tab is easier to find,
 cannot hide behind the main window and cannot be mistaken for the page you were on.
+
+---
+
+# Testing notes
+
+* **Leaked web-process helpers can make tests fail for no code reason.** WebKit gives each app a limited number of web-content processes. A test run that is stopped
+  by force (a killed `xcodebuild`, a crashed test host) leaves its empty helper processes behind, and after a few such runs a new run starts to fail:
+  page loads time out, "hundreds of tabs" tests take minutes, and the log fills with `ExceededProcessCountLimit`. Seven tests failed this way in one review
+  and all passed (the 300-tab restart in 12 seconds instead of 284) once the leftovers were cleared. Before trusting a failing page-load test, run
+  `pgrep -f com.apple.WebKit.WebContent | wc -l`; if it is in the hundreds with no app open, `pkill -KILL -f com.apple.WebKit.WebContent`.
+* **The keyboard-driven UI tests need an idle Mac** (`scripts/run-ui-tests-when-idle.sh`). Twenty-one of them fail ("address bar not found", "multiple matching
+  menu items") on this Mac, and they fail the same way at the commit from before the window and tab work, so they are not caused by it. They have not been
+  made to pass and are not a reason to trust or distrust a change.
