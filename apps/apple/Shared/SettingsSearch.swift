@@ -23,6 +23,7 @@ enum SettingsIndex {
         SettingEntry(title: "Profiles", words: "profile switch new work personal", phone: "general", mac: "profiles"),
         SettingEntry(title: "Theme", words: "light dark system appearance mode", phone: "interface", mac: "appearance"),
         SettingEntry(title: "Themes", words: "slime blood moon neon synthwave paper arctic custom photo background colours wallpaper", phone: "interface", mac: "appearance"),
+        SettingEntry(title: "VayuSetu (VPN, Encrypted DNS)", words: "vpn dns network protection wireguard encrypted dns ad blocker download vayusetu all apps", phone: "privacy", mac: "privacy"),
         SettingEntry(title: "AI Features", words: "ai artificial intelligence summary summaries ask this page assistant turn off disable apple intelligence", phone: "privacy", mac: "ai"),
         SettingEntry(title: "AI Tools", words: "claude gemini chatgpt codex cursor mcp model context protocol agent automate bsetu share tabs script token", phone: "privacy", mac: "ai"),
         SettingEntry(title: "Look-alike Address Warning", words: "phishing fake site spoof paypal warning safety", phone: "privacy", mac: "privacy"),

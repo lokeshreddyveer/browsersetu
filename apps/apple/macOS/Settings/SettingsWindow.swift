@@ -332,6 +332,7 @@ struct SettingsPanelView: View {
             ProxySection()
             PageDefensesSection()
             SafetySettingsSection()
+            VayuSetuSection()
             SensitiveLockSection()
             ClearOnQuitSection()
             PageMemorySection()
