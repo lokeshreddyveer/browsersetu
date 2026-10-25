@@ -39,7 +39,7 @@ struct VayuSetuSection: View {
             #endif
         } header: { Text("Network protection: VayuSetu") } footer: {
             #if os(macOS)
-            Text("A separate app by the same author. It adds what a browser cannot: a VPN client (you bring your own WireGuard or IKEv2 server), encrypted DNS and ad blocking for every app on this Mac, not only here. Browser Setu works fully without it. The download button opens the release page in a tab; nothing is installed for you.")
+            Text("A separate app by the same author. It adds what a browser cannot: a VPN client (you bring your own VPN server), encrypted DNS and ad blocking for every app on this Mac, not only here. Browser Setu works fully without it. The download button opens the release page in a tab; nothing is installed for you.")
             #else
             Text("A separate app by the same author: a VPN client, encrypted DNS and ad blocking for the whole device. The iPhone version is waiting for App Review. Browser Setu works fully without it.")
             #endif
