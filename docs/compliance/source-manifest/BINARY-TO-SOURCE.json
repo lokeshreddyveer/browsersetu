@@ -3,24 +3,7 @@
   "files": 108,
   "unmapped": [],
   "sourcesWithoutAnyRecord": [],
-  "externalSources": {
-    "curl-impersonate": {
-      "url": "https://github.com/lexiforest/curl-impersonate",
-      "note": "MIT; the exact version bundled by curl_cffi 0.17.0 is NOT verified here"
-    },
-    "openssl": {
-      "url": "https://www.openssl.org/source/",
-      "note": "Apache-2.0; attribution only"
-    },
-    "python": {
-      "url": "https://www.python.org/downloads/source/",
-      "note": "permissive licence (PSF-2.0); attribution only"
-    },
-    "zstd": {
-      "url": "https://github.com/facebook/zstd",
-      "note": "BSD-3-Clause elected"
-    }
-  },
+  "externalSources": {},
   "components": {
     "FFmpeg program": 2,
     "PyCryptodome extensions": 40,
@@ -523,7 +506,16 @@
       "component": "curl_cffi wrapper (statically contains curl-impersonate, curl, BoringSSL, nghttp2)",
       "sources": [
         "curl_cffi",
-        "curl-impersonate"
+        "curl-impersonate",
+        "curl",
+        "boringssl",
+        "nghttp2",
+        "ngtcp2",
+        "nghttp3",
+        "zlib",
+        "zstd",
+        "brotli-c",
+        "c-ares"
       ],
       "license": "MIT (and the licences of the statically contained components)"
     },
@@ -1113,8 +1105,8 @@
     },
     {
       "path": "Frameworks/libmp3lame.dylib",
-      "sha256": "d9a4706692b817702bb8cdeb6227c45d3ca9c9a7c1aa2d42010ca2d2af187f9a",
-      "size": 277616,
+      "sha256": "c4103e3c7b77501a20e3f4f69f8d9e568af31a5dd186df36e82e9bc89e083ab4",
+      "size": 276048,
       "component": "LAME MP3 encoder library",
       "sources": [
         "lame"
