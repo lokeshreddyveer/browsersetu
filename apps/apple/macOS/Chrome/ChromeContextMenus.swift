@@ -38,6 +38,7 @@ struct SidebarContextMenu: View {
 
     var body: some View {
         if model.showsMenuItem(.newTab) { Button("New Tab") { model.newTab() } }
+        if model.showsMenuItem(.newPrivateTab) { Button("New Private Window") { model.openPrivateWindow() } }
         if model.showsMenuItem(.newPrivateTab) { Button("New Private Tab") { model.openTab(url: nil, isPrivate: true) } }
         if model.showsMenuItem(.searchTabs) { Button("Search Tabs") { model.tabSearchVisible = true } }
         Divider()
@@ -73,7 +74,7 @@ struct SidebarContextMenu: View {
                 animated(.easeOut(duration: 0.22)) { if model.sidebarAutoHide { model.pinSidebar() } else { model.hideSidebarToEdge() } }
             }
         }
-        if model.showsMenuItem(.hideSidebar) { Button("Hide Sidebar") { animated(.easeOut(duration: 0.22)) { model.sidebarVisible = false } } }
+        if model.showsMenuItem(.hideSidebar) { Button("Hide Sidebar") { animated(.easeOut(duration: 0.22)) { model.setSidebarShown(false) } } }
         Divider()
         if model.showsMenuItem(.layout) { LayoutMenu() }
         if model.showsMenuItem(.density) { DensityMenu() }
@@ -88,12 +89,13 @@ struct ToolbarContextMenu: View {
 
     var body: some View {
         if model.showsMenuItem(.newTab) { Button("New Tab") { model.newTab() } }
+        if model.showsMenuItem(.newPrivateTab) { Button("New Private Window") { model.openPrivateWindow() } }
         if model.showsMenuItem(.newPrivateTab) { Button("New Private Tab") { model.openTab(url: nil, isPrivate: true) } }
         if model.showsMenuItem(.reopenClosed) { Button("Reopen Closed Tab") { model.reopenClosedTab() }.disabled(model.closedTabs.isEmpty) }
         Divider()
-        Button(model.sidebarVisible ? "Hide Sidebar" : "Show Sidebar") { animated(.easeOut(duration: 0.22)) { model.sidebarVisible.toggle() } }
+        Button(model.sidebarVisible ? "Hide Sidebar" : "Show Sidebar") { animated(.easeOut(duration: 0.22)) { model.toggleSidebar() } }
         if model.showsMenuItem(.breakMode) { Button(model.breakActive ? "End Break" : "Break: Pause All Media") { model.toggleBreakMode() } }
-        if let tab = model.active, let host = tab.url?.host?.lowercased(), !tab.isBlank {
+        if let tab = model.active, let host = tab.url?.host?.lowercased(), !tab.isBlank, !tab.isPrivate {
             let allowed = model.popupAllowedHosts.contains(host)
             Button(allowed ? "Stop Allowing Pop-ups from \(host)" : "Allow Pop-ups from \(host)") {
                 if allowed { model.popupAllowedHosts.remove(host) } else { model.popupAllowedHosts.insert(host) }
@@ -112,13 +114,22 @@ struct ToolbarContextMenu: View {
             .disabled(model.active == nil || model.active?.isBlank == true)
         }
         if model.showsMenuItem(.toolbarButtons) { Menu("Toolbar Buttons") {
-            ForEach(ToolbarItemID.allCases) { item in
+            // Reload is not a button of its own on the Mac: it sits inside the address field, so this entry switches that one (the same switch as Arrange Buttons).
+            ForEach(ToolbarItemID.allCases.filter { $0 != .reload }) { item in
                 Button {
                     if model.shows(item) { model.toolbarItems.removeAll { $0 == item } }
                     else { model.toolbarItems = ToolbarItemID.allCases.filter { $0 == item || model.shows($0) } }
                 } label: {
                     if model.shows(item) { Label(item.title, systemImage: "checkmark") } else { Text(item.title) }
                 }
+            }
+            Button {
+                animated(.easeOut(duration: 0.2)) {
+                    if model.addressBarItems.contains(.reload) { model.addressBarItems.removeAll { $0 == .reload } }
+                    else { model.addressBarItems.append(.reload) }
+                }
+            } label: {
+                if model.addressBarItems.contains(.reload) { Label("Reload (in the address bar)", systemImage: "checkmark") } else { Text("Reload (in the address bar)") }
             }
             Divider()
             Button("Reset to Default") { model.toolbarItems = ToolbarItemID.defaults }

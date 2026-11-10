@@ -32,12 +32,20 @@ final class ImportToolsTests: XCTestCase {
         XCTAssertTrue(PasswordImport.parse(csv: "nonsense\nvalue").logins.isEmpty)
     }
 
-    func testExportRoundTripsAndNeutralisesSpreadsheetFormulas() {
-        let logins = [WebLogin(origin: "https://a.test", user: "me", password: "p,w\"x"), WebLogin(origin: "https://b.test", user: "=cmd|' /C calc'!A0", password: "pw")]
+    func testExportRoundTripsCredentialsExactlyAndStillGuardsTheTextColumns() {
+        // A username or password that begins like a formula (about 6% of generated passwords do) must come back exactly as it went in: an apostrophe in front would
+        // make it a different password in the next password manager. The columns that are only text (name, address) are still made harmless for a spreadsheet.
+        let logins = [WebLogin(origin: "https://a.test", user: "me", password: "p,w\"x"),
+                      WebLogin(origin: "https://b.test", user: "=cmd|' /C calc'!A0", password: "-Xk3@pass"),
+                      WebLogin(origin: "https://c.test", user: "+1555", password: "=sum(1)")]
         let csv = PasswordImport.csv(for: logins)
         let back = PasswordImport.parse(csv: csv).logins
         XCTAssertEqual(back.first { $0.origin == "https://a.test" }?.password, "p,w\"x")
-        XCTAssertFalse(csv.contains(",=cmd"), "a field starting with = must not reach a spreadsheet as a formula")
+        XCTAssertEqual(back.first { $0.origin == "https://b.test" }?.user, "=cmd|' /C calc'!A0")
+        XCTAssertEqual(back.first { $0.origin == "https://b.test" }?.password, "-Xk3@pass")
+        XCTAssertEqual(back.first { $0.origin == "https://c.test" }?.user, "+1555")
+        XCTAssertEqual(back.first { $0.origin == "https://c.test" }?.password, "=sum(1)")
+        XCTAssertEqual(CSV.field("=HYPERLINK(\"x\")"), "\"'=HYPERLINK(\"\"x\"\")\"", "a text column that looks like a formula is still guarded")
     }
 
     func testGeneratedPasswordsAreLongMixedAndDifferent() {

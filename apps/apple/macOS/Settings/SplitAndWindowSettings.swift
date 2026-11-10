@@ -39,7 +39,7 @@ struct SplitAndWindowSettingsSection: View {
             Image(systemName: symbol).font(.system(size: 14)).foregroundStyle(Theme.accent).frame(width: 22)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).fontWeight(.medium)
-                Text(text).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Text(text).settingsNote().fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(.vertical, 2)

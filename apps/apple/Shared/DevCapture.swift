@@ -211,8 +211,8 @@ struct DeveloperExtras: View {
             NavigationStack {
                 ScrollView { Text(source ?? "").font(.system(size: 11, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding() }
                     .navigationTitle("Page Source")
-                    .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { showSource = false } }
-                               ToolbarItem(placement: .primaryAction) { Button("Copy") { copyToPasteboard(source ?? "") } } }
+                    .toolbar { ToolbarItem(placement: .primaryAction) { Button("Copy") { copyToPasteboard(source ?? "") } } }
+                    .sheetDoneToolbar { showSource = false }
             }
             .frame(minWidth: 560, minHeight: 420)
         }

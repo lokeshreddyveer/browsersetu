@@ -69,6 +69,9 @@ struct PhoneInterfaceSection: View {
 
     var body: some View {
         Group {
+            if UIDevice.current.userInterfaceIdiom == .phone {
+                PhoneLayoutSettings()
+            }
             Section("Toolbar") {
                 NavigationLink("Customize Toolbar and Menu") { PhoneToolbarEditor() }
                     .accessibilityIdentifier("customize-toolbar")
@@ -76,7 +79,7 @@ struct PhoneInterfaceSection: View {
                     ForEach(AddressDisplay.allCases) { Text($0.title).tag($0) }
                 }
                 Toggle("Show the site’s icon", isOn: $model.showAddressIcon)
-                Toggle("Collapse the toolbar while reading", isOn: $model.collapseOnScroll)
+                if UIDevice.current.userInterfaceIdiom != .phone { Toggle("Collapse the toolbar while reading", isOn: $model.collapseOnScroll) }
             }
             Section {
                 Toggle("Swipe the address bar to switch tabs", isOn: $model.swipeAddressPill)

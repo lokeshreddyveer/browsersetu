@@ -93,7 +93,7 @@ extension BrowserModel {
     /// With `group`, saves only that group's tabs (and the groups inside it) as a collection.
     func saveSession(named name: String, group: String? = nil) {
         let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let list = tabs.filter { tab in !tab.isPrivate && !tab.isBlank && tab.workspace == activeWorkspace && (group.map { GroupPath.isInside(tab.group, of: $0) } ?? true) }
+        let list = listedTabs(inWorkspace: activeWorkspace).filter { tab in !tab.isPrivate && !tab.isBlank && (group.map { GroupPath.isInside(tab.group, of: $0) } ?? true) }
         guard !clean.isEmpty, clean.count <= 60, !list.isEmpty else { notice = "There are no tabs to save in this workspace."; return }
         var session = SavedSession(name: clean, tabs: list.compactMap { tab in
             tab.url.map { SavedSession.Tab(url: $0.absoluteString, title: tab.displayTitle, pinned: tab.pinned) }
@@ -200,11 +200,11 @@ struct SavedSessionsView: View {
     @State private var importing = false
 
     var body: some View {
-        List {
+        PanelList {
             Section {
                 Button("Save These Tabs as a Session…") {
                     Task { @MainActor in
-                        if let name = await Dialogs.promptText(title: "Save Session", message: "Name this set of tabs.", placeholder: "Research, Trip, Work…"), !name.isEmpty {
+                        if let name = await Dialogs.promptText(title: "Save Session", message: "Name this set of tabs.", placeholder: "Research, Trip, Work…", prefill: false), !name.isEmpty {
                             model.saveSession(named: name)
                         }
                     }
@@ -258,13 +258,13 @@ struct TabActivityView: View {
 
     var body: some View {
         let groups = model.activityGroups()
-        List {
+        PanelList {
             if groups.isEmpty { Label("No tabs yet", systemImage: "clock").foregroundStyle(.secondary) }
             ForEach(groups, id: \.title) { group in
                 Section(group.title) {
                     ForEach(group.tabs) { tab in
                         Button {
-                            if tab.workspace != model.activeWorkspace { model.switchWorkspace(tab.workspace) }
+                            if !model.isEssentialTab(tab), tab.workspace != model.activeWorkspace { model.switchWorkspace(tab.workspace) }
                             model.select(tab.id); model.sheet = nil; dismiss()
                         } label: {
                             HStack(spacing: 10) {

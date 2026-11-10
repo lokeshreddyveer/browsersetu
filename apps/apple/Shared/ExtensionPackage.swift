@@ -23,6 +23,19 @@ enum ExtensionPackage {
     static let maxUnpacked = 300 * 1024 * 1024
     static let maxEntries = 20_000
 
+    /// What a zip may hold when it is unpacked. Extensions use the defaults; a downloaded archive the person asked to open uses tighter ones (see `ArchiveExtractor`).
+    struct Limits: Equatable {
+        var maxUnpacked = ExtensionPackage.maxUnpacked
+        var maxEntries = ExtensionPackage.maxEntries
+        /// Folders inside folders, counted from the top of the archive.
+        var maxDepth = 64
+        /// Unpacked size divided by the size of the zip itself. A small file that claims to hold a great deal is how a "bomb" is made.
+        var maxRatio = Int.max
+        /// A link inside the archive (which could point anywhere) is refused outright rather than written out as a file.
+        var rejectLinks = false
+        static let extensions = Limits()
+    }
+
     /// The unpacked extension, in a new folder the caller owns. The work is done off the main thread; see `unpackAsync`.
     static func unpack(file: URL) throws -> URL {
         let scoped = file.startAccessingSecurityScopedResource()
@@ -85,7 +98,7 @@ enum ExtensionPackage {
     /// Unpacks a zip into `folder`, holding to what the archive actually contains, not what it says about itself: stored entries must be exactly as long as they
     /// claim, compressed entries are inflated in small pieces and stopped the moment they pass their declared size or the total budget, every file's CRC must
     /// match, and entries that overlap or repeat a name are refused.
-    static func extract(zip: Data, into folder: URL) throws {
+    static func extract(zip: Data, into folder: URL, limits: Limits = .extensions, precheck: ((_ declaredBytes: Int) throws -> Void)? = nil) throws {
         try zip.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
             let z = raw.bindMemory(to: UInt8.self)
             func u16(_ at: Int) -> Int { Int(z[at]) | Int(z[at + 1]) << 8 }
@@ -100,9 +113,9 @@ enum ExtensionPackage {
             guard eocd >= 0 else { throw Failure.notAPackage }
             let count = u16(eocd + 10), directory = u32(eocd + 16)
             guard count != 0xFFFF, directory != 0xFFFF_FFFF else { throw Failure.unsupported }       // zip64
-            guard count <= maxEntries else { throw Failure.tooManyFiles(count) }
+            guard count <= limits.maxEntries else { throw Failure.tooManyFiles(count) }
 
-            struct Entry { var name: String; var nameBytes: [UInt8]; var method: Int; var crc: UInt32; var compressed: Int; var size: Int; var offset: Int }
+            struct Entry { var name: String; var nameBytes: [UInt8]; var method: Int; var crc: UInt32; var compressed: Int; var size: Int; var offset: Int; var isLink: Bool }
             var entries: [Entry] = []
             var at = directory, declaredTotal = 0
             var names = Set<String>()
@@ -118,18 +131,25 @@ enum ExtensionPackage {
                 let name = String(decoding: nameBytes, as: UTF8.self)
                 guard names.insert(name.lowercased()).inserted else { throw Failure.unsafePath(name) }   // the same file twice
                 declaredTotal += size
-                guard declaredTotal <= maxUnpacked else { throw Failure.tooLarge(declaredTotal) }
-                entries.append(Entry(name: name, nameBytes: nameBytes, method: method, crc: entryCRC, compressed: compressed, size: size, offset: offset))
+                guard declaredTotal <= limits.maxUnpacked else { throw Failure.tooLarge(declaredTotal) }
+                guard declaredTotal / max(1, z.count) <= limits.maxRatio else { throw Failure.tooLarge(declaredTotal) }
+                // The Unix file type sits in the top half of the "external attributes": 0o120000 is a symbolic link.
+                let isLink = (u32(at + 38) >> 16) & 0o170000 == 0o120000
+                if limits.rejectLinks, isLink { throw Failure.unsafePath(name) }
+                entries.append(Entry(name: name, nameBytes: nameBytes, method: method, crc: entryCRC, compressed: compressed, size: size, offset: offset, isLink: isLink))
                 at += 46 + nameLength + extra + comment
             }
 
+            // The archive's own listing is now known and within bounds; the caller may refuse before anything is written (not enough disk space, say).
+            try precheck?(declaredTotal)
             // The data of two entries must never overlap: that is how a small archive is made to write a lot.
             var spans: [(Int, Int)] = []
             let root = folder.standardizedFileURL.path
             var written = 0
             for entry in entries {
                 let name = entry.name
-                guard !name.hasPrefix("/"), !name.contains("\\"), !name.split(separator: "/").contains("..") else { throw Failure.unsafePath(name) }
+                guard !name.hasPrefix("/"), !name.contains("\\"), !name.split(separator: "/").contains(".."), !name.unicodeScalars.contains(where: { $0.value == 0 }) else { throw Failure.unsafePath(name) }
+                guard name.split(separator: "/").count <= limits.maxDepth else { throw Failure.unsafePath(name) }
                 let target = folder.appendingPathComponent(name).standardizedFileURL
                 guard target.path.hasPrefix(root + "/") || target.path == root else { throw Failure.unsafePath(name) }
                 if name.hasSuffix("/") {
@@ -156,10 +176,10 @@ enum ExtensionPackage {
                         // Stored: it must be exactly as long as it says.
                         guard entry.compressed == entry.size else { throw Failure.notAPackage }
                         fileCRC = crc(0, packed); fileBytes = packed.count; written += packed.count
-                        guard written <= maxUnpacked else { throw Failure.tooLarge(written) }
+                        guard written <= limits.maxUnpacked else { throw Failure.tooLarge(written) }
                         try handle.write(contentsOf: Data(packed))
                     case 8:
-                        try inflate(packed, expecting: entry.size, budget: maxUnpacked - written) { chunk in
+                        try inflate(packed, expecting: entry.size, budget: limits.maxUnpacked - written) { chunk in
                             fileCRC = crc(fileCRC, chunk); fileBytes += chunk.count; written += chunk.count
                             try handle.write(contentsOf: Data(chunk))
                         }
@@ -176,7 +196,7 @@ enum ExtensionPackage {
     /// Inflates raw deflate data a piece at a time. Stops with an error as soon as the output would pass `expecting` or the remaining `budget`, and
     /// fails if it ends with anything other than exactly `expecting` bytes.
     private static func inflate(_ packed: UnsafeBufferPointer<UInt8>, expecting: Int, budget: Int, sink: (UnsafeBufferPointer<UInt8>) throws -> Void) throws {
-        guard expecting <= budget else { throw Failure.tooLarge(maxUnpacked + 1) }
+        guard expecting <= budget else { throw Failure.tooLarge(budget + 1) }
         if packed.isEmpty { guard expecting == 0 else { throw Failure.notAPackage }; return }
         let chunkSize = 64 * 1024
         let output = UnsafeMutablePointer<UInt8>.allocate(capacity: chunkSize)

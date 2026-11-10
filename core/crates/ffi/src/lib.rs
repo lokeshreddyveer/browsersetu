@@ -574,6 +574,21 @@ impl BrowserCore {
             return Ok(None);
         }
         let mut registry = self.tabs.lock().unwrap();
+        // Tabs that may not be restored are dropped, so the saved active position has to be moved to where its tab now is.
+        let mut kept_before_active = 0usize;
+        let mut active_kept: Option<usize> = None;
+        let mut kept = 0usize;
+        for (i, t) in snap.tabs.iter().enumerate() {
+            if policy::evaluate_navigation(&t.url, true) == NavigationDecision::Allow {
+                if i == snap.active {
+                    active_kept = Some(kept);
+                }
+                if i < snap.active {
+                    kept_before_active += 1;
+                }
+                kept += 1;
+            }
+        }
         let tabs: Vec<TabInfo> = snap
             .tabs
             .iter()
@@ -598,7 +613,7 @@ impl BrowserCore {
         if tabs.is_empty() {
             return Ok(None);
         }
-        let active_index = snap.active.min(tabs.len() - 1) as u32;
+        let active_index = active_kept.unwrap_or(kept_before_active).min(tabs.len() - 1) as u32;
         Ok(Some(RestoredSession { tabs, active_index }))
     }
 }

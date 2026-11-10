@@ -201,7 +201,7 @@ extension BrowserModel {
             if let visit = cell.value {
                 guard ["http", "https"].contains(URL(string: url)?.scheme?.lowercased() ?? "") else { continue }
                 if let have = local[url], have >= visit.last { continue }
-                visits.append(ImportedVisit(url: url, title: String(visit.title.prefix(300)), lastVisit: Int64(visit.last), visitCount: 1))
+                visits.append(ImportedVisit(url: url, title: String(visit.title.prefix(300)), lastVisit: Int64(min(max(visit.last.isFinite ? visit.last : 0, 0), 4_000_000_000)), visitCount: 1))
             } else if local[url] != nil { deletions.append(url) }
         }
         if !visits.isEmpty, let written = try? core.importHistory(visits: Array(visits.prefix(2_000))) { outcome.historyChanged += Int(written) }
@@ -215,8 +215,8 @@ extension BrowserModel {
 
     @discardableResult
     func sendTab(_ tab: TabController, to device: SyncDevice) -> Bool {
-        guard !tab.isPrivate, !tab.isBlank, let url = tab.url, let clean = Continuity.handoffURL(isPrivate: false, isBlank: false, url: url) else {
-            notice = tab.isPrivate ? "Private tabs are never sent." : "That page cannot be sent."
+        guard !tab.leavesNoTrace, !tab.isBlank, let url = tab.url, let clean = Continuity.handoffURL(isPrivate: false, isBlank: false, url: url) else {
+            notice = tab.leavesNoTrace ? "Private and temporary tabs are never sent." : "That page cannot be sent."
             return false
         }
         let item = SentTab(id: UUID().uuidString, to: device.id, fromName: syncDeviceName, url: clean.absoluteString, title: String(tab.displayTitle.prefix(200)), sent: Date().timeIntervalSince1970)
@@ -280,7 +280,12 @@ extension BrowserModel {
 
     func recordSyncOutcome(push: Bool, error: String?) {
         let now = Date()
-        if let error { syncError = error; return }
+        if let error {
+            // Said once outside Settings, when the problem is new, so a failing sync is not found out weeks later.
+            if syncError != error { notice = "Sync problem: \(error)" }
+            syncError = error
+            return
+        }
         syncError = nil
         if push { lastPush = now; saveSetting("sync_last_push", String(now.timeIntervalSince1970)) }
         else { lastPull = now; saveSetting("sync_last_pull", String(now.timeIntervalSince1970)) }
@@ -305,6 +310,11 @@ struct SyncStatusRow: View {
                 }
                 Spacer()
                 if model.iCloudSync { Button("Sync Now") { Task { await model.syncNowCloud() } }.disabled(health == .syncing || health == .needsPassphrase || health == .needsICloud) }
+            }
+            // A failed sync is said with what is true and what can be done, in the same design as the other failures; the rest of this panel stays as it was.
+            if case .problem(let text) = health {
+                let problem = SyncProblem(message: text)
+                ErrorInlineView(info: problem.info, actions: problem.canRetry ? [.tryAgain] : []) { _ in Task { await model.syncNowCloud() } }
             }
             if model.iCloudSync, model.cloudSync != nil {
                 VStack(alignment: .leading, spacing: 3) {

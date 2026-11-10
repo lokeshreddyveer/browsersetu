@@ -3,6 +3,35 @@ import SwiftUI
 /// Everything that decides what the window's chrome looks like, gathered in one place. The browser keeps these as separate settings (a preset, whether the sidebar is
 /// shown or tucked to the edge, focus mode, toolbar auto-hide, full screen and so on). `LayoutState.resolve` reads all of them at once and answers every question the
 /// screens ask, so no screen has to combine several flags by itself and no combination can slip through unexamined.
+/// The rules the model and `LayoutState` must agree on, written once. Both call these, so the screens and the diagnostics cannot drift apart (they did: a
+/// stored Custom auto-hide choice and One Row in full screen were each answered differently by the two).
+enum LayoutRules {
+    /// Whether the toolbar hides until the pointer reaches the top edge. A single toolbar has no top bar to hide.
+    static func autoHidesToolbar(preset: LayoutPreset, singleToolbar: Bool, toolbarAutoHide: Bool, fullScreen: Bool) -> Bool {
+        !singleToolbar && ((preset == .custom && toolbarAutoHide) || fullScreen)
+    }
+
+    /// Whether the sidebar slides in from the window edge by choice. A remembered "hide until the edge" only counts in the layouts that have a sidebar: it
+    /// must not give Classic, Minimal or One Row ("no sidebar") an edge-hover one.
+    static func sidebarAutoHides(preset: LayoutPreset, sidebarAutoHide: Bool) -> Bool {
+        sidebarAutoHide && preset != .classic && preset != .minimal && preset != .inline
+    }
+}
+
+/// The sizes the layouts share, in one place (they were typed out in five).
+enum LayoutMetrics {
+    /// Room kept for the traffic lights at the start of a toolbar: none in full screen, where they are not in the window.
+    static func toolbarLeadingInset(fullScreen: Bool) -> CGFloat { fullScreen ? 10 : 84 }
+    /// The same room at the head of a sidebar that is under the lights, left side and windowed only.
+    static let sidebarLights: CGFloat = 74
+    /// Top inset of the content in a sidebar, with and without a top bar over the page.
+    static let sidebarTopWithBar: CGFloat = 36
+    /// The height of the one row of controls at the top of a window (and of the One Row bar). Every layout measures its top bar from this.
+    static let toolbarHeight: CGFloat = 40
+    static let sidebarTopColumnBar: CGFloat = toolbarHeight
+    static let sidebarTopBarless: CGFloat = 46
+}
+
 struct LayoutInputs: Equatable {
     var isMac = true
     var isPhone = false
@@ -18,6 +47,8 @@ struct LayoutInputs: Equatable {
     var windowFullScreen = false
     var collapseOnScroll = true
     var windowWidth: Double = 1100
+    /// How many of the optional toolbar buttons are on; they take room, so they move the width at which the rest fold away.
+    var toolbarExtras = 0
 }
 
 /// The controls every layout must keep reachable, however much is hidden.
@@ -68,20 +99,20 @@ struct LayoutState: Equatable {
         }
         let resolved = resolveLayout(preset: i.preset, customTabLayout: i.customTabLayout, customSidebarVisible: i.sidebarVisible, customSingleToolbar: i.singleToolbarCustom)
         let single = resolved.singleToolbar
-        let autoHidesToolbar = (i.preset == .custom && i.toolbarAutoHide) || (i.windowFullScreen && !single)
+        let autoHidesToolbar = LayoutRules.autoHidesToolbar(preset: i.preset, singleToolbar: single, toolbarAutoHide: i.toolbarAutoHide, fullScreen: i.windowFullScreen)
 
         let sidebar: SidebarMode
         if i.focusMode { sidebar = .hidden }
         else if i.sidebarVisible { sidebar = i.sidebarRail ? .rail : .pinned }
-        else if i.sidebarAutoHide || resolved.tabLayout == .sidebar { sidebar = .onEdge }
+        else if LayoutRules.sidebarAutoHides(preset: i.preset, sidebarAutoHide: i.sidebarAutoHide) || resolved.tabLayout == .sidebar { sidebar = .onEdge }
         else { sidebar = .hidden }
 
         let top: TopChrome
         if i.focusMode { top = .focusBand }
         else if i.preset == .floating { top = .floatingPill }
         else if single { top = .none }
+        else if autoHidesToolbar { top = .toolbarOnEdge }      // checked before One Row: in full screen it hides like the others, and needs its handle
         else if i.preset == .inline { top = .singleRow }
-        else if autoHidesToolbar { top = .toolbarOnEdge }
         else { top = .toolbar }
 
         let tabs: TabsPlacement
@@ -103,7 +134,7 @@ struct LayoutState: Equatable {
         switch top {
         case .toolbar, .singleRow:
             // The toolbar drops its optional buttons from the right as the window narrows; they stay one click away in More.
-            let priority = ToolbarPriority(fitting: CGFloat(i.windowWidth), leadingInset: i.windowFullScreen ? 10 : 84)
+            let priority = ToolbarPriority(fitting: CGFloat(i.windowWidth), leadingInset: LayoutMetrics.toolbarLeadingInset(fullScreen: i.windowFullScreen), extras: i.toolbarExtras)
             reach[.search] = .visible
             reach[.settings] = .handle
             reach[.newTab] = priority.showOptional ? .visible : .handle
@@ -148,6 +179,9 @@ struct LayoutSnapshot: Codable, Equatable {
     var splitOrientation: String
     var toolbarAutoHide: Bool
     var collapseOnScroll: Bool
+    /// Custom's own choices (nil in snapshots made before they were kept).
+    var tabLayout: String? = nil
+    var singleToolbar: Bool? = nil
 }
 
 /// Ready-made arrangements.
@@ -192,6 +226,7 @@ extension BrowserModel {
         inputs.windowFullScreen = windowFullScreen
         inputs.collapseOnScroll = collapseOnScroll
         inputs.windowWidth = width
+        inputs.toolbarExtras = toolbarExtrasCount
         return inputs
     }
 
@@ -200,13 +235,20 @@ extension BrowserModel {
     func layoutSnapshot() -> LayoutSnapshot {
         LayoutSnapshot(preset: layoutPreset.rawValue, sidebarPosition: sidebarPosition.rawValue, sidebarVisible: sidebarVisible, sidebarRail: sidebarRail,
                        sidebarAutoHide: sidebarAutoHide, focusMode: focusMode, splitOrientation: splitOrientation.rawValue, toolbarAutoHide: toolbarAutoHide,
-                       collapseOnScroll: collapseOnScroll)
+                       collapseOnScroll: collapseOnScroll, tabLayout: tabLayout.rawValue, singleToolbar: singleToolbarCustom)
     }
 
     /// Puts the window into a saved arrangement. Unknown values are ignored, so an old or damaged snapshot cannot leave the layout in a state nobody chose.
     func apply(_ snapshot: LayoutSnapshot) {
         #if os(macOS)
-        if let preset = LayoutPreset(rawValue: snapshot.preset), preset != .custom { layoutPreset = preset }
+        if let preset = LayoutPreset(rawValue: snapshot.preset) {
+            // Custom comes back with the choices it was saved with, set first so the layout is only ever resolved once.
+            if preset == .custom {
+                if let saved = snapshot.tabLayout.flatMap(TabLayout.init(rawValue:)) { tabLayout = saved }
+                if let single = snapshot.singleToolbar { singleToolbarCustom = single }
+            }
+            layoutPreset = preset
+        }
         if let position = SidebarPosition(rawValue: snapshot.sidebarPosition) { sidebarPosition = position }
         sidebarRail = snapshot.sidebarRail
         if snapshot.sidebarVisible && !snapshot.sidebarRail { pinSidebar() } else if snapshot.sidebarAutoHide { hideSidebarToEdge() } else { sidebarVisible = snapshot.sidebarVisible }
@@ -230,6 +272,8 @@ extension BrowserModel {
         overviewVisible = false
         #if os(macOS)
         layoutPreset = .classic
+        tabLayout = .separate
+        clearSidebarPin()
         sidebarRail = false
         sidebarAutoHide = false
         toolbarAutoHide = false
@@ -238,7 +282,7 @@ extension BrowserModel {
         #endif
         toolbarItems = ToolbarItemID.defaults
         collapseOnScroll = true
-        expandChrome()
+        expandChrome(userRequested: true)
         notice = "Standard layout restored."
     }
 }
@@ -309,7 +353,7 @@ struct LayoutDiagnosticsView: View {
 
     var body: some View {
         let state = model.layoutState(width: model.windowWidth)
-        List {
+        PanelList {
             Section("Now") {
                 ForEach(Array(state.summary.enumerated()), id: \.offset) { _, line in LabeledContent(line.0, value: line.1) }
             }

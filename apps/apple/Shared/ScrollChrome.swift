@@ -30,9 +30,26 @@ struct ScrollChrome: Equatable {
         return false
     }
 
+    /// Folds the toolbar at once (the Reading layout keeps it folded).
+    mutating func collapse() {
+        collapsed = true
+        travelled = 0
+    }
+
     /// Brings the toolbar back at once (a tab change, a click on the pill, the address bar taking focus).
     mutating func expand() {
         collapsed = false
         travelled = 0
     }
+}
+
+/// When the iPhone's folded controls may open again. Pure, so it can be tested away from the phone; `BrowserModel` asks it. `sticky` comes from the layout
+/// (`PhoneLayoutSpec.sticky`): folds and stays folded, or always folded.
+enum ChromeFoldPolicy {
+    /// An automatic request to open the controls (a page finishing, a tab chosen from the list, the address bar taking focus) is ignored once they have folded, in a
+    /// sticky layout. Only a person's own request opens them: a tap on a pill, Show Toolbar, a layout change.
+    static func ignoresAutomaticExpand(isPhone: Bool, sticky: Bool) -> Bool { isPhone && sticky }
+
+    /// Scrolling never opens controls that have folded, in a sticky layout (down or back up).
+    static func ignoresScroll(isPhone: Bool, collapsed: Bool, sticky: Bool) -> Bool { isPhone && collapsed && sticky }
 }

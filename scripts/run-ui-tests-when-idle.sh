@@ -21,6 +21,6 @@ xcodebuild -project BrowserSetu.xcodeproj -scheme BrowserSetuMac -derivedDataPat
   test -only-testing:BrowserSetuMacUITests > "${TMPDIR:-/tmp}/ui-idle.log" 2>&1 &
 XB=$!
 wait "$XB"; RC=$?
-pkill -f testserver.py; pkill -f "Browser Setu"
+pkill -f testserver.py
 grep -E "Tests.swift.*error|' (failed|passed)|Executed [0-9]+ tests|TEST (SUCCEEDED|FAILED)" "${TMPDIR:-/tmp}/ui-idle.log" | sed 's/^.*Tests[. ]//' | cut -c1-300 | sort -u
 exit $RC

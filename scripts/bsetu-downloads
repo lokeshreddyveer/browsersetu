@@ -1,0 +1,77 @@
+#!/bin/bash
+# bsetu-downloads: control Browser Setu's downloads from a terminal or a script.
+# It speaks to the app's local automation socket (Settings › Downloads › Automation) with the same API every other client uses, so it follows the same rules:
+# it can only see this profile's downloads, it can only PROPOSE a new download (you approve it in the app), and it cannot start peer-to-peer.
+#
+# Setup:  export BSETU_SOCKET="<the Socket path shown in Settings>"
+#         export BSETU_TOKEN_FILE="$HOME/.config/bsetu/token"     # a file only you can read, holding the token shown once at "Add Client"
+# The token is never taken from the command line, so it never appears in a process list.
+#
+#   bsetu-downloads list [state]            bsetu-downloads add <url> [--name n] [--priority low|normal|high] [--start-at iso] [--sha256 h]
+#   bsetu-downloads status <id>             bsetu-downloads pause|resume|cancel|retry <id>
+#   bsetu-downloads priority <id> <p>       bsetu-downloads schedule <id> <iso-time>
+#   bsetu-downloads proposals               bsetu-downloads queues list | hold [iso-time] | release
+#   bsetu-downloads stats | capabilities | health | events
+# Add --json for the raw reply, --dry-run to print the request without sending it.
+set -euo pipefail
+
+JSON=0; DRY=${BSETU_DRY_RUN:-0}; ARGS=()
+for a in "$@"; do case "$a" in --json) JSON=1 ;; --dry-run) DRY=1 ;; *) ARGS+=("$a") ;; esac; done
+set -- "${ARGS[@]+"${ARGS[@]}"}"
+[ "${1:-}" = "downloads" ] && shift
+cmd=${1:-help}; shift || true
+
+urlenc() { local s=$1 out="" c i; for ((i=0; i<${#s}; i++)); do c=${s:i:1}; case "$c" in [a-zA-Z0-9._~-]) out+=$c ;; *) out+=$(printf '%%%02X' "'$c") ;; esac; done; printf '%s' "$out"; }
+quote() { local s=$1; s=${s//\\/\\\\}; s=${s//\"/\\\"}; s=${s//$'\n'/\\n}; s=${s//$'\r'/\\r}; s=${s//$'\t'/\\t}; printf '"%s"' "$s"; }
+
+METHOD=GET; PATH_=""; BODY=""; STREAM=0
+need() { [ "$#" -ge 1 ] && [ -n "$1" ] || { echo "Missing argument. Try: bsetu-downloads help" >&2; exit 2; }; }
+case "$cmd" in
+  list)         PATH_="/v1/downloads"; [ -n "${1:-}" ] && PATH_="/v1/downloads?state=$(urlenc "$1")" ;;
+  status)       need "${1:-}"; PATH_="/v1/downloads/$1" ;;
+  add)          need "${1:-}"; METHOD=POST; PATH_="/v1/downloads"; url=$1; shift
+                BODY="{\"url\":$(quote "$url")"
+                while [ "$#" -gt 0 ]; do case "$1" in
+                  --name) BODY+=",\"filename\":$(quote "$2")"; shift 2 ;;
+                  --priority) BODY+=",\"priority\":$(quote "$2")"; shift 2 ;;
+                  --start-at) BODY+=",\"startAt\":$(quote "$2")"; shift 2 ;;
+                  --sha256) BODY+=",\"sha256\":$(quote "$2")"; shift 2 ;;
+                  *) echo "Unknown option $1" >&2; exit 2 ;; esac; done
+                BODY+="}" ;;
+  pause|resume|cancel|retry) need "${1:-}"; METHOD=POST; PATH_="/v1/downloads/$1/$cmd" ;;
+  priority)     need "${1:-}"; need "${2:-}"; METHOD=POST; PATH_="/v1/downloads/$1/priority"; BODY="{\"priority\":$(quote "$2")}" ;;
+  schedule)     need "${1:-}"; need "${2:-}"; METHOD=POST; PATH_="/v1/downloads/$1/schedule"; BODY="{\"startAt\":$(quote "$2")}" ;;
+  proposals)    PATH_="/v1/proposals" ;;
+  queues)       sub=${1:-list}; shift || true
+                case "$sub" in
+                  list) PATH_="/v1/queues" ;;
+                  hold) METHOD=POST; PATH_="/v1/queues/default/hold"; [ -n "${1:-}" ] && BODY="{\"until\":$(quote "$1")}" ;;
+                  release) METHOD=POST; PATH_="/v1/queues/default/release" ;;
+                  *) echo "Unknown queues command" >&2; exit 2 ;; esac ;;
+  stats)        PATH_="/v1/stats" ;;
+  capabilities) PATH_="/v1/capabilities" ;;
+  health)       PATH_="/v1/health" ;;
+  events)       PATH_="/v1/events"; STREAM=1 ;;
+  help|-h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  *) echo "Unknown command: $cmd" >&2; exit 2 ;;
+esac
+
+if [ "$DRY" = "1" ]; then printf '%s %s %s\n' "$METHOD" "$PATH_" "$BODY"; exit 0; fi
+
+SOCKET="${BSETU_SOCKET:-}"
+[ -n "$SOCKET" ] || { echo "Set BSETU_SOCKET to the socket path shown in Settings." >&2; exit 2; }
+if [ -n "${BSETU_TOKEN_FILE:-}" ]; then TOKEN=$(tr -d '[:space:]' < "$BSETU_TOKEN_FILE"); else TOKEN="${BSETU_TOKEN:-}"; fi
+[ -n "$TOKEN" ] || { echo "Set BSETU_TOKEN_FILE to a file holding your token." >&2; exit 2; }
+
+# The credential goes to curl on its standard input, not on its command line.
+KEY=$(date +%s)-$$-$RANDOM
+config=$(printf 'header = "Authorization: Bearer %s"\nheader = "Content-Type: application/json"\n' "$TOKEN")
+[ "$METHOD" = "POST" ] && config+=$(printf '\nheader = "Idempotency-Key: bsetu-%s"' "$KEY")
+args=(--silent --show-error --unix-socket "$SOCKET" -X "$METHOD" -K -)
+[ -n "$BODY" ] && args+=(--data-binary "$BODY")
+if [ "$STREAM" = "1" ]; then
+  # Events are printed as they arrive; Ctrl-C ends the stream cleanly.
+  exec curl "${args[@]}" -N "http://localhost$PATH_" <<<"$config"
+fi
+reply=$(curl "${args[@]}" "http://localhost$PATH_" <<<"$config") || { echo "Could not reach Browser Setu. Is Automation switched on?" >&2; exit 1; }
+if [ "$JSON" = "1" ]; then printf '%s\n' "$reply"; else printf '%s' "$reply" | plutil -p - 2>/dev/null || printf '%s\n' "$reply"; fi

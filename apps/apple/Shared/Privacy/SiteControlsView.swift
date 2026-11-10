@@ -178,6 +178,11 @@ struct SiteControlsView: View {
                     get: { !(key.map { model.autoplayExceptions.contains($0) } ?? false) },
                     set: { on in model.setAutoplayException(host: host, allowed: !on) }))
                     .disabled(!model.blockAutoplay)
+                Picker("Dark page", selection: Binding(
+                    get: { model.darkChoice(forHost: host) },
+                    set: { model.setDarkChoice(host: host, $0) })) {
+                    ForEach(DarkSiteChoice.allCases) { Text($0.title).tag($0) }
+                }
                 Toggle("Randomize canvas and audio details", isOn: Binding(
                     get: { !(key.map { model.fingerprintExceptions.contains($0) } ?? false) },
                     set: { on in model.setFingerprintException(host: host, allowed: !on) }))
@@ -197,6 +202,14 @@ struct SiteControlsView: View {
                 Toggle("Keep this site's tab awake", isOn: Binding(
                     get: { model.neverSleeps(host: host) },
                     set: { model.setNeverSleeps(host: host, $0) }))
+                Toggle("Load in Lockdown Mode", isOn: Binding(
+                    get: { key.map { model.lockdownHosts.contains($0) } ?? false },
+                    set: { on in model.setLockdown(host: host, on: on); model.active?.reload() }))
+                if model.blockLocalNetwork {
+                    Toggle("Let this site reach my home network", isOn: Binding(
+                        get: { key.map { model.localNetworkAllowed.contains($0) } ?? false },
+                        set: { on in model.setLocalNetworkAllowed(host: host, on: on); model.active?.reload() }))
+                }
             }
             SecurityHeadersSection(host: host)
             lookSection

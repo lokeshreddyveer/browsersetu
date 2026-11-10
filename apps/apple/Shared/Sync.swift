@@ -9,10 +9,10 @@ enum SyncRules {
     static let settingKeys: Set<String> = [
         "search_template", "search_suggestions", "search_shortcuts", "accent", "appearance", "address_display", "dark_pages", "dark_sites", "website_appearance", "site_appearance",
         "site_zoom", "site_styles", "site_notes", "bookmark_tags", "group_colors", "strip_tracking", "app_links", "app_link_sites",
-        "blur_private_switcher", "permission_expiry", "homepage", "favorites_order", "site_js_off", "never_sleep_sites", "de_amp", "user_themes", "start_tile", "theme_custom", "block_autoplay", "autoplay_exceptions",
+        "blur_private_switcher", "permission_expiry", "homepage", "favorites_order", "site_js_off", "never_sleep_sites", "dark_sites_off", "de_amp", "user_themes", "start_tile", "theme_custom", "block_autoplay", "autoplay_exceptions",
         // Rules and per-site choices (the "site rules" group in sync settings).
         "site_open_rules", "site_delete_rules", "site_user_agents", "containers", "split_templates", "workflows", "fingerprint_noise", "fingerprint_exceptions",
-        "block_webrtc", "webrtc_exceptions", "video_ads", "cookie_banners", "video_speeds", "autoplay_exceptions",
+        "block_webrtc", "webrtc_exceptions", "video_ads", "cookie_banners", "video_speeds", "autoplay_exceptions", "pinned_addresses",
         // Newer browsing features: pop-ups, chains, panels, the theme schedule, menus, previews, stacks, address bar sources.
         "block_popups", "popup_allowed_hosts", "youtube_rules_auto", "command_chains", "web_panels", "theme_schedule", "hidden_menu_items", "hover_previews", "hover_delay", "tab_stacks", "address_sources", "tab_tree",
         // What the start page shows.
@@ -23,7 +23,7 @@ enum SyncRules {
     static let siteRuleKeys: Set<String> = [
         "site_zoom", "site_styles", "site_notes", "site_appearance", "permission_expiry", "site_js_off", "never_sleep_sites", "site_open_rules", "site_delete_rules",
         "site_user_agents", "containers", "split_templates", "workflows", "fingerprint_noise", "fingerprint_exceptions", "block_webrtc", "webrtc_exceptions", "video_ads",
-        "app_link_sites", "popup_allowed_hosts",
+        "app_link_sites", "popup_allowed_hosts", "pinned_addresses",
     ]
 
     static func category(forSetting key: String) -> SyncCategory { siteRuleKeys.contains(key) ? .siteRules : .settings }
@@ -57,13 +57,21 @@ enum SyncRules {
     static func sealedFitting(_ snapshot: BackupPayload, passphrase: String, iterations: UInt32 = BackupFile.defaultIterations) throws -> Data {
         var working = snapshot
         var sealed = try BackupFile.seal(working, passphrase: passphrase, iterations: iterations)
-        while sealed.count > maxSealedBytes {
-            if let t = working.tabs, !t.isEmpty { working.tabs = Array(t.prefix(t.count / 2)) }
-            else if working.extensions != nil { working.extensions = nil }
-            else if var state = working.state, state.history.count > 40 { state.history = SyncRules.newestHistory(state.history, keep: state.history.count / 2); working.state = state }
-            else if var state = working.state, SyncRules.dropOldestTombstones(&state) { working.state = state }
-            else if working.state == nil, working.bookmarks.count > 50 { working.bookmarks = Array(working.bookmarks.prefix(working.bookmarks.count * 3 / 4)) }
-            else { break }
+        // Every step must change something, or the next one is tried: a step that cuts nothing (history made only of deletions cannot be cut by keeping the newest
+        // pages) used to repeat for ever, sealing again each time. The count of rounds is capped as well.
+        var rounds = 0
+        while sealed.count > maxSealedBytes, rounds < 40 {
+            rounds += 1
+            var changed = false
+            if let t = working.tabs, !t.isEmpty { working.tabs = Array(t.prefix(t.count / 2)); changed = true }
+            else if working.extensions != nil { working.extensions = nil; changed = true }
+            else if var state = working.state, state.history.count > 40 {
+                let trimmed = SyncRules.newestHistory(state.history, keep: state.history.count / 2)
+                if trimmed.count < state.history.count { state.history = trimmed; working.state = state; changed = true }
+            }
+            if !changed, var state = working.state, SyncRules.dropOldestTombstones(&state) { working.state = state; changed = true }
+            if !changed, working.state == nil, working.bookmarks.count > 50 { working.bookmarks = Array(working.bookmarks.prefix(working.bookmarks.count * 3 / 4)); changed = true }
+            if !changed { break }
             sealed = try BackupFile.seal(working, passphrase: passphrase, iterations: iterations)
         }
         return sealed
@@ -151,6 +159,7 @@ final class CloudSync {
     var bytesInUse: Int { store.dictionaryRepresentation.filter { $0.key.hasPrefix("bs.sync.") }.reduce(0) { $0 + (($1.value as? Data)?.count ?? 0) } }
 
     func start() {
+        stop()      // a second start would otherwise leave the first observer listening, and every change would fire twice
         observer = NotificationCenter.default.addObserver(forName: NSUbiquitousKeyValueStore.didChangeExternallyNotification, object: store, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.onChange?() }
         }

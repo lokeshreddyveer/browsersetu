@@ -38,7 +38,8 @@ final class WebKitCompileTests: XCTestCase {
 
         let broken = PolicySnapshot(rulesJSON: Data("[{\"trigger\":{\"url-filter\":\"(\"},\"action\":{\"type\":\"block\"}}]".utf8), additionalRulesJSON: [],
                                     identifier: "setu-broken-test", domainBlockRules: 1, urlBlockRules: 0, elementHidingRules: 0, userRules: 0,
-                                    siteExceptions: 0, droppedForBudget: 0, unsupportedRules: 0, failedLists: [:], listNames: [], strictExtras: [])
+                                    siteExceptions: 0, droppedForBudget: 0, unsupportedRules: 0, importantRules: 0, diagnostics: [], scriptRules: ScriptRuleSet(), scriptIdentifier: "",
+                                    failedLists: [:], listNames: [], strictExtras: [])
         let failed = await installer.apply(broken)
         XCTAssertNotNil(failed.error, "WebKit must reject the malformed rule")
         XCTAssertTrue(failed.installed, "previous valid rules stay installed")

@@ -44,15 +44,13 @@ final class HardeningTests: XCTestCase {
 
     // MARK: Stage 1 - sandbox, measured on the process that actually runs these tests
 
-    func testRunningProcessIsSandboxedWithExpectedEntitlements() {
-        XCTAssertTrue(entitlement("com.apple.security.app-sandbox"), "process is not sandboxed")
-        XCTAssertTrue(entitlement("com.apple.security.network.client"))
-        XCTAssertTrue(entitlement("com.apple.security.files.downloads.read-write"))
+    /// The Mac app is distributed as a Developer ID, notarized, hardened-runtime DMG and is deliberately not sandboxed (see project.yml); what is measured is what it still must and must not ask for.
+    func testRunningProcessHasOnlyTheExpectedEntitlements() {
+        XCTAssertFalse(entitlement("com.apple.security.app-sandbox"), "the direct-download Mac build is not sandboxed")
         XCTAssertTrue(entitlement("com.apple.security.device.camera"))
         XCTAssertTrue(entitlement("com.apple.security.device.audio-input"))
         XCTAssertFalse(entitlement("com.apple.security.network.server"), "should not accept inbound connections")
         XCTAssertFalse(entitlement("com.apple.security.files.all"))
-        XCTAssertTrue(NSHomeDirectory().contains("/Library/Containers/"), "home is not a sandbox container: \(NSHomeDirectory())")
     }
 
     // Enforcement (blocked Documents/Desktop, no writes outside the container) is verified against the
@@ -123,6 +121,11 @@ final class HardeningTests: XCTestCase {
         // A genuine renderer crash cannot be induced from the sandbox (WebKit's process cannot be signalled
         // and the private kill hook does not produce a callback), so this exercises the app's own
         // termination handler. Real-crash behaviour remains NOT TESTED.
+        // The first time in a while the page is brought back without a word (the system ends page processes whenever memory is short): no error page.
+        a.engineProcessCrashed()
+        try await Task.sleep(for: .seconds(1))
+        XCTAssertFalse(a.isShowingError, "a first crash is recovered silently, as Safari does")
+        // Dying again soon after is shown to the person instead of looping.
         a.engineProcessCrashed()
         let errored = await waitUntil(5) { a.isShowingError }
         XCTAssertTrue(errored, "tab did not show a crash page")

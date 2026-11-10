@@ -13,7 +13,16 @@ struct ToolsMenuItems: View {
             Button("Plain") { Task { await model.copyCitationFromDOI(.plain) } }
         } label: { Label("Copy Citation from DOI", systemImage: "quote.opening") }
             .disabled(model.active?.isBlank ?? true)
-        Button { Task { await model.annotatePageScreenshot() } } label: { Label("Screenshot and Mark Up", systemImage: "camera.viewfinder") }
+        Button { Task { await model.startScreenshot(fullPage: false) } } label: { Label("Screenshot and Edit…", systemImage: "camera.viewfinder") }
+            .disabled(model.active?.isBlank ?? true)
+        Button { Task { await model.startScreenshot(fullPage: true) } } label: { Label("Full-Page Screenshot and Edit…", systemImage: "rectangle.expand.vertical") }
+            .disabled(model.active?.isBlank ?? true)
+        Button { model.sheet = .picturesToPDF } label: { Label("Pictures to PDF…", systemImage: "photo.on.rectangle.angled") }
+        Button { Task { await model.annotatePageScreenshot() } } label: { Label("Page as PDF and Mark Up", systemImage: "doc.richtext") }
+            .disabled(model.active?.isBlank ?? true)
+        Button { model.toggleAutoScroll() } label: { Label("Auto Scroll (start or stop)", systemImage: "arrow.down.to.line") }
+            .disabled(model.active?.isBlank ?? true)
+        Button { if let tab = model.active { model.pageMenu(.editPageText, target: PageMenuTarget(), in: tab) } } label: { Label("Edit Text on the Page (on or off)", systemImage: "pencil.line") }
             .disabled(model.active?.isBlank ?? true)
         Button { model.reopenLastSession() } label: { Label("Reopen My Last Session", systemImage: "clock.arrow.circlepath") }
         Button { Task { await model.toggleWatch() } } label: { Label("Watch This Page for Changes", systemImage: "eye") }

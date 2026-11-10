@@ -3,7 +3,7 @@ import SwiftUI
 
 /// The panels of the Settings window, in toolbar order. Every panel holds only controls that change something real.
 enum SettingsPanel: String, CaseIterable, Identifiable {
-    case general, appearance, tabs, search, privacy, ai, websites, profiles, performance, extensions, shortcuts, advanced
+    case general, appearance, tabs, search, downloads, privacy, ai, websites, profiles, performance, extensions, shortcuts, advanced
 
     var id: String { rawValue }
 
@@ -13,6 +13,7 @@ enum SettingsPanel: String, CaseIterable, Identifiable {
         case .appearance: "Appearance"
         case .tabs: "Tabs"
         case .search: "Search"
+        case .downloads: "Downloads"
         case .privacy: "Privacy & Security"
         case .ai: "AI"
         case .websites: "Websites"
@@ -33,6 +34,7 @@ enum SettingsPanel: String, CaseIterable, Identifiable {
         case .appearance: "paintbrush"
         case .tabs: "square.on.square"
         case .search: "magnifyingglass"
+        case .downloads: "arrow.down.circle"
         case .privacy: "hand.raised"
         case .ai: "sparkles"
         case .websites: "globe"
@@ -51,6 +53,7 @@ enum SettingsPanel: String, CaseIterable, Identifiable {
         case .appearance: 620
         case .tabs: 720
         case .search: 260
+        case .downloads: 720
         case .privacy: 700
         case .ai: 640
         case .websites: 360
@@ -134,7 +137,7 @@ struct MacSettingsView: View {
     /// The panels in three groups down a rail of our own, with the panel's name large above its settings: a window that is
     /// Browser Setu's, not a copy of a system preferences window.
     private static let groups: [(title: String, panels: [SettingsPanel])] = [
-        ("Browser", [.general, .appearance, .tabs, .search, .ai]),
+        ("Browser", [.general, .appearance, .tabs, .search, .downloads, .ai]),
         ("Protection", [.privacy, .websites, .profiles]),
         ("More", [.performance, .extensions, .shortcuts, .advanced])
     ]
@@ -146,16 +149,12 @@ struct MacSettingsView: View {
             ZStack(alignment: .top) {
                 // The settings scroll up under the title, which is frosted, instead of being cut off at its edge.
                 SettingsPanelView(panel: panel)
-                    .contentMargins(.top, 72, for: .scrollContent)
+                    .contentMargins(.top, 20, for: .scrollContent)
                     .id(panel.rawValue)
                     .transition(.opacity)
-                HStack(spacing: 12) {
-                    Image(systemName: panel.symbol).font(.system(size: 17, weight: .semibold)).foregroundStyle(Theme.accent)
-                        .frame(width: 34, height: 34)
-                        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Theme.accent.opacity(0.16)))
-                    Text(panel.title).font(.system(size: 22, weight: .semibold))
-                    Spacer()
-                    modeSwitch
+                // No header bar: only the Panel / Tab switch (and Close, when shown as a tab), floating at the top right over the settings.
+                HStack(spacing: 10) {
+                    modeSwitch.background(Capsule().fill(.ultraThinMaterial))
                     if inline {
                         Button { if let tab = model.tabs.first(where: \.isSettingsPage) { model.closeTab(id: tab.id, force: true) } } label: {
                             Image(systemName: "xmark").font(.system(size: 11, weight: .bold)).foregroundStyle(.secondary)
@@ -164,9 +163,8 @@ struct MacSettingsView: View {
                         .buttonStyle(.plain).keyboardShortcut(.cancelAction).accessibilityLabel("Close settings")
                     }
                 }
-                .padding(.horizontal, 24).padding(.top, 18).padding(.bottom, 12)
-                .background(ThemeState.animated ? AnyShapeStyle(Color.clear) : AnyShapeStyle(.ultraThinMaterial))
-                .overlay(alignment: .bottom) { Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 0.5) }
+                .padding(.trailing, 14).padding(.top, 6)
+                .frame(maxWidth: .infinity, alignment: .trailing)
                 .id(panel.rawValue)
             }
             .frame(maxWidth: .infinity)
@@ -260,12 +258,13 @@ extension MacSettingsView {
                     ForEach(found.prefix(8)) { entry in
                         Button {
                             selected = entry.mac
+                            model.settingsReveal = SettingsIndex.macSection(for: entry).map { SettingsReveal(section: $0) }
                             query = ""
                         } label: {
                             HStack {
                                 Text(entry.title).lineLimit(1)
                                 Spacer()
-                                Text((SettingsPanel(rawValue: entry.mac) ?? .general).title).font(.caption).foregroundStyle(.secondary)
+                                Text((SettingsPanel(rawValue: entry.mac) ?? .general).title).settingsNote()
                             }
                             .padding(.horizontal, 10).frame(height: 28).contentShape(Rectangle())
                         }
@@ -289,7 +288,10 @@ struct SettingsPanelView: View {
     var body: some View {
         Form { content }
             .formStyle(.grouped)
+            .settingsPaneLayout()
             .themedSurface()
+            .onAppear { reveal() }
+            .onChange(of: model.settingsReveal) { _, _ in reveal() }
             .accessibilityElement(children: .contain)
             .accessibilityLabel(panel.title)
             .accessibilityIdentifier("settings-\(panel.rawValue)")
@@ -298,87 +300,111 @@ struct SettingsPanelView: View {
             .motion(.easeOut(duration: 0.22), value: model.extensionCenter.extensions.count)
     }
 
+    /// Scrolls to the section a search result asked for. A pane lays its rows out a moment after it appears (and a window a moment after it opens), so the scroll is tried
+    /// again a few times; the request is forgotten once it has run.
+    private func reveal() {
+        guard let request = model.settingsReveal else { return }
+        Task { @MainActor in
+            for delay in [150, 400, 900] {
+                try? await Task.sleep(for: .milliseconds(delay))
+                guard model.settingsReveal == request else { return }
+                let found = SettingsAnchors.reveal(request.section)
+                #if DEBUG
+                WallpaperDebug.log("SETTINGS reveal \(request.section) after \(delay) ms found=\(found)")
+                #endif
+            }
+            if model.settingsReveal == request { model.settingsReveal = nil }
+        }
+    }
+
     @ViewBuilder private var content: some View {
         switch panel {
         case .general:
-            DefaultBrowserSection()
-            StartupSettingsSection()
-            StartPageSettingsSection()
-            DownloadsSettingsSection()
-            SyncSection()
+            DefaultBrowserSection().settingsAnchor("DefaultBrowserSection")
+            StartupSettingsSection().settingsAnchor("StartupSettingsSection")
+            StartPageSettingsSection().settingsAnchor("StartPageSettingsSection")
+            SyncSection().settingsAnchor("SyncSection")
         case .appearance:
-            AppearanceSettingsSection()
-            DarkPagesSection()
+            AppearanceSettingsSection().settingsAnchor("AppearanceSettingsSection")
+            DarkPagesSection().settingsAnchor("DarkPagesSection")
         case .tabs:
-            TabPositionSection()
-            TabsSettingsSection()
-            TabHoverAndStacksSection()
-            SidebarFooterSection()
-            DockedPanelsSection()
-            SplitAndWindowSettingsSection()
-            WorkspacesSettingsSection()
-            FocusScheduleSection()
-            WebPanelsSection()
-            ContextMenusSection()
+            TabPositionSection().settingsAnchor("TabPositionSection")
+            TabsSettingsSection().settingsAnchor("TabsSettingsSection")
+            TabHoverAndStacksSection().settingsAnchor("TabHoverAndStacksSection")
+            SidebarFooterSection().settingsAnchor("SidebarFooterSection")
+            DockedPanelsSection().settingsAnchor("DockedPanelsSection")
+            SplitAndWindowSettingsSection().settingsAnchor("SplitAndWindowSettingsSection")
+            WorkspacesSettingsSection().settingsAnchor("WorkspacesSettingsSection")
+            FocusScheduleSection().settingsAnchor("FocusScheduleSection")
+            WebPanelsSection().settingsAnchor("WebPanelsSection")
+            ContextMenusSection().settingsAnchor("ContextMenusSection")
         case .search:
-            SearchSettingsSection()
-            AddressSourcesSection()
-            AddressBarButtonsSection()
-            SearchShortcutsSection()
+            SearchSettingsSection().settingsAnchor("SearchSettingsSection")
+            AddressSourcesSection().settingsAnchor("AddressSourcesSection")
+            AddressBarButtonsSection().settingsAnchor("AddressBarButtonsSection")
+            SearchShortcutsSection().settingsAnchor("SearchShortcutsSection")
+            MenuBarSearchSettingsSection().settingsAnchor("MenuBarSearchSettingsSection")
+        case .downloads:
+            DownloadsSettingsSection().settingsAnchor("DownloadsSettingsSection")
         case .privacy:
-            VayuLevelSection(privacy: model.privacy)
-            SecurityFactsSection()
-            ThreatListSection()
-            ProxySection()
-            PageDefensesSection()
-            SafetySettingsSection()
-            VayuSetuSection()
-            SensitiveLockSection()
-            ClearOnQuitSection()
-            PageMemorySection()
-            SearchableCopySection()
-            BrowsingDataSection()
+            VayuLevelSection(privacy: model.privacy).settingsAnchor("VayuLevelSection")
+            PrivacyPresetSection().settingsAnchor("PrivacyPresetSection")
+            SecurityFactsSection().settingsAnchor("SecurityFactsSection")
+            ThreatListSection().settingsAnchor("ThreatListSection")
+            ProxySection().settingsAnchor("ProxySection")
+            PageDefensesSection().settingsAnchor("PageDefensesSection")
+            SafetySettingsSection().settingsAnchor("SafetySettingsSection")
+            VayuSetuSection().settingsAnchor("VayuSetuSection")
+            SensitiveLockSection().settingsAnchor("SensitiveLockSection")
+            ClearOnQuitSection().settingsAnchor("ClearOnQuitSection")
+            PageMemorySection().settingsAnchor("PageMemorySection")
+            SearchableCopySection().settingsAnchor("SearchableCopySection")
+            BrowsingDataSection().settingsAnchor("BrowsingDataSection")
         case .ai:
-            AISettingsSection()
+            AISettingsSection().settingsAnchor("AISettingsSection")
         case .websites:
-            SitePermissionsSection()
-            PopupSettingsSection()
-            SavedSignInsSection()
-            PasswordsInfoSection()
-            AddressesSection()
-            PermissionActivitySection()
-            SiteZoomSection()
-            GlobalStyleSection()
-            WebsiteDataSection()
+            SitePermissionsSection().settingsAnchor("SitePermissionsSection")
+            PopupSettingsSection().settingsAnchor("PopupSettingsSection")
+            SavedSignInsSection().settingsAnchor("SavedSignInsSection")
+            PasswordsInfoSection().settingsAnchor("PasswordsInfoSection")
+            AddressesSection().settingsAnchor("AddressesSection")
+            PermissionActivitySection().settingsAnchor("PermissionActivitySection")
+            SiteZoomSection().settingsAnchor("SiteZoomSection")
+            GlobalStyleSection().settingsAnchor("GlobalStyleSection")
+            WebsiteDataSection().settingsAnchor("WebsiteDataSection")
         case .profiles:
-            ProfileSettingsSection()
+            ProfileSettingsSection().settingsAnchor("ProfileSettingsSection")
         case .performance:
-            MemorySettingsSection()
-            NeverSleepSection()
-            ResourceMonitorSection()
+            MemorySettingsSection().settingsAnchor("MemorySettingsSection")
+            NeverSleepSection().settingsAnchor("NeverSleepSection")
+            ResourceMonitorSection().settingsAnchor("ResourceMonitorSection")
         case .extensions:
-            ExtensionsSettingsSection()
-            RemoteExtensionsSection()
-            UserScriptsSection()
+            ExtensionsSettingsSection().settingsAnchor("ExtensionsSettingsSection")
+            RemoteExtensionsSection().settingsAnchor("RemoteExtensionsSection")
+            UserScriptsSection().settingsAnchor("UserScriptsSection")
+            SponsorBlockSection().settingsAnchor("SponsorBlockSection")
+            WebAppsSection().settingsAnchor("WebAppsSection")
+            EnhancementsSection().settingsAnchor("EnhancementsSection")
         case .shortcuts:
-            ShortcutsSettingsSection()
+            ShortcutsSettingsSection().settingsAnchor("ShortcutsSettingsSection")
         case .advanced:
-            AdvancedSettingsSection()
-            BreakAndPageActionsSection()
-            CommandChainsSection()
-            GesturesSection()
-            HealthCheckSection()
+            AdvancedSettingsSection().settingsAnchor("AdvancedSettingsSection")
+            BreakAndPageActionsSection().settingsAnchor("BreakAndPageActionsSection")
+            CommandChainsSection().settingsAnchor("CommandChainsSection")
+            GesturesSection().settingsAnchor("GesturesSection")
+            HealthCheckSection().settingsAnchor("HealthCheckSection")
             #if DIRECT_BUILD
-            UpdatesSettingsSection()
+            UpdatesSettingsSection().settingsAnchor("UpdatesSettingsSection")
             #endif
-            MediaCompatibilitySection()
-            LinkCleaningSection()
-            SiteIconsSection()
-            BookmarkTransferSection()
-            ImportExportSection()
-            BackupSection()
-            RecoverySection()
-            AboutSection()
+            MediaCompatibilitySection().settingsAnchor("MediaCompatibilitySection")
+            LinkCleaningSection().settingsAnchor("LinkCleaningSection")
+            PageExtrasSection().settingsAnchor("PageExtrasSection")
+            SiteIconsSection().settingsAnchor("SiteIconsSection")
+            BookmarkTransferSection().settingsAnchor("BookmarkTransferSection")
+            ImportExportSection().settingsAnchor("ImportExportSection")
+            BackupSection().settingsAnchor("BackupSection")
+            RecoverySection().settingsAnchor("RecoverySection")
+            AboutSection().settingsAnchor("AboutSection")
         }
     }
 }
@@ -412,7 +438,7 @@ struct TabPositionSection: View {
             Text(model.layoutPreset == .custom
                  ? "This is your own layout. The Appearance panel has the ready-made ones."
                  : "The \(model.layoutPreset.title) layout decides where the tabs go. To set it yourself, choose Custom in the Appearance panel.")
-                .font(.caption).foregroundStyle(.secondary)
+                .settingsNote()
         }
     }
 }
@@ -445,4 +471,64 @@ private struct SettingsWindowGuard: NSViewRepresentable {
 
     func makeNSView(context: Context) -> Anchor { let view = Anchor(); view.enabled = enabled; return view }
     func updateNSView(_ view: Anchor, context: Context) { view.enabled = enabled; view.check() }
+}
+
+
+// MARK: - Finding a section on screen
+
+extension View {
+    /// Marks a section of a Settings pane so a search result can scroll to it.
+    func settingsAnchor(_ name: String) -> some View { background(SettingsAnchorMarker(name: name)) }
+}
+
+/// An invisible AppKit view placed behind a section. The pane's own scroll view cannot be asked to scroll to a SwiftUI id (a grouped Form ignores it), so the section is found
+/// by where its marker actually is, and that scroll view is moved to it.
+private struct SettingsAnchorMarker: NSViewRepresentable {
+    let name: String
+    func makeNSView(context: Context) -> SettingsAnchorView { SettingsAnchorView(name: name) }
+    func updateNSView(_ view: SettingsAnchorView, context: Context) { view.name = name }
+}
+
+final class SettingsAnchorView: NSView {
+    var name: String
+    init(name: String) { self.name = name; super.init(frame: .zero) }
+    required init?(coder: NSCoder) { fatalError("not used") }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); if window != nil { SettingsAnchors.views.add(self) } }
+}
+
+@MainActor
+enum SettingsAnchors {
+    static let views = NSHashTable<SettingsAnchorView>.weakObjects()
+
+    /// Scrolls the pane that holds the section called `name` so the section starts at the top. Returns whether it was found. (A section is a few rows, each with a marker; the top one counts.)
+    @discardableResult
+    static func reveal(_ name: String) -> Bool {
+        #if DEBUG
+        let all = views.allObjects
+        WallpaperDebug.log("SETTINGS anchors: \(all.count) registered, \(all.filter { $0.window != nil }.count) in a window, \(all.filter { $0.enclosingScrollView != nil }.count) in a scroll view; names \(Set(all.map(\.name)).sorted())")
+        #endif
+        let candidates = views.allObjects.filter { $0.name == name && $0.window != nil && $0.enclosingScrollView != nil }
+        guard let scroll = candidates.first?.enclosingScrollView, let document = scroll.documentView else { return false }
+        let inThisPane = candidates.filter { $0.enclosingScrollView === scroll }
+        let frames = inThisPane.map { $0.convert($0.bounds, to: document) }
+        let clip = scroll.contentView
+        let margin: CGFloat = 14
+        let target: CGFloat
+        if document.isFlipped {
+            guard let top = frames.map(\.minY).min() else { return false }
+            target = top - margin - scroll.contentInsets.top
+        } else {
+            guard let top = frames.map(\.maxY).max() else { return false }
+            target = top + margin - clip.bounds.height
+        }
+        let limit = max(0, document.frame.height - clip.bounds.height)
+        let y = min(max(target, -scroll.contentInsets.top), limit)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.25
+            clip.animator().setBoundsOrigin(NSPoint(x: clip.bounds.origin.x, y: y))
+        }
+        scroll.reflectScrolledClipView(clip)
+        return true
+    }
 }

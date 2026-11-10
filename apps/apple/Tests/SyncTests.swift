@@ -62,8 +62,8 @@ final class SyncModelTests: XCTestCase {
         try mac.core.addBookmark(url: "https://from-mac.test", title: "Mac", folder: "")
         try phone.core.addBookmark(url: "https://from-phone.test", title: "Phone", folder: "")
         // The Mac sends first and the phone answers with its own, as the link does.
-        let reply = try XCTUnwrap(phone.receiveWiFiSnapshot(try XCTUnwrap(mac.wifiSnapshot())))
-        mac.finishWiFiSync(reply: reply, deviceName: "Phone")
+        let reply = try XCTUnwrap(phone.mergeWiFiSnapshot(try XCTUnwrap(mac.wifiSnapshot())))
+        mac.mergeWiFiReply(try JSONDecoder().decode(BackupPayload.self, from: reply), deviceName: "Phone")
         for m in [mac, phone] {
             XCTAssertTrue(try m.core.isBookmarked(url: "https://from-mac.test"))
             XCTAssertTrue(try m.core.isBookmarked(url: "https://from-phone.test"))
@@ -76,10 +76,10 @@ final class SyncModelTests: XCTestCase {
         try a.core.setSetting(key: "accent", value: "green")
         try a.core.setSetting(key: "layout_preset", value: "sidebar")
         b.syncSettingsToo = false
-        _ = b.receiveWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
+        _ = b.mergeWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
         XCTAssertNil(try b.core.getSetting(key: "accent"), "off means nothing is applied")
         b.syncSettingsToo = true
-        _ = b.receiveWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
+        _ = b.mergeWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
         XCTAssertEqual(try b.core.getSetting(key: "accent"), "green")
         XCTAssertNotEqual(try b.core.getSetting(key: "layout_preset"), "sidebar", "layout stays on its own device")
     }
@@ -89,7 +89,7 @@ final class SyncModelTests: XCTestCase {
         await a.start(); await b.start()
         a.openTab(url: URL(string: "https://reading.test/page"), isPrivate: false)
         a.openTab(url: URL(string: "https://secret.test/"), isPrivate: true)
-        _ = b.receiveWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
+        _ = b.mergeWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
         let listed = b.remoteTabs.flatMap(\.tabs).map(\.url)
         XCTAssertTrue(listed.contains("https://reading.test/page"))
         XCTAssertFalse(listed.contains("https://secret.test/"), "private tabs are never shared")
@@ -102,12 +102,12 @@ final class SyncModelTests: XCTestCase {
         let a = model(), b = model()
         await a.start(); await b.start()
         try a.core.addBookmark(url: "https://shared.test", title: "Shared", folder: "")
-        _ = b.receiveWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
+        _ = b.mergeWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
         XCTAssertTrue(try b.core.isBookmarked(url: "https://shared.test"))
         try a.core.removeBookmark(url: "https://shared.test")                    // removed on the first device
-        _ = b.receiveWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
+        _ = b.mergeWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
         XCTAssertFalse(try b.core.isBookmarked(url: "https://shared.test"), "the deletion travels instead of the bookmark coming back")
-        _ = a.receiveWiFiSnapshot(try XCTUnwrap(b.wifiSnapshot()))
+        _ = a.mergeWiFiSnapshot(try XCTUnwrap(b.wifiSnapshot()))
         XCTAssertFalse(try a.core.isBookmarked(url: "https://shared.test"), "and it does not return when the other device syncs back")
     }
 
@@ -116,12 +116,12 @@ final class SyncModelTests: XCTestCase {
         await a.start(); await b.start()
         try a.core.addBookmark(url: "https://page.test", title: "Old", folder: "")
         let first = try XCTUnwrap(a.wifiSnapshot())
-        _ = b.receiveWiFiSnapshot(first)
+        _ = b.mergeWiFiSnapshot(first)
         try a.core.removeBookmark(url: "https://page.test")
         try a.core.addBookmark(url: "https://page.test", title: "New", folder: "")
-        _ = b.receiveWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
+        _ = b.mergeWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
         XCTAssertEqual(try b.core.listBookmarks(query: "").first { $0.url == "https://page.test" }?.title, "New")
-        _ = b.receiveWiFiSnapshot(first)                                         // the old copy is delivered late
+        _ = b.mergeWiFiSnapshot(first)                                         // the old copy is delivered late
         XCTAssertEqual(try b.core.listBookmarks(query: "").first { $0.url == "https://page.test" }?.title, "New", "a late, older copy cannot undo the edit")
     }
 
@@ -129,10 +129,10 @@ final class SyncModelTests: XCTestCase {
         let a = model(), b = model()
         await a.start(); await b.start()
         a.createWorkspace("Research", icon: "book")
-        _ = b.receiveWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
+        _ = b.mergeWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
         XCTAssertEqual(b.workspaces.first { $0.name == "Research" }?.icon, "book")
         a.deleteWorkspace("Research")
-        _ = b.receiveWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
+        _ = b.mergeWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
         XCTAssertNil(b.workspaces.first { $0.name == "Research" }, "deleting a workspace travels too")
     }
 
@@ -164,12 +164,12 @@ final class SessionSyncTests: XCTestCase {
         let a = model(), b = model()
         await a.start(); await b.start()
         a.setSavedSessions([SavedSession(name: "Reading", tabs: [SavedSession.Tab(url: "https://a.test/x", title: "A", pinned: false, scroll: 0.4)], workspace: "")])
-        _ = b.receiveWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
+        _ = b.mergeWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
         XCTAssertEqual(b.savedSessions.first?.name, "Reading")
         XCTAssertEqual(b.savedSessions.first?.tabs.first?.scroll, 0.4, "the place on the page travels with it")
         let session = try XCTUnwrap(a.savedSessions.first)
         a.deleteSession(session)
-        _ = b.receiveWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
+        _ = b.mergeWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
         XCTAssertTrue(b.savedSessions.isEmpty)
     }
 
@@ -177,7 +177,7 @@ final class SessionSyncTests: XCTestCase {
         let a = model(), b = model()
         await a.start(); await b.start()
         a.setSavedSessions([SavedSession(name: "Mixed", tabs: [SavedSession.Tab(url: "javascript:alert(1)", title: "x", pinned: false), SavedSession.Tab(url: "https://ok.test/", title: "ok", pinned: false)])])
-        _ = b.receiveWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
+        _ = b.mergeWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
         XCTAssertEqual(b.savedSessions.first?.tabs.map(\.url), ["https://ok.test/"])
     }
 

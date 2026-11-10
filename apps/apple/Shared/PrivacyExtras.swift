@@ -65,6 +65,11 @@ struct PrivacyDashboardView: View {
                     LabeledContent("Connection", value: (model.active?.isSecure ?? false) ? "Encrypted (https)" : "Not encrypted")
                     LabeledContent("Protection", value: privacy.state(forHost: host).statusWord)
                 }
+                Section("Cookie banners") { SiteConsentRows(host: host) }
+                if model.sponsorBlockEnabled { Section("SponsorBlock") { SiteSponsorRows(host: host) } }
+                if !model.userScripts(matching: model.active?.url).isEmpty {
+                    Section("Scripts on this site") { SiteScriptsList(url: model.active?.url) }
+                }
             }
             Section("Cleaned for you") {
                 LabeledContent("Tracking parameters removed from links", value: "\(model.strippedLinkCount) this session")
@@ -77,7 +82,7 @@ struct PrivacyDashboardView: View {
             } header: {
                 Text("What can connect out")
             } footer: {
-                Text("Besides the sites you open, these are the only things the browser contacts. Nothing is collected or sent about you, and private tabs use none of them.")
+                Text("Besides the sites you open, these are the only things the browser contacts. Nothing is collected or sent about you, and private tabs use none of them. A script you installed contacts a website only if you gave that script that permission, or when you press Check for Update or Install from a Link.")
             }
             Section("Stored on this device") {
                 LabeledContent("Sites with a saved camera or microphone decision", value: "\(permissionSites)")

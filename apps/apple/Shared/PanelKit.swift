@@ -161,30 +161,23 @@ struct PanelRow<Leading: View, Trailing: View>: View {
     }
 }
 
-/// The same row's end buttons, shown on hover on a Mac and always on a phone.
-struct PanelActions<Content: View>: View {
-    @ViewBuilder var content: Content
-    var body: some View {
-        HStack(spacing: 6) { content }
-            .buttonStyle(.borderless)
-            .font(.system(size: 12))
-            .foregroundStyle(.secondary)
-    }
-}
-
 struct PanelEmpty: View {
     let symbol: String
     let title: String
     var detail: String?
+    /// An optional way out of an empty panel (for example, importing what the other browser had).
+    var actionTitle: String? = nil
+    var action: (() -> Void)? = nil
 
     var body: some View {
         VStack(spacing: 10) {
             Image(systemName: symbol).font(.system(size: 34, weight: .light)).foregroundStyle(Theme.accent.opacity(0.8))
             Text(title).font(.system(size: 16, weight: .semibold))
             if let detail { Text(detail).font(.system(size: 12.5)).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 320) }
+            if let actionTitle, let action { Button(actionTitle, action: action).padding(.top, 4) }
         }
         .frame(maxWidth: .infinity).padding(.vertical, 60)
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: actionTitle == nil ? .combine : .contain)
     }
 }
 

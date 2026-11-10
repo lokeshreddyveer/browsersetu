@@ -6,6 +6,21 @@ import SwiftUI
 /// Groups nest by writing the parent in the name: "Work/Project A" is the group "Project A" inside "Work".
 enum GroupPath {
     static let separator: Character = "/"
+    /// How many levels a group path may have ("A/B/C/D/E" is five). A deeper tree is not readable in a sidebar.
+    static let maxLevels = 5
+
+    /// A path that can be a group: one to `maxLevels` parts, none of them empty (no "A//B", no leading or trailing "/").
+    static func isValid(_ name: String) -> Bool {
+        let all = name.split(separator: separator, omittingEmptySubsequences: false)
+        return !all.isEmpty && all.count <= maxLevels && all.allSatisfy { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+    }
+
+    /// Why a group of this name cannot be made, or nil when it can.
+    static func problem(_ name: String) -> String? {
+        let all = name.split(separator: separator, omittingEmptySubsequences: false)
+        if all.count > maxLevels { return "Groups can be nested up to \(maxLevels) levels deep." }
+        return isValid(name) ? nil : "A group name cannot be empty, or start or end with “/”."
+    }
 
     static func parts(_ name: String) -> [String] { name.split(separator: separator).map(String.init) }
     static func depth(_ name: String) -> Int { max(0, parts(name).count - 1) }

@@ -183,14 +183,16 @@ final class PolicyTests: XCTestCase {
         ||ads.example.org/banner/*$image,third-party
         example.org##.sponsored
         example.org#?#div:-abp-has(.x)
-        /regex-rule/
+        /\\bregex-rule\\b/
         ||tracker.example.net^$redirect=1x1.gif
         ||plain-ads.example.net^
         """
         let snapshot = PolicyBuilder.build(configuration: config, downloaded: [url: Data(text.utf8)])!
         XCTAssertEqual(snapshot.urlBlockRules, 1)
         XCTAssertEqual(snapshot.elementHidingRules, 1)
-        XCTAssertGreaterThanOrEqual(snapshot.unsupportedRules, 3)
+        XCTAssertEqual(snapshot.unsupportedRules, 2, "a regex WebKit cannot express and a redirect; the procedural :-abp-has rule is now run by the page script")
+        XCTAssertEqual(snapshot.scriptRules.procedural.count, 1)
+        XCTAssertEqual(snapshot.diagnostics.compactMap { $0.reasons[FilterClassifier.regexTooComplex] }.first, 1)
         XCTAssertFalse(try filters(snapshot).contains { $0.contains("regex-rule") }, "regex rules must not be approximated")
         XCTAssertFalse(try filters(snapshot).contains { $0.contains("tracker\\.example\\.net") }, "redirect rules must not become plain blocks")
     }

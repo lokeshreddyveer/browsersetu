@@ -1,3 +1,4 @@
+import Charts
 import Foundation
 import SwiftUI
 #if canImport(FoundationModels)
@@ -121,6 +122,18 @@ struct SiteTimeLog: Codable, Equatable {
     /// Seconds by site, by day ("2026-10-19").
     var days: [String: [String: Double]] = [:]
     static let keepDays = 30
+    /// How long the days are kept. Set by the person; 0 keeps them until they are cleared.
+    static let retentionChoices = [7, 30, 90, 365, 0]
+    /// A person with no sign of life for this long is not counted (a coffee, a call, a locked screen).
+    static let idleLimit: TimeInterval = 120
+
+    /// Forgets the days older than `days` (0 keeps all).
+    mutating func prune(keepingDays days: Int, now: Date = Date(), calendar: Calendar = .current) {
+        guard days > 0, let cutoff = calendar.date(byAdding: .day, value: -days, to: now) else { return }
+        let first = Self.day(cutoff, calendar: calendar)
+        for key in days_keys() where key < first { self.days[key] = nil }
+    }
+    private func days_keys() -> [String] { Array(days.keys) }
 
     static func day(_ date: Date = Date(), calendar: Calendar = .current) -> String {
         let c = calendar.dateComponents([.year, .month, .day], from: date)
@@ -130,7 +143,6 @@ struct SiteTimeLog: Codable, Equatable {
     mutating func add(seconds: Double, host: String, on date: Date = Date()) {
         guard seconds > 0, seconds <= 120, !host.isEmpty else { return }
         days[Self.day(date), default: [:]][host, default: 0] += seconds
-        if days.count > Self.keepDays { for key in days.keys.sorted().prefix(days.count - Self.keepDays) { days[key] = nil } }
     }
 
     func sites(on date: Date = Date()) -> [(host: String, seconds: Double)] {
@@ -138,6 +150,18 @@ struct SiteTimeLog: Codable, Equatable {
     }
 
     func total(on date: Date = Date()) -> Double { (days[Self.day(date)] ?? [:]).values.reduce(0, +) }
+
+    /// The last `days` days, oldest first.
+    func recent(days count: Int, endingOn date: Date = Date(), calendar: Calendar = .current) -> [(day: String, seconds: Double)] {
+        (0..<count).reversed().compactMap { calendar.date(byAdding: .day, value: -$0, to: date) }.map { (Self.day($0, calendar: calendar), (days[Self.day($0, calendar: calendar)] ?? [:]).values.reduce(0, +)) }
+    }
+
+    /// The sites with the most time over the last `days` days.
+    func topSites(days count: Int, endingOn date: Date = Date(), calendar: Calendar = .current) -> [(host: String, seconds: Double)] {
+        var totals: [String: Double] = [:]
+        for offset in 0..<count { if let d = calendar.date(byAdding: .day, value: -offset, to: date) { for (host, seconds) in days[Self.day(d, calendar: calendar)] ?? [:] { totals[host, default: 0] += seconds } } }
+        return totals.map { ($0.key, $0.value) }.sorted { $0.1 > $1.1 }
+    }
 
     /// The last seven days, oldest first.
     func week(endingOn date: Date = Date(), calendar: Calendar = .current) -> [(day: String, seconds: Double)] {
@@ -220,6 +244,13 @@ extension BrowserModel {
         guard feeds.count < 20 else { return "You can follow up to 20 feeds." }
         guard !feeds.contains(where: { $0.url == url.absoluteString }) else { return "You already follow that." }
         guard let result = await FeedFetcher.fetch(url) else { return "That address did not give a feed. Try the site's RSS or Atom address." }
+        return addFetchedFeed(url, result)
+    }
+
+    /// Follows a feed that was already fetched (several are fetched together when an OPML list is imported). Nil when it was added.
+    func addFetchedFeed(_ url: URL, _ result: (title: String, items: [FeedItem])) -> String? {
+        guard feeds.count < 20 else { return "You can follow up to 20 feeds." }
+        guard !feeds.contains(where: { $0.url == url.absoluteString }) else { return "You already follow that." }
         feeds.append(Feed(url: url.absoluteString, title: result.title.isEmpty ? (url.host ?? url.absoluteString) : result.title))
         saveFeeds()
         feedItems = merge(feedItems.filter { $0.feed != url.absoluteString }, result.items)
@@ -263,14 +294,17 @@ extension BrowserModel {
     /// Called with the background check. Adds the time since the last call to the site in front, only while the app is in front and the tab is not private.
     func trackSiteTime(now: Date = Date()) {
         defer { lastTimeTick = now }
-        guard trackTime, !isSecondary, let tab = active, !tab.isPrivate, !tab.isBlank, let host = tab.url?.host else { breakStart = nil; return }
+        guard trackTime, !isSecondary, let tab = active, tab.privacy.canRecordActivity, !tab.isBlank, let host = tab.url?.host else { breakStart = nil; return }
         #if os(macOS)
-        guard NSApp.isActive else { breakStart = nil; return }
+        // In front, and the person has touched the keyboard, mouse or trackpad lately: a locked screen or a walk away is not counted.
+        guard NSApp.isActive, Self.systemIdleSeconds() < SiteTimeLog.idleLimit else { breakStart = nil; return }
         #else
-        guard UIApplication.shared.applicationState == .active else { breakStart = nil; return }
+        // In front, and the person has done something in the browser lately. Only what Browser Setu itself can see: nothing about other apps.
+        guard UIApplication.shared.applicationState == .active, now.timeIntervalSince(lastInteraction) < SiteTimeLog.idleLimit else { breakStart = nil; return }
         #endif
         let key = FaviconStore.key(forHost: host) ?? host
         siteTimeLog.add(seconds: now.timeIntervalSince(lastTimeTick), host: key, on: now)
+        siteTimeLog.prune(keepingDays: siteTimeRetentionDays, now: now)
         timeTicks += 1
         if timeTicks % 12 == 0, let data = try? JSONEncoder().encode(siteTimeLog), let text = String(data: data, encoding: .utf8) { saveSetting("site_time", text) }
         if breakSite != key { breakSite = key; breakStart = now }
@@ -282,10 +316,29 @@ extension BrowserModel {
 
     func clearSiteTime() { siteTimeLog = SiteTimeLog(); saveSetting("site_time", "{\"days\":{}}") }
 
+    /// Seconds since the last keyboard, mouse or trackpad event on this Mac.
+    static func systemIdleSeconds() -> TimeInterval {
+        #if os(macOS)
+        return CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: ~0)!)
+        #else
+        return 0
+        #endif
+    }
+
+    /// The person did something in a page or the browser (iPhone: the only sign of life there is). Cheap: one date.
+    func noteInteraction() { lastInteraction = Date() }
+
+    func setSiteTimeRetention(_ days: Int) {
+        siteTimeRetentionDays = days
+        saveSetting("site_time_days", String(days))
+        siteTimeLog.prune(keepingDays: days)
+        if let data = try? JSONEncoder().encode(siteTimeLog), let text = String(data: data, encoding: .utf8) { saveSetting("site_time", text) }
+    }
+
     // MARK: Clipboard
 
     func recordCopy(_ text: String) {
-        guard keepClipboardHistory, !(active?.isPrivate ?? false) else { return }
+        guard keepClipboardHistory, active?.privacy.canRecordClipboard ?? true else { return }
         clipboardHistory = ClipboardRules.adding(text, to: clipboardHistory, keepFor: 24 * 3600)
     }
 }
@@ -299,6 +352,10 @@ struct ToolkitView: View {
     @State private var newFeed = ""
     @State private var feedProblem: String?
     @State private var adding = false
+    @State private var onPage: [FoundFeed]?
+    @State private var importing = false
+    @State private var exporting = false
+    @State private var feedNote: String?
     @State private var question = ""
     @State private var answer: String?
     @State private var asking = false
@@ -322,16 +379,37 @@ struct ToolkitView: View {
     }
 
     private var feeds: some View {
-        List {
+        PanelList {
             Section {
                 HStack {
-                    TextField("Feed address, such as https://example.com/feed.xml", text: $newFeed).textFieldStyle(.roundedBorder).autocorrectionDisabled()
+                    FormTextField("Feed address, such as https://example.com/feed.xml", text: $newFeed).textFieldStyle(.roundedBorder).autocorrectionDisabled()
                     Button(adding ? "Adding…" : "Follow") {
                         adding = true
                         Task { feedProblem = await model.addFeed(newFeed); if feedProblem == nil { newFeed = "" }; adding = false }
                     }.disabled(newFeed.isEmpty || adding)
                 }
                 if let feedProblem { Text(feedProblem).font(.caption).foregroundStyle(.red) }
+                HStack {
+                    Button("Find Feeds on This Page") { Task { onPage = await model.feedsOnActivePage() } }
+                    Button("Import OPML…") { importing = true }
+                    Button("Export OPML…") { exporting = true }.disabled(model.feeds.isEmpty)
+                }
+                .buttonStyle(.borderless).font(.caption)
+                if let onPage {
+                    if onPage.isEmpty { Text("This page does not advertise a feed.").font(.caption).foregroundStyle(.secondary) }
+                    ForEach(onPage) { found in
+                        HStack {
+                            VStack(alignment: .leading) {
+                                Text(found.title.isEmpty ? (URL(string: found.url)?.host ?? found.url) : found.title).lineLimit(1)
+                                Text(found.url).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+                            }
+                            Spacer()
+                            Button("Follow") { Task { feedProblem = await model.addFeed(found.url); if feedProblem == nil { self.onPage?.removeAll { $0.id == found.id } } } }
+                                .buttonStyle(.borderless)
+                        }
+                    }
+                }
+                if let feedNote { Text(feedNote).font(.caption).foregroundStyle(.secondary) }
                 HStack {
                     Button(model.refreshingFeeds ? "Refreshing…" : "Refresh All") { Task { await model.refreshFeeds() } }.disabled(model.refreshingFeeds || model.feeds.isEmpty)
                     Spacer()
@@ -365,12 +443,23 @@ struct ToolkitView: View {
                 }
             }
         }
+        .motion(.easeOut(duration: 0.2), value: onPage)
+        .fileImporter(isPresented: $importing, allowedContentTypes: OPMLDocument.readableContentTypes + [.xml, .plainText]) { result in
+            guard case .success(let url) = result else { return }
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            guard let data = try? Data(contentsOf: url), data.count <= 1_000_000 else { feedNote = "That file could not be read."; return }
+            Task { feedNote = await model.importOPML(data) }
+        }
+        .fileExporter(isPresented: $exporting, document: OPMLDocument(text: model.opmlText), contentType: OPMLDocument.readableContentTypes[0], defaultFilename: "feeds") { result in
+            if case .failure = result { feedNote = "The list could not be saved." }
+        }
     }
 
     private var ask: some View {
-        List {
+        PanelList {
             Section {
-                TextField("Ask about the page you are on", text: $question).textFieldStyle(.roundedBorder).onSubmit { runAsk() }
+                FormTextField("Ask about the page you are on", text: $question).textFieldStyle(.roundedBorder).onSubmit { runAsk() }
                 Button(asking ? "Reading…" : "Ask") { runAsk() }.disabled(asking || question.isEmpty || (model.active?.isBlank ?? true))
                 if let answer { Text(answer).textSelection(.enabled) }
             } footer: { Text("Answered on this device from the text of the page in front. It can be wrong; check anything important on the page. Needs macOS 26 or iOS 26 with Apple Intelligence.") }
@@ -392,21 +481,40 @@ struct ToolkitView: View {
     }
 
     private var time: some View {
-        List {
+        PanelList {
             Section {
                 Toggle("Keep track of time on sites", isOn: $model.trackTime)
                 Picker("Remind me to take a break after", selection: $model.breakMinutes) {
                     Text("Never").tag(0); Text("20 minutes").tag(20); Text("30 minutes").tag(30); Text("45 minutes").tag(45); Text("60 minutes").tag(60)
                 }
-            } footer: { Text("Counts the seconds a page is in front while the app is in front. Private tabs are never counted. Kept on this device for 30 days.") }
+                if model.trackTime {
+                    Picker("Keep this for", selection: Binding(get: { model.siteTimeRetentionDays }, set: { model.setSiteTimeRetention($0) })) {
+                        ForEach(SiteTimeLog.retentionChoices, id: \.self) { Text($0 == 0 ? "Until I clear it" : $0 == 365 ? "1 year" : "\($0) days").tag($0) }
+                    }
+                }
+            } footer: {
+                #if os(macOS)
+                Text("Off until you turn it on. Counts the seconds a page is in front while Browser Setu is in front and you are using the keyboard or mouse (not while you are away or the screen is locked). Private tabs are never counted. Only the site and the seconds per day are kept, on this device.")
+                #else
+                Text("Off until you turn it on. Counts the seconds a page is in front while Browser Setu is open and you are using it. It only knows about Browser Setu: nothing about other apps. Private tabs are never counted. Only the site and the seconds per day are kept, on this device.")
+                #endif
+            }
             if model.trackTime {
                 Section("Today · \(SiteTimeLog.clock(model.siteTimeLog.total()))") {
                     let sites = model.siteTimeLog.sites()
                     if sites.isEmpty { Text("Nothing yet today.").foregroundStyle(.secondary) }
                     ForEach(sites.prefix(15), id: \.host) { LabeledContent($0.host, value: SiteTimeLog.clock($0.seconds)) }
                 }
-                Section("This Week") {
+                Section("The Last Two Weeks") {
+                    Chart(model.siteTimeLog.recent(days: 14), id: \.day) { entry in
+                        BarMark(x: .value("Day", String(entry.day.suffix(5))), y: .value("Minutes", entry.seconds / 60)).foregroundStyle(Theme.accent)
+                    }
+                    .frame(height: 120)
+                    .accessibilityLabel("Minutes on sites for each of the last 14 days")
                     ForEach(model.siteTimeLog.week(), id: \.day) { LabeledContent($0.day, value: SiteTimeLog.clock($0.seconds)) }
+                }
+                Section("Top Sites This Week") {
+                    ForEach(model.siteTimeLog.topSites(days: 7).prefix(8), id: \.host) { LabeledContent($0.host, value: SiteTimeLog.clock($0.seconds)) }
                 }
                 Section { Button("Clear Time Data", role: .destructive) { model.clearSiteTime() } }
             }
@@ -414,7 +522,7 @@ struct ToolkitView: View {
     }
 
     private var clipboard: some View {
-        List {
+        PanelList {
             Section {
                 Toggle("Remember what I copy from Browser Setu", isOn: $model.keepClipboardHistory)
             } footer: { Text("Only links, citations and text copied with Browser Setu's own Copy commands, for 24 hours, in memory only: it is gone when you quit. It never reads the system clipboard.") }

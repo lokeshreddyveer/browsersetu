@@ -51,7 +51,7 @@ struct HandoffModifier: ViewModifier {
     @ObservedObject var model: BrowserModel
     func body(content: Content) -> some View {
         let tab = model.active
-        let address = Continuity.handoffURL(isPrivate: tab?.isPrivate ?? true, isBlank: tab?.isBlank ?? true, url: tab?.url)
+        let address = Continuity.handoffURL(isPrivate: tab?.leavesNoTrace ?? true, isBlank: tab?.isBlank ?? true, url: tab?.url)      // a scratch tab is not handed to another device either
         return content
             .userActivity(Continuity.pageActivity, isActive: address != nil) { activity in
                 activity.webpageURL = address

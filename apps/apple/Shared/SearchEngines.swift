@@ -17,7 +17,9 @@ enum SearchEngines {
         SearchEngine(id: "ecosia", name: "Ecosia", template: "https://www.ecosia.org/search?q={}"),
         SearchEngine(id: "startpage", name: "Startpage", template: "https://www.startpage.com/do/search?q={}"),
         SearchEngine(id: "qwant", name: "Qwant", template: "https://www.qwant.com/?q={}"),
-        SearchEngine(id: "searxng", name: "SearXNG (searx.be)", template: "https://searx.be/search?q={}"),
+        SearchEngine(id: "mojeek", name: "Mojeek", template: "https://www.mojeek.com/search?q={}"),
+        SearchEngine(id: "kagi", name: "Kagi (needs an account)", template: "https://kagi.com/search?q={}"),
+        SearchEngine(id: "searxng", name: "SearXNG (public instance: searx.be)", template: "https://searx.be/search?q={}"),
     ]
 
     /// The engine a profile uses until the user picks another.

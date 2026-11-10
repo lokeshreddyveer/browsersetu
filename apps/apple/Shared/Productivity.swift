@@ -181,7 +181,7 @@ extension BrowserModel {
     func noteForActivePage() -> String { noteKey(for: active).flatMap { siteNotes[$0] } ?? "" }
 
     func setNoteForActivePage(_ text: String) {
-        guard let key = noteKey(for: active) else { return }
+        guard active?.leavesNoTrace != true, let key = noteKey(for: active) else { return }      // nothing typed in a private tab is saved
         var map = siteNotes
         let trimmed = String(text.prefix(5_000))
         if trimmed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { map[key] = nil } else if map[key] != nil || map.count < 300 { map[key] = trimmed }
@@ -199,7 +199,8 @@ extension BrowserModel {
 
     /// Saves (or with empty text, removes) the style sheet for the page's website and applies it now.
     func setStyleForActiveSite(_ css: String) {
-        guard let key = FaviconStore.key(forHost: active?.url?.host) else { return }
+        guard let tab = active, tab.privacy.canSaveSiteSettings else { notice = "A style is kept in your settings, so it can’t be saved from a tab that leaves nothing behind."; return }
+        guard let key = FaviconStore.key(forHost: tab.url?.host) else { return }
         var map = siteStyles
         let trimmed = String(css.prefix(20_000))
         if trimmed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { map[key] = nil } else if map[key] != nil || map.count < 100 { map[key] = trimmed }
@@ -268,9 +269,9 @@ struct ReadingListView: View {
     @State private var query = ""
 
     var body: some View {
-        List {
+        PanelList {
             Section {
-                TextField("Search saved articles", text: $query).autocorrectionDisabled()
+                FormTextField("Search saved articles", text: $query).autocorrectionDisabled()
                 Button("Add This Page to the Reading List") { Task { await model.addToReadingList() } }
                     .disabled(model.active?.isBlank ?? true)
             } footer: { Text("An article is kept on this device so it opens without a connection. Select text in a saved article, then choose Highlight Selection.") }
@@ -314,7 +315,7 @@ struct PageNoteView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(displayHost(model.active?.url) + (model.active?.url?.path ?? "")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-            TextEditor(text: $text).font(.body).frame(minHeight: 160)
+            TextEditor(text: $text).font(.body).frame(minHeight: 160).quietWritingToolsButton()
                 .overlay(alignment: .topLeading) { if text.isEmpty { Text("Write a note about this page…").foregroundStyle(.tertiary).padding(.top, 8).padding(.leading, 5).allowsHitTesting(false) } }
             Text("Saved on this device only, and shown again whenever you open this page.").font(.caption).foregroundStyle(.secondary)
         }

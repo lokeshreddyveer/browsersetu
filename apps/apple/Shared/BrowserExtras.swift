@@ -182,6 +182,8 @@ extension BrowserModel {
     func loadExtraSettings(_ get: (String) -> String?) {
         if let list = get("address_sources") { addressSources = list.split(separator: ",").compactMap { AddressSource(rawValue: String($0)) } }
         hoverPreviews = get("hover_previews") != "0"
+        hideSingleTabStrip = get("hide_single_tab_strip") == "1"
+        snapSidebarWidth = get("snap_sidebar_width") != "0"
         hoverDelay = Double(get("hover_delay") ?? "") ?? 0.6
         themeSchedule = Self.loadJSON(get("theme_schedule"), as: ThemeSchedule.self) ?? ThemeSchedule()
         chains = Self.loadJSON(get("command_chains"), as: [CommandChain].self) ?? []
@@ -199,6 +201,15 @@ extension BrowserModel {
         // `-BrowserSetuShowSetup YES` on the command line shows the questions once more without touching anything saved.
         let forced = UserDefaults.standard.bool(forKey: "BrowserSetuShowSetup")
         showSetup = !isSecondary && !scripted && (forced || get("setup_done") != "1")
+        // The film plays once, on a brand-new install, before the questions: not when setup was asked for again, not for an existing profile, not once seen or skipped.
+        let skipIntro = ProcessInfo.processInfo.environment["BS_SKIP_INTRO"] == "1"
+        showIntro = showSetup && !forced && !skipIntro && get("setup_done") != "1" && get("intro_done") != "1"
+        // A first installation always starts in dark appearance, whatever the system is set to. The choice is written once (so it stays until the person changes it, in the
+        // assistant or in Settings), and only for a profile that has never chosen and has not been through the assistant: a profile that already exists is never touched.
+        if !isSecondary, !scripted, get("appearance") == nil, get("setup_done") != "1" {
+            appearance = .dark
+            try? core.setSetting(key: "appearance", value: AppearanceMode.dark.rawValue)
+        }
         popupAllowedHosts = Set((get("popup_allowed_hosts") ?? "").split(separator: ",").map(String.init))
         startThemeSchedule()
     }
@@ -338,7 +349,7 @@ extension BrowserModel {
         for action in PageAction.allCases {
             items.append(.init(id: "page-action-\(action.rawValue)", title: "Page Action: \(action.title)", subtitle: "On this page", symbol: action.symbol, shortcut: "") { [self] in togglePageAction(action) })
         }
-        if let tab = active, let host = tab.url?.host?.lowercased(), !tab.isBlank {
+        if let tab = active, let host = tab.url?.host?.lowercased(), !tab.isBlank, !tab.isPrivate {
             let allowed = popupAllowedHosts.contains(host)
             items.append(.init(id: "popups-site", title: allowed ? "Stop Allowing Pop-ups for \(host)" : "Allow Pop-ups for \(host)", subtitle: "", symbol: "rectangle.on.rectangle", shortcut: "") { [self] in
                 if allowed { popupAllowedHosts.remove(host) } else { popupAllowedHosts.insert(host) }
@@ -426,10 +437,18 @@ extension BrowserModel {
     /// Lets this tab's site open windows without a click from now on, and opens the one that was just blocked.
     func allowPopups(in tab: TabController) {
         guard let host = tab.url?.host?.lowercased() else { return }
+        // A choice made in a private or scratch tab is not written down: the site's name would be left in the settings.
+        if tab.leavesNoTrace { openBlockedPopup(from: tab); notice = "Opened once. Pop-ups are not remembered for private tabs."; return }
         popupAllowedHosts.insert(host)
-        if let blocked = tab.blockedPopup, blocked.scheme == "http" || blocked.scheme == "https" { openTab(url: blocked, isPrivate: tab.isPrivate, opener: tab) }
-        tab.blockedPopup = nil
+        openBlockedPopup(from: tab)
         notice = "Pop-ups allowed for \(host)."
+    }
+
+    /// Opens the window that was blocked, as the tab that blocked it would have: same privacy, same container, same scratch kind.
+    func openBlockedPopup(from tab: TabController) {
+        defer { tab.blockedPopup = nil }
+        guard let blocked = tab.blockedPopup, blocked.scheme == "http" || blocked.scheme == "https" else { return }
+        _ = openTab(url: blocked, isPrivate: tab.isPrivate, opener: tab, container: tabMeta[tab.id]?.container, scratch: tabMeta[tab.id]?.scratch == true)
     }
 
     /// A window opened by a page's script (a sign-in, a payment, a share box): a tab joined to the page that opened it, so the two can talk.
@@ -483,7 +502,7 @@ private struct PopupBlockedCard: View {
             }
             Spacer(minLength: 6)
             if blocked.scheme == "http" || blocked.scheme == "https" {
-                Button("Open Once") { model.openTab(url: blocked, isPrivate: tab.isPrivate, opener: tab); tab.blockedPopup = nil }
+                Button("Open Once") { model.openBlockedPopup(from: tab) }
             }
             Button("Always Allow") { model.allowPopups(in: tab) }.tint(Theme.accent)
             Button { tab.blockedPopup = nil } label: { Image(systemName: "xmark") }.accessibilityLabel("Dismiss")
@@ -631,6 +650,10 @@ struct NoticeToast: View {
                 HStack(spacing: 10) {
                     Image(systemName: icon(for: text)).foregroundStyle(Theme.accent)
                     Text(text).font(.system(size: 13, weight: .medium)).fixedSize(horizontal: false, vertical: true)
+                    if let action = model.noticeUndo {
+                        Button(action.title) { let run = action.run; model.notice = nil; run() }
+                            .buttonStyle(.plain).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.accent)
+                    }
                     Button { model.notice = nil } label: { Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary) }
                         .buttonStyle(.plain).accessibilityLabel("Dismiss")
                 }
@@ -648,7 +671,8 @@ struct NoticeToast: View {
                 .task(id: text) {
                     AccessibilityNotification.Announcement(text).post()
                     // Long messages stay longer; a failure stays longest.
-                    let seconds = min(9.0, max(3.0, Double(text.count) / 14.0 + (isProblem(text) ? 2 : 0)))
+                    // A message with an Undo stays long enough to be read and acted on.
+                    let seconds = model.noticeUndo != nil ? 9.0 : min(9.0, max(3.0, Double(text.count) / 14.0 + (isProblem(text) ? 2 : 0)))
                     try? await Task.sleep(for: .seconds(seconds))
                     if model.notice == text { model.notice = nil }
                 }

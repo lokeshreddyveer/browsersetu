@@ -38,8 +38,14 @@ protocol TabEngineEvents: AnyObject {
     func engineLoadingChanged(isLoading: Bool, canGoBack: Bool, canGoForward: Bool)
     func engineProgress(_ progress: Double)
     func engineSecurityChanged(_ secure: Bool)
+    /// The page started or stopped using the camera or the microphone (a call, a recording), so the tab can say so.
+    func engineCaptureChanged(camera: Bool, microphone: Bool)
     func engineDidFinishLoading()
     func engineLoadFailed(url: URL?, description: String)
+    /// The same failure with the system's own evidence (the error's domain and code), which is what the error page is chosen from.
+    func engineLoadFailed(url: URL?, domain: String, code: Int, description: String)
+    /// The site answered the page load with an error status and sent nothing to show (a bare 404 or 503). A site's own error page is left alone: this is only for an empty one.
+    func engineHTTPFailure(url: URL?, status: Int)
     func engineProcessCrashed()
     func engineMouseGesturesEnabled() -> Bool
     /// Whether the page being opened may run scripts (the person can switch them off for a site, or for this one tab).
@@ -55,6 +61,9 @@ protocol TabEngineEvents: AnyObject {
     func engineLoginFieldFocused(origin: String?, usernameOnly: Bool)
     /// A password was typed (and a name with it); the sign-in has not been sent. Kept in memory so the person can save it from the page.
     func engineLoginTyped(origin: String, user: String, password: String)
+    /// DX-07: a media observation from a frame of the page (already checked; the frame's origin is the engine's, not the page's), and a committed navigation, after which earlier observations are void.
+    func engineMediaObserved(_ observation: MediaObservation)
+    func engineMediaNavigated()
     /// A script asked for a new window and the person had just clicked or typed: the new page, connected to this one. Nil if none could be made.
     func engineOpenPopup(configuration: AnyObject) -> TabEngine?
     /// A script asked for a new window with no click or key press behind it, and it was not opened.
@@ -65,6 +74,13 @@ protocol TabEngineEvents: AnyObject {
     func enginePopupsAllowedWithoutGesture() -> Bool
     /// A choice from the page's link menu.
     func engineLinkAction(_ url: URL, _ action: LinkAction)
+    /// The page's right-click menu asked for the Downloads window; the window that owns the page opens it.
+    func engineShowDownloads()
+    /// The person clicked a magnet or eD2k link. true if the browser handled it (nothing more happens in the page).
+    func engineCustomLink(_ url: URL, linkActivated: Bool) -> Bool
+    /// A choice from the extra part of the page's right-click menu, and whether that part is switched on.
+    func enginePageMenuAction(_ action: PageMenuAction, target: PageMenuTarget)
+    func enginePageMenuEnabled() -> Bool
     /// A typed character while no text field has the keyboard. True means the browser acted on it.
     func engineVimKey(_ key: String) -> Bool
     /// Synchronous: engines must not start the navigation until this returns.
@@ -76,8 +92,11 @@ protocol TabEngineEvents: AnyObject {
     func engineThemeColorChanged(_ tint: PageTint?)
     /// The user scrolled the page. Positive moves the page toward its top, negative further down.
     func engineScrolled(deltaY: Double)
+    /// How far down the page now is, in screens, with how far it just moved (positive toward the top). Only the person's own scrolling reports this.
+    func engineScrollPosition(screens: Double, deltaY: Double)
     /// The page named these icon addresses, best first (read in the engine; none if it named none).
-    func engineIconsFound(_ urls: [URL])
+    /// The icons a page declared, read when it finished loading. `page` is the address those links were read from, captured then, not whatever the tab shows later.
+    func engineIconsFound(_ candidates: [IconCandidate], page: URL)
     /// A website's sign-in box: the saved sign-in for it (in normal tabs only), and what to do with one the user chose to keep or that failed.
     func engineSavedSignIn(space: SignInSpace) -> (user: String, password: String)?
     func engineRememberSignIn(space: SignInSpace, user: String, password: String)
@@ -100,7 +119,17 @@ extension TabEngine {
     func navigate(toOffset offset: Int) {}
 
     func readableContent() async -> ReadableArticle? { nil }
+    func collectLinks() async -> LinkPageSnapshot { LinkPageSnapshot(candidates: [], truncated: false) }
+    func collectImages() async -> LinkPageSnapshot { LinkPageSnapshot(candidates: [], truncated: false) }
+    func scanPageLinks() async -> PageLinkScan { PageLinkScan(links: [], truncated: false) }
+    func discoverMedia() async -> MediaPageSnapshot { MediaPageSnapshot(hits: [], truncated: false) }
+    /// DX-07: asks the page's observer to look again (a single-page app changed route). Engines without an observer do nothing.
+    func rescanMedia() {}
     func pageDiagnostics() async -> [String: Any]? { nil }
+    func consentOutcome(rerun: Bool) async -> String? { nil }
+    func webAppMetadata() async -> String? { nil }
+    func setSponsorSpans(videoID: String, json: String) async {}
+    func sponsorStats() async -> String? { nil }
     func pickElement() async -> [String: Any]? { nil }
     func cancelPicking() {}
     func loginFormOrigin() async -> String? { nil }
@@ -114,7 +143,7 @@ extension TabEngine {
     func securityReport() async -> SecurityReport? { nil }
     func connectionCertificate() async -> Data? { nil }
     func setUserAgent(_ value: String?) {}
-    func controlVideo(index: Int, action: String, value: Double) async {}
+    func controlVideo(id: Int, action: String, value: Double) async -> String? { nil }
     func fillCouponField(_ code: String) async -> Bool { false }
     func scrollFraction() async -> Double? { nil }
     func audioPlaying() async -> Bool { false }
@@ -134,6 +163,8 @@ extension TabEngine {
     func extractPageData() async -> [String: Any]? { nil }
     func scrollToHeading(_ index: Int) async {}
     func mediaElements() async -> [[String: Any]]? { nil }
+    func blockedMediaFrames() async -> Int { 0 }
+    func mediaData(_ script: String, id: Int) async -> [String: Any]? { nil }
     func showHTML(_ html: String, baseURL: URL?) {}
     func presentNativeFind() {}
     func pagePDF() async -> Data? { nil }
@@ -160,6 +191,9 @@ extension TabEngine {
 }
 
 extension TabEngineEvents {
+    func engineLoadFailed(url: URL?, domain: String, code: Int, description: String) { engineLoadFailed(url: url, description: description) }
+    func engineHTTPFailure(url: URL?, status: Int) {}
+    func engineCaptureChanged(camera: Bool, microphone: Bool) {}
     func engineMouseGesturesEnabled() -> Bool { false }
     func engineScriptsAllowed(for url: URL) -> Bool { true }
     func engineMouseGesture(_ sequence: String, finished: Bool) {}
@@ -168,15 +202,22 @@ extension TabEngineEvents {
     func engineLoginSubmitted(origin: String, user: String, password: String) {}
     func engineLoginFieldFocused(origin: String?, usernameOnly: Bool) {}
     func engineLoginTyped(origin: String, user: String, password: String) {}
+    func engineMediaObserved(_ observation: MediaObservation) {}
+    func engineMediaNavigated() {}
     func engineOpenPopup(configuration: AnyObject) -> TabEngine? { nil }
     func engineBlockedPopup(url: URL?) {}
     func engineSuspiciousRedirect(sites: [String]) {}
     func enginePopupsAllowedWithoutGesture() -> Bool { false }
     func engineLinkAction(_ url: URL, _ action: LinkAction) {}
+    func engineShowDownloads() {}
+    func engineCustomLink(_ url: URL, linkActivated: Bool) -> Bool { false }
+    func enginePageMenuAction(_ action: PageMenuAction, target: PageMenuTarget) {}
+    func enginePageMenuEnabled() -> Bool { false }
     func engineVimKey(_ key: String) -> Bool { false }
     func engineThemeColorChanged(_ tint: PageTint?) {}
     func engineScrolled(deltaY: Double) {}
-    func engineIconsFound(_ urls: [URL]) {}
+    func engineScrollPosition(screens: Double, deltaY: Double) {}
+    func engineIconsFound(_ candidates: [IconCandidate], page: URL) {}
     func engineSavedSignIn(space: SignInSpace) -> (user: String, password: String)? { nil }
     func engineRememberSignIn(space: SignInSpace, user: String, password: String) {}
     func engineForgetSignIn(space: SignInSpace) {}
@@ -188,8 +229,23 @@ protocol TabEngine: AnyObject {
     var hostView: PlatformView { get }
     /// The article on the page, if it has one (for the reader). Engines that cannot read a page return nil.
     func readableContent() async -> ReadableArticle?
+    /// Addresses of the links on the open page, read once and only when the person asks (never on load). Engines that cannot read a page return none.
+    func collectLinks() async -> LinkPageSnapshot
+    func collectImages() async -> LinkPageSnapshot
+    /// Every link the page offers (address and whether the page marks it as a download), read passively and boundedly for the toolbar's category counts.
+    func scanPageLinks() async -> PageLinkScan
+    /// The media elements and media links of the open page, read once and only when the person asks. Engines that cannot read a page return none.
+    func discoverMedia() async -> MediaPageSnapshot
+    func rescanMedia()
     /// Resource timing, storage keys, page errors and load numbers, for the developer tools.
     func pageDiagnostics() async -> [String: Any]?
+    /// What the cookie-banner script made of the page's banner, as a small JSON text (a state word and the tool's name), or nil. With `rerun` the script looks again first.
+    func consentOutcome(rerun: Bool) async -> String?
+    /// The page's own description of itself as an app (manifest name, start address, icons), as a JSON text, or nil.
+    func webAppMetadata() async -> String?
+    /// Hands SponsorBlock's segments for a video to the page's script (as data), and reads back how many were skipped.
+    func setSponsorSpans(videoID: String, json: String) async
+    func sponsorStats() async -> String?
     /// Waits for the person to click an element on the page and describes it (nil if they cancel or nothing is picked within a minute).
     func pickElement() async -> [String: Any]?
     func cancelPicking()
@@ -206,8 +262,8 @@ protocol TabEngine: AnyObject {
     func setGestures(_ options: GestureOptions)
     /// True when the page has a password, card or one-time-code box, so its text must not be copied.
     func pageHasSensitiveForm() async -> Bool
-    /// Play, pause, speed, Picture in Picture or full screen for one player on the page; typing a saved code into the page's coupon box.
-    func controlVideo(index: Int, action: String, value: Double) async
+    /// Play, pause, speed, Picture in Picture or full screen for one player on the page, named by the number `mediaElements` gave it (nil: it worked; else why not); typing a saved code into the page's coupon box.
+    func controlVideo(id: Int, action: String, value: Double) async -> String?
     func fillCouponField(_ code: String) async -> Bool
     /// How far down the page you are (0 to 1), and going back there; long unsent text in the page's text boxes, and putting it back into empty ones.
     func scrollFraction() async -> Double?
@@ -236,6 +292,10 @@ protocol TabEngine: AnyObject {
     func extractPageData() async -> [String: Any]?
     func scrollToHeading(_ index: Int) async
     func mediaElements() async -> [[String: Any]]?
+    /// How many players sit in frames from other sites, which a page cannot reach into (so they cannot be controlled, only counted).
+    func blockedMediaFrames() async -> Int
+    /// A structured answer from one player (a captured picture, its subtitles), named by the number `mediaElements` gave it.
+    func mediaData(_ script: String, id: Int) async -> [String: Any]?
     /// Shows generated HTML in place of the page. `baseURL` is where its pictures resolve from.
     func showHTML(_ html: String, baseURL: URL?)
     /// Page tools. Engines that cannot do one ignore it.
@@ -318,6 +378,10 @@ protocol BrowserEngine: AnyObject {
     func prepare() async
     /// `container` names a separate identity: the tab keeps cookies and storage of its own. "scratch" is storage that exists only for that one tab.
     func makeTab(isPrivate: Bool, profile: String, container: String?, events: TabEngineEvents) -> TabEngine
+    /// A tab of a private window: `privateSession` names that window's own temporary storage, shared by its tabs and by nothing else (nil is the storage the private tabs of ordinary windows share).
+    func makeTab(isPrivate: Bool, profile: String, container: String?, privateSession: UUID?, events: TabEngineEvents) -> TabEngine
+    /// A private window closed: its temporary storage is dropped with it.
+    func releasePrivateSession(_ id: UUID)
     /// A page that a script opened with window.open: it is built from the configuration the page's engine hands over, so it stays connected to the page that opened it.
     func makePopupTab(configuration: AnyObject, events: TabEngineEvents) -> TabEngine?
     /// Installs (or, with nil, removes) the privacy rules on every tab. Keeps the previous rules if the new ones fail.
@@ -334,8 +398,12 @@ protocol BrowserEngine: AnyObject {
     func removeSiteData(host: String, profile: String) async
     /// The scripts to run on pages in normal tabs (never private ones). Replaces the previous set on every open tab.
     func setUserScripts(_ scripts: [UserScript])
+    /// Where the scripts that were given storage keep their values (kept by the profile, not by the engine).
+    func setUserScriptStorage(_ storage: UserScriptStorage?)
     /// Switches the page's WebRTC off (except on the named sites), for tabs opened afterwards and, by reinstalling, the ones that are open.
     func setWebPolicy(_ policy: WebPolicy)
+    /// Returns once the blocking rules of the last `setWebPolicy` are attached, so the first page of a session is already filtered by them.
+    func policyRulesReady() async
     /// Sends page loads in every profile (private ones too) through the proxy, or, with nil, directly. Takes effect for pages opened afterwards.
     func setProxy(_ proxy: ProxyConfig?, password: String?)
 }
@@ -345,8 +413,14 @@ extension TabEngine {
 }
 
 extension BrowserEngine {
+    func makeTab(isPrivate: Bool, profile: String, container: String?, privateSession: UUID?, events: TabEngineEvents) -> TabEngine {
+        makeTab(isPrivate: isPrivate, profile: profile, container: container, events: events)
+    }
+    func releasePrivateSession(_ id: UUID) {}
     func setUserScripts(_ scripts: [UserScript]) {}
+    func setUserScriptStorage(_ storage: UserScriptStorage?) {}
     func setWebPolicy(_ policy: WebPolicy) {}
+    func policyRulesReady() async {}
     func setProxy(_ proxy: ProxyConfig?, password: String?) {}
 }
 
@@ -360,9 +434,24 @@ enum ErrorPage {
         }
         return """
         <!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
-        <style>:root{color-scheme:light dark}body{font:16px -apple-system,system-ui;display:flex;align-items:center;
-        justify-content:center;height:100vh;margin:0;text-align:center}div{max-width:30em;padding:1.5em}
-        h1{font-size:1.4em}p{opacity:.7}a{color:inherit;opacity:1}</style><div><h1>\(esc(title))</h1><p>\(esc(detail))</p>\(offersSavedCopy ? "<p><a href=\"browsersetu://savedcopy\">Look for a saved copy on the Internet Archive</a></p>" : "")</div>
+        <style>
+        :root{color-scheme:light dark;--bg1:#f6f8fb;--bg2:#e7edf5;--ink:#1d2430;--dim:#5b6676;--card:rgba(255,255,255,.78);--edge:rgba(20,30,50,.10);--accent:#0d8299;--glow1:rgba(96,170,215,.45);--glow2:rgba(170,150,240,.38)}
+        @media (prefers-color-scheme:dark){:root{--bg1:#0c0f17;--bg2:#080a10;--ink:#eef1f6;--dim:#9aa4b5;--card:rgba(255,255,255,.06);--edge:rgba(255,255,255,.12);--accent:#3bb8cf;--glow1:rgba(30,110,150,.40);--glow2:rgba(110,70,190,.30)}}
+        *{box-sizing:border-box}
+        body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;font:16px/1.5 -apple-system,system-ui,sans-serif;color:var(--ink);
+        background:radial-gradient(60em 40em at 12% 8%,var(--glow1),transparent 60%),radial-gradient(50em 36em at 92% 14%,var(--glow2),transparent 60%),linear-gradient(180deg,var(--bg1),var(--bg2))}
+        main{width:min(30em,calc(100% - 2.5em));text-align:center;padding:2.2em 2em 2em;border-radius:22px;background:var(--card);border:1px solid var(--edge);
+        box-shadow:0 1px 2px rgba(0,0,0,.08),0 18px 48px -12px rgba(13,130,153,.28);-webkit-backdrop-filter:blur(24px) saturate(1.3);backdrop-filter:blur(24px) saturate(1.3)}
+        svg{width:84px;height:84px;display:block;margin:0 auto 1em;filter:drop-shadow(0 8px 14px rgba(13,130,153,.35))}
+        h1{font-size:1.45em;line-height:1.25;margin:0 0 .4em;letter-spacing:-.01em}
+        p{margin:.5em 0 0;color:var(--dim)}
+        a{color:var(--accent);text-decoration:none;font-weight:500}a:hover{text-decoration:underline}a:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:4px}
+        </style>
+        <main role=main><svg viewBox="0 0 84 84" aria-hidden="true"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4fc3d9"/><stop offset="1" stop-color="#0d7f96"/></linearGradient>
+        <linearGradient id="s" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".55"/><stop offset=".6" stop-color="#fff" stop-opacity="0"/></linearGradient></defs>
+        <path d="M42 6 70 16v22c0 17-11.5 31-28 38C25.500 69 14 55 14 38V16Z" fill="url(#g)"/><path d="M42 6 70 16v22c0 17-11.5 31-28 38C25.500 69 14 55 14 38V16Z" fill="url(#s)"/>
+        <path d="M42 24v20" stroke="#fff" stroke-width="5" stroke-linecap="round"/><circle cx="42" cy="54" r="3.2" fill="#fff"/></svg>
+        <h1>\(esc(title))</h1><p>\(esc(detail))</p>\(offersSavedCopy ? "<p><a href=\"browsersetu://savedcopy\">Look for a saved copy on the Internet Archive</a></p>" : "")</main>
         """
     }
 }
@@ -378,8 +467,20 @@ struct GestureOptions: Equatable {
 }
 
 /// What the page's link menu can do with a link beyond opening it in place.
-enum LinkAction { case newTab, backgroundTab, privateTab, split, otherPane }
+enum LinkAction { case newTab, backgroundTab, privateTab, split, otherPane, glance }
 
 extension BrowserEngine {
     func makePopupTab(configuration: AnyObject, events: TabEngineEvents) -> TabEngine? { nil }
+}
+
+/// What the page's links came to: the ones likely to be downloads, and whether the page had more than the limit.
+struct PageLinkScan: Equatable, Sendable {
+    var links: [(href: String, marked: Bool)]
+    var truncated: Bool
+    static func == (a: Self, b: Self) -> Bool { a.truncated == b.truncated && a.links.count == b.links.count && zip(a.links, b.links).allSatisfy { $0.href == $1.href && $0.marked == $1.marked } }
+}
+
+struct LinkPageSnapshot: Equatable, Sendable {
+    var candidates: [String]
+    var truncated: Bool
 }

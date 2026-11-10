@@ -42,3 +42,55 @@ enum TabBehavior {
         return rest[min(position, rest.count - 1)].id
     }
 }
+
+
+/// Which tab was in front when, most recent first, and the walk down that list that Control-Tab makes. A walk is a run of presses close together: it steps through the order as
+/// it was when the run began (so tabs passed on the way do not reshuffle it), and only when the run ends does the tab it stopped on become the most recent.
+struct TabRecency {
+    private(set) var order: [UInt64] = []
+    private var walk: (base: [UInt64], index: Int, at: Date)?
+    /// How long after one press the next still counts as the same walk.
+    static let walkWindow: TimeInterval = 1.5
+
+    var isWalking: Bool { walk != nil }
+
+    /// A tab came to the front by any other means: it is now the most recent, and a walk in progress is over.
+    mutating func noteSelected(_ id: UInt64) {
+        order.removeAll { $0 == id }
+        order.insert(id, at: 0)
+        walk = nil
+    }
+
+    mutating func forget(_ id: UInt64) { order.removeAll { $0 == id } }
+
+    /// The tab one step further back (`direction` 1) or forward again (-1) in the walk, among `available` (the tabs that may be chosen right now, in the order they are listed: the
+    /// ones the current window and privacy context show). Tabs never seen in front come after the ones that were. Nil when there is nowhere to go.
+    mutating func step(_ direction: Int, current: UInt64?, available: [UInt64], now: Date = Date()) -> UInt64? {
+        let usable = Set(available)
+        var base: [UInt64]
+        var index: Int
+        if let walk, now.timeIntervalSince(walk.at) < Self.walkWindow {
+            base = walk.base.filter { usable.contains($0) }
+            index = min(walk.index, max(0, base.count - 1))
+        } else {
+            let seen = order.filter { usable.contains($0) }
+            base = seen + available.filter { !seen.contains($0) }
+            if let current, usable.contains(current) {
+                base.removeAll { $0 == current }; base.insert(current, at: 0)
+                index = 0
+            } else {
+                // In front is a page that is in no list (an Essential's): the first press goes to the most recent listed tab, Shift to the oldest.
+                index = direction > 0 ? -1 : 0
+            }
+        }
+        guard base.count > 1 else { walk = nil; return nil }
+        index = ((index + direction) % base.count + base.count) % base.count
+        walk = (base, index, now)
+        return base[index]
+    }
+
+    /// The walk is over (no press for a while): the tab it stopped on becomes the most recent.
+    mutating func endWalk(on id: UInt64?) {
+        if let id { noteSelected(id) } else { walk = nil }
+    }
+}

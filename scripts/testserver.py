@@ -56,6 +56,30 @@ class H(http.server.BaseHTTPRequestHandler):
             return self.send(200, f"<title>Tall</title><body style='margin:0'>{rows}</body>")
         if path == "/amp-page":
             return self.send(200, f'<html amp><head><title>AMP copy</title><link rel="canonical" href="http://127.0.0.1:{PORT}/full-page"></head><body>amp</body></html>')
+        if path in ("/clip.mp4", "/clip-sound.mp4"):
+            import os
+            data = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", path[1:]), "rb").read()
+            rng = self.headers.get("Range")
+            if rng and rng.startswith("bytes="):
+                lo, _, hi = rng[6:].partition("-")
+                lo = int(lo or 0); hi = int(hi) if hi else len(data) - 1; hi = min(hi, len(data) - 1)
+                return self.send(206, data[lo:hi + 1], "video/mp4", [("Content-Range", f"bytes {lo}-{hi}/{len(data)}"), ("Accept-Ranges", "bytes")])
+            return self.send(200, data, "video/mp4", [("Accept-Ranges", "bytes")])
+        if path == "/video-matrix":
+            page = """<title>Video matrix</title><body>
+<video id=a src="/clip.mp4" autoplay muted playsinline loop></video>
+<video id=b src="/clip.mp4" autoplay playsinline loop></video>
+<video id=c src="/clip-sound.mp4" autoplay muted playsinline loop></video>
+<video id=d src="/clip-sound.mp4" autoplay playsinline loop></video>
+<video id=e src="/clip-sound.mp4" autoplay controls playsinline loop></video>
+<video id=f src="/clip-sound.mp4" playsinline loop></video>
+<video id=g src="/clip-sound.mp4" playsinline loop></video>
+<script>
+window.__err = {};
+function tryPlay(id){ var v=document.getElementById(id); var p=v.play(); if(p&&p.catch) p.catch(function(e){window.__err[id]=e.name}); }
+tryPlay('f'); setTimeout(function(){ tryPlay('g'); }, 3000);
+</script></body>"""
+            return self.send(200, page)
         if path == "/silence.wav":
             import struct
             n = 16000

@@ -15,7 +15,7 @@ struct SitePrivacyView: View {
     private var key: String? { FaviconStore.key(forHost: host) }
 
     var body: some View {
-        List {
+        PanelList {
             if let host {
                 Section("What \(TabOrganizing.siteName(forHost: host)) has here") { reportRows }
                 Section("Safety of this page") { securityRows }
@@ -124,7 +124,7 @@ struct SitePrivacyView: View {
                 .swipeActions { Button("Delete", role: .destructive) { model.setSiteDeleteRules(model.siteDeleteRules.filter { $0.id != rule.id }) } }
                 .contextMenu { Button("Delete Rule", role: .destructive) { model.setSiteDeleteRules(model.siteDeleteRules.filter { $0.id != rule.id }) } }
             }
-            TextField("Sites, separated by commas (a category)", text: $ruleHosts).autocorrectionDisabled()
+            FormTextField("Sites, separated by commas (a category)", text: $ruleHosts).autocorrectionDisabled()
             Picker("When", selection: $ruleTrigger) { ForEach(SiteDeleteRule.Trigger.allCases) { Text($0.title).tag($0) } }
             Picker("Clear", selection: $ruleScope) { ForEach(SiteDeleteRule.Scope.allCases) { Text($0.title).tag($0) } }
             Button("Add Rule") {

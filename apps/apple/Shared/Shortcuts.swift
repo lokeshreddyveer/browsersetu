@@ -68,8 +68,8 @@ struct KeyCombo: Equatable, Hashable {
 
 /// Everything the menu bar can do that has a shortcut a person may change.
 enum ShortcutAction: String, CaseIterable, Identifiable {
-    case newTab, newPrivateTab, openLocation, commandPalette, closeTab, reopenClosedTab
-    case print, back, forward, reload, stop, nextTab, previousTab
+    case newTab, newPrivateTab, newPrivate, newPrivateWindow, openLocation, commandPalette, closeTab, reopenClosedTab
+    case print, back, forward, reload, stop, nextTab, previousTab, recentTab, recentTabReverse
     case pasteAndGo, find, findNext, findPrevious
     case bookmarkPage, showBookmarks, showHistory, showDownloads
     case toggleSidebar, tabOverview, searchTabs, focusMode, zoomIn, zoomOut, actualSize, sharePage, readerMode, findAllTabs, restoreLayout
@@ -80,6 +80,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         switch self {
         case .newTab: "New Tab"
         case .newPrivateTab: "New Private Tab"
+        case .newPrivate: "New Private Window or Tab (as chosen in Settings)"
+        case .newPrivateWindow: "New Private Window"
         case .openLocation: "Open Location"
         case .commandPalette: "Command Palette"
         case .closeTab: "Close Tab"
@@ -91,6 +93,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .stop: "Stop"
         case .nextTab: "Next Tab"
         case .previousTab: "Previous Tab"
+        case .recentTab: "Switch to Recently Used Tab"
+        case .recentTabReverse: "Switch Forward Through Recent Tabs"
         case .pasteAndGo: "Paste and Go"
         case .find: "Find in Page"
         case .findNext: "Find Next"
@@ -115,7 +119,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
 
     var group: String {
         switch self {
-        case .newTab, .newPrivateTab, .closeTab, .reopenClosedTab, .nextTab, .previousTab, .tabOverview, .searchTabs: "Tabs"
+        case .newTab, .newPrivateTab, .newPrivate, .newPrivateWindow, .closeTab, .reopenClosedTab, .nextTab, .previousTab, .recentTab, .recentTabReverse, .tabOverview, .searchTabs: "Tabs"
         case .openLocation, .commandPalette, .pasteAndGo, .find, .findNext, .findPrevious, .findAllTabs: "Address and Search"
         case .back, .forward, .reload, .stop: "Navigation"
         case .bookmarkPage, .showBookmarks, .showHistory, .showDownloads, .print, .sharePage, .readerMode: "Library"
@@ -126,7 +130,10 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
     var defaultCombo: KeyCombo {
         switch self {
         case .newTab: KeyCombo(key: "t", command: true)
-        case .newPrivateTab: KeyCombo(key: "n", command: true, shift: true)
+        // ⇧⌘N follows the choice made in Settings (a private window by default); the two explicit commands have keys of their own.
+        case .newPrivate: KeyCombo(key: "n", command: true, shift: true)
+        case .newPrivateWindow: KeyCombo(key: "n", command: true, option: true)
+        case .newPrivateTab: KeyCombo(key: "t", command: true, shift: true, option: true)
         case .openLocation: KeyCombo(key: "l", command: true)
         case .commandPalette: KeyCombo(key: "k", command: true)
         case .closeTab: KeyCombo(key: "w", command: true)
@@ -138,6 +145,8 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .stop: KeyCombo(key: ".", command: true)
         case .nextTab: KeyCombo(key: "]", command: true, shift: true)
         case .previousTab: KeyCombo(key: "[", command: true, shift: true)
+        case .recentTab: KeyCombo(key: "tab", control: true)
+        case .recentTabReverse: KeyCombo(key: "tab", shift: true, control: true)
         case .pasteAndGo: KeyCombo(key: "v", command: true, shift: true)
         case .find: KeyCombo(key: "f", command: true)
         case .findNext: KeyCombo(key: "g", command: true)

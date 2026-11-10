@@ -66,8 +66,9 @@ enum NativeHosts {
 
     static func isPermitted(_ manifest: Manifest, chromeID: String?) -> Bool {
         guard let chromeID, chromeID.count == 32 else { return false }
-        let path = URL(fileURLWithPath: manifest.path).standardizedFileURL.path
-        return path.hasPrefix("/System/") && manifest.allowedOrigins.contains(origin(for: chromeID))
+        // Resolved first: "..", symlinks and the /System/Volumes/Data firmlink must not let a path that merely starts with /System/ lead to somewhere a person can write.
+        let path = URL(fileURLWithPath: manifest.path).standardizedFileURL.resolvingSymlinksInPath().path
+        return path.hasPrefix("/System/") && !path.hasPrefix("/System/Volumes/") && manifest.allowedOrigins.contains(origin(for: chromeID))
     }
 }
 

@@ -22,8 +22,22 @@ enum SecretStore {
 
     /// Writes the secret, replacing any earlier copy in either place. With `synchronizable`, iCloud Keychain is tried first; when this copy of the app cannot use it,
     /// the secret is kept on this device instead and the result says so.
+    /// The Keychain calls `put` makes, so a test can make one fail.
+    struct Operations {
+        var update: ([String: Any], [String: Any]) -> OSStatus
+        var delete: ([String: Any]) -> OSStatus
+        static let system = Operations(update: { SecItemUpdate($0 as CFDictionary, $1 as CFDictionary) }, delete: { SecItemDelete($0 as CFDictionary) })
+    }
+
     @discardableResult
-    static func put(_ data: Data, service: String, account: String, synchronizable: Bool = false) -> Outcome {
+    static func put(_ data: Data, service: String, account: String, synchronizable: Bool = false, ops: Operations = .system) -> Outcome {
+        // An existing device-only copy is updated in place. If that fails for any reason other than "there is no copy", the old secret is left exactly as it was: a failed write must not cost
+        // the secret that was already saved.
+        if !synchronizable {
+            let status = ops.update(query(service: service, account: account, cloud: false), [kSecValueData as String: data])
+            if status == errSecSuccess { _ = ops.delete(query(service: service, account: account, cloud: true)); return .local }
+            if status != errSecItemNotFound { return .failed }
+        }
         remove(service: service, account: account)
         if synchronizable {
             var item = query(service: service, account: account, cloud: true)

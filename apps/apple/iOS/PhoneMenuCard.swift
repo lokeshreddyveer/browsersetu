@@ -56,12 +56,17 @@ struct PhoneMenuContent: View {
                         }
                     }
                     Divider()
+                    Button { model.showPlayer() } label: { Label("Player Controls", systemImage: "slider.horizontal.3") }
                     Button { model.togglePictureInPicture() } label: { Label("Picture in Picture", systemImage: "pip.enter") }
                 } label: { Label("Video", systemImage: "play.rectangle") }
             }
             Menu { ToolsMenuItems(model: model) } label: { Label("Tools", systemImage: "wrench.and.screwdriver") }
             moreMenu
             extensionsMenu
+            Button { model.sheet = .webApps } label: { Label("Web Apps…", systemImage: "app.dashed") }
+            if !model.userScripts(matching: tab.url).isEmpty {
+                Menu { SiteScriptsList(url: tab.url) } label: { Label("Scripts on This Site", systemImage: "curlybraces") }
+            }
             Button { model.sheet = .settings } label: { Label("Settings", systemImage: "gearshape") }
         }
         Section {
@@ -93,7 +98,7 @@ struct PhoneMenuContent: View {
         Menu {
             if !tab.isBlank {
                 Button { PhoneAction.darkPages.run(model, tab) } label: {
-                    Label(model.isDarkSite(host) ? "Undarken" : "Darken", systemImage: model.isDarkSite(host) ? "moon.stars.fill" : "moon.stars")
+                    Label(model.shouldDarken(host: host) ? "Undarken" : "Darken", systemImage: model.shouldDarken(host: host) ? "moon.stars.fill" : "moon.stars")
                 }
                 Button { model.privacy.toggleSite(host: host); tab.reload() } label: {
                     Label(blockerOn ? "Disable Blocker" : "Enable Blocker", systemImage: blockerOn ? "shield.slash" : "shield")

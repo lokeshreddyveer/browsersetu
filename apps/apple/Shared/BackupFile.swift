@@ -30,6 +30,9 @@ struct BackupPayload: Codable, Equatable {
     var syncGroup: String? = nil
     /// The id of the device that made it (sync only), so devices can be approved or revoked one by one.
     var deviceID: String? = nil
+    /// Wi-Fi sync only: the key this device proves itself with, and the proof for this copy (see WiFiTrust). Never part of a backup file.
+    var wifiKey: String? = nil
+    var wifiProof: String? = nil
     /// Research collections, in a backup file only (sync does not carry them).
     var research: [ResearchCollection]? = nil
     /// Saved passwords, only when the person chose to include them. A backup file is sealed with their passphrase.

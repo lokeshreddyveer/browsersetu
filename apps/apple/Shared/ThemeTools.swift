@@ -312,11 +312,57 @@ struct GlobalStyleSection: View {
 struct StartDrawer: View {
     @EnvironmentObject var model: BrowserModel
     @State private var choosingStartImage = false
+    #if DEBUG
+    // Development only: open on a given section (BS_DRAWER_SECTION=effects) to look at it.
+    @State private var section = ProcessInfo.processInfo.environment["BS_DRAWER_SECTION"].flatMap(StartCustomizeSection.init(rawValue:)) ?? .wallpaper
+    #else
+    @State private var section = StartCustomizeSection.wallpaper
+    #endif
+    @Environment(\.colorScheme) private var scheme
 
     private func close() { animated(.easeOut(duration: 0.22)) { model.startDrawerOpen = false } }
 
+    /// The five groups, as chips that scroll sideways when the panel is narrow.
+    private var sectionChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(StartCustomizeSection.allCases) { item in
+                    let selected = section == item
+                    Button { animated(.easeOut(duration: 0.18)) { section = item } } label: {
+                        Text(item.title).font(.system(size: 12.5, weight: selected ? .semibold : .regular))
+                            .foregroundStyle(selected ? Color.white : Color.primary)
+                            .padding(.horizontal, 12).frame(height: 28)
+                            .background(Capsule().fill(selected ? Theme.accent : Color.primary.opacity(0.08)))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(selected ? .isSelected : [])
+                }
+            }
+        }
+    }
+
     var body: some View {
         GeometryReader { geo in
+            #if os(iOS)
+            // A floating card, not a drawer: the page behind keeps its own brightness (no scrim, no blur), a tap outside still closes the card, and the card is bounded
+            // so it never fills the screen. The material is confined to the card.
+            ZStack {
+                Color.clear.contentShape(Rectangle()).onTapGesture { close() }.accessibilityHidden(true)
+                panel
+                    .frame(width: min(380, geo.size.width - 24))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .themedBar(fallback: .regularMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5))
+                    .shadow(color: .black.opacity(0.22), radius: 18, y: 6)
+                    .transition(.scale(scale: 0.97).combined(with: .opacity))
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel("Customize start page")
+                    .accessibilityAddTraits(.isModal)
+            }
+            .frame(width: geo.size.width, height: geo.size.height)
+            .onChange(of: geo.size.height, initial: true) { _, h in bodyCap = max(200, min(h * 0.74, h - 210)) }
+            #else
             ZStack(alignment: .trailing) {
                 Color.black.opacity(0.38).ignoresSafeArea()
                     .contentShape(Rectangle())
@@ -333,9 +379,11 @@ struct StartDrawer: View {
                     .accessibilityLabel("Customize start page")
                     .accessibilityAddTraits(.isModal)
             }
+            #endif
         }
         .fileImporter(isPresented: $choosingStartImage, allowedContentTypes: [.image]) { result in
-            if case .success(let url) = result { model.setStartImage(from: url) }
+            // Every picture goes into the collection (a collection of one is the plain "my photo"), so a rotation never replaces one chosen by hand.
+            if case .success(let url) = result { model.addWallpaper(from: url) }
         }
         #if os(macOS)
         .onExitCommand { close() }
@@ -343,50 +391,86 @@ struct StartDrawer: View {
     }
 
     private var panel: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 0) {
+            // Fixed: the title, close button and the five section chips stay put while only the settings below scroll.
+            VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     Text("Customize").font(.title2.weight(.semibold))
                     Spacer()
                     Button(action: close) { Image(systemName: "xmark.circle.fill").font(.title3).foregroundStyle(.secondary).accessibilityLabel("Close") }
                         .buttonStyle(.plain).keyboardShortcut(.cancelAction)
                 }
-                card("Background") {
-                    backgroundTiles
-                    backgroundControls
-                }
-                card("Theme and accent") {
-                    Text(model.activeTheme.name).font(.callout).foregroundStyle(.secondary)
-                    ThemeDots()
-                    if !model.themeIsActive {
-                        HStack(spacing: 10) {
-                            ForEach(AccentChoice.allCases) { choice in
-                                Button { model.accent = choice } label: {
-                                    Circle().fill(choice.color).frame(width: 24, height: 24)
-                                        .overlay(Image(systemName: "checkmark").font(.system(size: 11, weight: .bold)).foregroundStyle(.white).opacity(model.accent == choice ? 1 : 0))
+                sectionChips
+            }
+            .padding(.horizontal, 20).padding(.top, 16).padding(.bottom, 10)
+            #if os(iOS)
+            .safeAreaPadding(.top, 4)
+            #endif
+            Divider().opacity(0.5)
+            panelBody
+        }
+        #if os(iOS)
+        .safeAreaPadding(.vertical, 6)
+        #endif
+    }
+
+    @State private var bodyHeight: CGFloat = 0
+    /// The most the settings body may take before it scrolls (set from the screen's height; unlimited until measured).
+    @State private var bodyCap: CGFloat = 480
+
+    private var panelBody: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                switch section {
+                case .wallpaper:
+                    card("Background") {
+                        backgroundTiles
+                        backgroundControls
+                    }
+                case .appearance:
+                    card("Theme and accent") {
+                        Text(model.activeTheme.name).font(.callout).foregroundStyle(.secondary)
+                        ThemeDots()
+                        if !model.themeIsActive {
+                            HStack(spacing: 10) {
+                                ForEach(AccentChoice.allCases) { choice in
+                                    Button { model.accent = choice } label: {
+                                        Circle().fill(choice.color).frame(width: 24, height: 24)
+                                            .overlay(Image(systemName: "checkmark").font(.system(size: 11, weight: .bold)).foregroundStyle(.white).opacity(model.accent == choice ? 1 : 0))
+                                    }
+                                    .buttonStyle(.plain).accessibilityLabel("\(choice.title) accent\(model.accent == choice ? ", selected" : "")")
                                 }
-                                .buttonStyle(.plain).accessibilityLabel("\(choice.title) accent\(model.accent == choice ? ", selected" : "")")
                             }
                         }
                     }
-                }
-                card("Heading and search") {
-                    TextField("Your own heading (empty shows the greeting)", text: $model.startTitle).textFieldStyle(.roundedBorder)
-                    labeled("Heading font") { Picker("", selection: $model.startFont) { ForEach(StartFont.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented).labelsHidden() }
-                    labeled("Search box") { Picker("", selection: $model.startSearchStyle) { ForEach(StartSearchStyle.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented).labelsHidden() }
-                    labeled("Page width") { Picker("", selection: $model.startWidth) { ForEach(StartWidth.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented).labelsHidden() }
-                    labeled("Icon size") { Picker("", selection: $model.startTile) { ForEach(StartTile.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented).labelsHidden() }
-                }
-                card("Show on the page") {
-                    Toggle("Greeting", isOn: $model.showGreeting)
-                    Toggle("Favorites", isOn: $model.showFavorites)
-                    Toggle("Continue browsing", isOn: $model.showContinue)
-                    Toggle("Often visited", isOn: $model.showFrequent)
-                    Toggle("Recently closed", isOn: $model.showRecentlyClosed)
-                }
-                card("Behavior") {
-                    HStack { Text("Search engine"); Spacer(); SearchEngineMenu() }
-                    HStack { Text("New tabs open"); Spacer(); Picker("", selection: $model.newTabMode) { ForEach(NewTabMode.allCases) { Text($0.title).tag($0) } }.labelsHidden().fixedSize() }
+                    card("Heading and search") {
+                        TextField("Your own heading (empty shows the greeting)", text: $model.startTitle).textFieldStyle(.roundedBorder)
+                        labeled("Heading font") { Picker("", selection: $model.startFont) { ForEach(StartFont.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented).labelsHidden() }
+                        labeled("Search box") { Picker("", selection: $model.startSearchStyle) { ForEach(StartSearchStyle.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented).labelsHidden() }
+                    }
+                    card("Glass and ink") {
+                        Toggle("Text colours follow the picture or gradient", isOn: $model.startLook.adaptiveText)
+                        Text("Over a picture or a gradient the greeting, search field and cards take light or dark ink to suit it, and their glass follows. Reduce Transparency makes them solid.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                case .layout:
+                    card("Size and spacing") {
+                        labeled("Page width") { Picker("", selection: $model.startWidth) { ForEach(StartWidth.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented).labelsHidden() }
+                        labeled("Icon size (favorites density)") { Picker("", selection: $model.startTile) { ForEach(StartTile.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented).labelsHidden() }
+                    }
+                    card("Show on the page") {
+                        Toggle("Greeting", isOn: $model.showGreeting)
+                        Toggle("Favorites", isOn: $model.showFavorites)
+                        Text("Sections that draw on your browsing history are under Privacy.").font(.caption).foregroundStyle(.secondary)
+                    }
+                    card("Behavior") {
+                        HStack { Text("Search engine"); Spacer(); SearchEngineMenu() }
+                        HStack { Text("New tabs open"); Spacer(); Picker("", selection: $model.newTabMode) { ForEach(NewTabMode.allCases) { Text($0.title).tag($0) } }.labelsHidden().fixedSize() }
+                    }
+                case .effects:
+                    card("Effects") { StartEffectsControls() }
+                case .privacy:
+                    card("Privacy") { StartPrivacyControls() }
                 }
                 Button("More Settings…") {
                     close()
@@ -400,16 +484,17 @@ struct StartDrawer: View {
             }
             .toggleStyle(.switch)
             .padding(20)
+            // The card is as tall as the section needs, up to its limit; only then does the body scroll.
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { bodyHeight = $0 }
         }
         #if os(iOS)
-        // Below the status bar and clear of the Dynamic Island, in either orientation.
-        .safeAreaPadding(.vertical, 6)
+        .frame(height: bodyHeight > 0 ? min(bodyHeight, bodyCap) : nil)
         #endif
     }
 
     /// One tile for each kind of background; the last is the person's own picture, and tapping it before one is chosen opens the file picker.
     private var backgroundTiles: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 84), spacing: 10)], spacing: 12) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 84), spacing: 10)], spacing: 10) {
             ForEach(StartBackground.allCases) { kind in
                 let selected = model.startBackground == kind
                 Button {
@@ -419,7 +504,7 @@ struct StartDrawer: View {
                 } label: {
                     VStack(spacing: 6) {
                         swatch(kind)
-                            .frame(height: 52)
+                            .frame(height: 44)
                             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                             .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(selected ? Theme.accent : Color.primary.opacity(0.15), lineWidth: selected ? 2.5 : 0.8))
                         Text(kind == .image ? "My Photo" : kind.title).font(.caption).foregroundStyle(selected ? Color.primary : Color.secondary)
@@ -437,11 +522,12 @@ struct StartDrawer: View {
         case .gradient:
             ZStack { Color(red: 0.047, green: 0.059, blue: 0.090); RadialGradient(colors: [Color(red: 0.067, green: 0.106, blue: 0.188), .clear], center: .center, startRadius: 0, endRadius: 50) }
         case .plain: Color(red: 0.12, green: 0.13, blue: 0.17)
+        case .preset: Rectangle().fill(StartPreset.named(model.startPreset).gradient())
         case .color: StartColor.color(model.startColorA)
         case .blend: LinearGradient(colors: [StartColor.color(model.startColorA), StartColor.color(model.startColorB, fallback: StartColor.defaultB)], startPoint: .top, endPoint: .bottom)
         case .image:
-            if let data = model.startImageData, let image = Image(platformData: data) {
-                Color.clear.overlay(image.resizable().scaledToFill()).clipped()
+            if let data = model.startImageData, let cg = WallpaperImages.image(data, longSide: 480) {
+                Color.clear.overlay(Image(decorative: cg, scale: 1).resizable().scaledToFill()).clipped()
             } else {
                 ZStack { Color.primary.opacity(0.06); Image(systemName: "photo.badge.plus").font(.system(size: 20)).foregroundStyle(.secondary) }
             }
@@ -452,14 +538,33 @@ struct StartDrawer: View {
         switch model.startBackground {
         case .image:
             HStack {
-                Button(model.startImageData == nil ? "Choose a Photo…" : "Change Photo…") { choosingStartImage = true }
-                if model.startImageData != nil { Button("Remove", role: .destructive) { model.removeStartImage() } }
+                Button(model.startImageData == nil ? "Choose a Photo…" : "Add a Photo…") { choosingStartImage = true }
+                if model.startImageData != nil {
+                    Button("Remove", role: .destructive) {
+                        if let entry = model.wallpaperLibrary.entries.first(where: { $0.id == model.currentWallpaperID }) { model.removeWallpaper(entry, dark: scheme == .dark) }
+                        else { model.removeStartImage() }
+                    }
+                }
             }
-            if model.startImageData != nil {
+            if let data = model.startImageData {
+                labeled("Position (drag to choose what stays in view)") { FocalPointPad(data: data, look: $model.startLook) }
+                Picker("", selection: $model.startLook.fit) { Text("Fill").tag(false); Text("Fit").tag(true) }.pickerStyle(.segmented).labelsHidden()
                 labeled("Darken") { Slider(value: $model.startImageDim, in: 0...0.7) }
                 labeled("Blur") { Slider(value: $model.startImageBlur, in: 0...30) }
+                labeled("Brightness") { Slider(value: $model.startLook.brightness, in: -0.4...0.4) }
+                labeled("Colour") { Slider(value: $model.startLook.saturation, in: 0...2) }
+                Button("Reset Picture Settings") {
+                    animated(.easeOut(duration: 0.2)) { model.startLook = StartLook(); model.startImageDim = 0.3; model.startImageBlur = 0 }
+                }
+                .buttonStyle(.borderless)
             }
             Text("From Photos or Files. It stays on this device, in this profile.").font(.caption).foregroundStyle(.secondary)
+            Divider()
+            WallpaperCollectionControls()
+            Divider()
+            StartVideoControls()
+        case .preset:
+            StartPresetControls()
         case .color:
             ColorPicker("Colour", selection: Binding(get: { StartColor.color(model.startColorA) }, set: { model.startColorA = StartColor.hex(of: $0) }), supportsOpacity: false)
         case .blend:

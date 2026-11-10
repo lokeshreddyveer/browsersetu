@@ -72,8 +72,13 @@ enum DevUtilities {
     enum RegexResult: Equatable { case matches([RegexMatch]), failed(String) }
 
     /// Flags: i (ignore case), m (lines), s (dot matches newline), x (extended).
-    static func testRegex(_ pattern: String, in text: String, flags: String = "") -> RegexResult {
+    /// The longest a pattern may work on the text. A pattern such as (a+)+$ can take longer than the age of the universe on a few dozen characters; the matcher reports
+    /// its progress now and then, and when the time is up it is stopped, so a typo in a pattern can never freeze the app.
+    static let regexTimeLimit: TimeInterval = 1.0
+
+    static func testRegex(_ pattern: String, in text: String, flags: String = "", timeLimit: TimeInterval = DevUtilities.regexTimeLimit) -> RegexResult {
         guard !pattern.isEmpty else { return .failed("Enter a pattern.") }
+        guard pattern.utf16.count <= 500 else { return .failed("The pattern is too long (500 characters at most).") }
         guard text.utf16.count <= 50_000 else { return .failed("The text is too long to test here (50,000 characters at most).") }
         var options: NSRegularExpression.Options = []
         if flags.contains("i") { options.insert(.caseInsensitive) }
@@ -83,14 +88,21 @@ enum DevUtilities {
         do {
             let regex = try NSRegularExpression(pattern: pattern, options: options)
             let whole = NSRange(text.startIndex..., in: text)
-            let found = regex.matches(in: text, range: whole).prefix(500).map { m -> RegexMatch in
+            let deadline = Date().addingTimeInterval(timeLimit)
+            var timedOut = false
+            var found: [RegexMatch] = []
+            regex.enumerateMatches(in: text, options: [.reportProgress], range: whole) { m, flags, stop in
+                if Date() > deadline { timedOut = true; stop.pointee = true; return }
+                guard let m, !flags.contains(.progress) else { return }
                 let groups = (1..<max(m.numberOfRanges, 1)).map { i -> String in
                     let r = m.range(at: i)
                     return r.location == NSNotFound ? "" : (Range(r, in: text).map { String(text[$0]) } ?? "")
                 }
-                return RegexMatch(text: Range(m.range, in: text).map { String(text[$0]) } ?? "", range: m.range, groups: groups)
+                found.append(RegexMatch(text: Range(m.range, in: text).map { String(text[$0]) } ?? "", range: m.range, groups: groups))
+                if found.count >= 500 { stop.pointee = true }
             }
-            return .matches(Array(found))
+            if timedOut { return .failed("That pattern took too long on this text, so it was stopped. A repeat inside a repeat, such as (a+)+, is the usual cause.") }
+            return .matches(found)
         } catch { return .failed("That pattern is not valid.") }
     }
 
@@ -141,6 +153,9 @@ enum DevUtilities {
 
     struct LineDiff: Equatable { var removed: [String]; var added: [String]; var same: Int }
 
+    /// The most lines a side may have for the comparison: the work grows with the lines times the differences.
+    static let maxDiffLines = 3_000
+
     static func diffLines(_ a: String, _ b: String) -> LineDiff {
         let left = a.components(separatedBy: "\n"), right = b.components(separatedBy: "\n")
         let difference = right.difference(from: left)
@@ -170,118 +185,6 @@ enum DevUtilities {
         case .sha512: return hex(SHA512.hash(data: data))
         case .sha1: return hex(Insecure.SHA1.hash(data: data))
         case .md5: return hex(Insecure.MD5.hash(data: data))
-        }
-    }
-}
-
-struct DevUtilitiesView: View {
-    enum Tool: String, CaseIterable, Identifiable {
-        case json = "JSON", url = "URL", base64 = "Base64", time = "Timestamp", regex = "Regex", color = "Colour", compare = "Compare", hash = "Hash"
-        var id: String { rawValue }
-    }
-    @State private var tool = Tool.json
-    @State private var input = ""
-    @State private var second = ""
-    @State private var flags = "i"
-    @State private var hashKind = DevUtilities.HashKind.sha256
-    @State private var picked = Color.blue
-
-    var body: some View {
-        List {
-            Section {
-                Button("Try an Example") { loadExample() }.buttonStyle(.borderless)
-                Picker("Tool", selection: $tool) { ForEach(Tool.allCases) { Text($0.rawValue).tag($0) } }
-                editor(tool == .compare ? "Left text" : (tool == .regex ? "Pattern" : "Input"), $input, height: tool == .regex ? 36 : 110)
-                if tool == .regex { editor("Text to test", $second, height: 90); TextField("Flags (i m s x)", text: $flags).textFieldStyle(.roundedBorder) }
-                if tool == .compare { editor("Right text", $second, height: 110) }
-                if tool == .hash { Picker("Algorithm", selection: $hashKind) { ForEach(DevUtilities.HashKind.allCases) { Text($0.rawValue).tag($0) } }
-                    if let note = hashKind.note { Text(note).font(.caption).foregroundStyle(.secondary) } }
-            }
-            Section("Result") { result }
-        }
-        #if DEBUG
-        .onAppear {
-            if let name = UserDefaults.standard.string(forKey: "ShotTool"), let wanted = Tool(rawValue: name) { tool = wanted; loadExample() }
-        }
-        #endif
-    }
-
-    /// Fills the boxes for the tool in use with something that shows what it does.
-    private func loadExample() {
-        switch tool {
-        case .json: input = "{\"name\":\"Browser Setu\",\"tabs\":[3,1,2],\"private\":true,\"engine\":\"WebKit\"}"
-        case .url: input = "https://example.com/search?q=privacy browser&lang=en"
-        case .base64: input = "Browser Setu keeps your data on your device"
-        case .time: input = "1760803200"
-        case .regex: input = "(\\w+)@(\\w+)\\.com"; second = "write to ada@example.com or grace@navy.com today"
-        case .color: input = "#1B2A4A"
-        case .compare: input = "one\ntwo\nthree"; second = "one\n2\nthree\nfour"
-        case .hash: input = "Browser Setu"
-        }
-    }
-
-    private func editor(_ title: String, _ text: Binding<String>, height: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.caption).foregroundStyle(.secondary)
-            TextEditor(text: text).font(.system(.callout, design: .monospaced)).frame(height: height)
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.primary.opacity(0.15)))
-        }
-    }
-
-    private func out(_ text: String, copyable: Bool = true) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(text.isEmpty ? " " : text).font(.system(.callout, design: .monospaced)).textSelection(.enabled)
-            if copyable && !text.isEmpty { Button("Copy") { copyToPasteboard(text) }.buttonStyle(.borderless) }
-        }
-    }
-
-    @ViewBuilder private var result: some View {
-        switch tool {
-        case .json:
-            switch DevUtilities.formatJSON(input) {
-            case .ok(let pretty): out(pretty); Button("Copy Minified") { if case .ok(let m) = DevUtilities.formatJSON(input, pretty: false) { copyToPasteboard(m) } }.buttonStyle(.borderless)
-            case .failed(let why): Text(input.isEmpty ? "Paste JSON above." : why).foregroundStyle(input.isEmpty ? Color.secondary : Color.red)
-            }
-        case .url:
-            LabeledContent("Encoded") { out(DevUtilities.urlEncode(input)) }
-            LabeledContent("Decoded") { out(DevUtilities.urlDecode(input) ?? "Not valid percent-encoding.") }
-        case .base64:
-            LabeledContent("Encoded") { out(DevUtilities.base64Encode(input)) }
-            LabeledContent("URL-safe") { out(DevUtilities.base64Encode(input, urlSafe: true)) }
-            LabeledContent("Decoded") { out(input.isEmpty ? "" : (DevUtilities.base64Decode(input) ?? "Not valid Base64 text.")) }
-        case .time:
-            if let r = DevUtilities.readTimestamp(input) {
-                LabeledContent("Read as", value: r.unit); LabeledContent("UTC") { out(r.utc) }; LabeledContent("Local") { out(r.local) }
-            } else if let seconds = DevUtilities.timestamp(fromISO: input) {
-                LabeledContent("Seconds") { out(String(Int(seconds))) }; LabeledContent("Milliseconds") { out(String(Int(seconds * 1000))) }
-            } else { Text("Enter a Unix time (seconds, milliseconds) or a date such as 2026-10-18T09:30:00Z.").foregroundStyle(.secondary) }
-            Button("Now") { input = String(Int(Date().timeIntervalSince1970)) }.buttonStyle(.borderless)
-        case .regex:
-            switch DevUtilities.testRegex(input, in: second, flags: flags) {
-            case .failed(let why): Text(why).foregroundStyle(input.isEmpty ? Color.secondary : Color.red)
-            case .matches(let list):
-                Text(list.isEmpty ? "No match" : "\(list.count) match\(list.count == 1 ? "" : "es")").fontWeight(.medium)
-                ForEach(Array(list.prefix(50).enumerated()), id: \.offset) { i, m in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("\(i + 1). \(m.text)").font(.system(.callout, design: .monospaced))
-                        ForEach(Array(m.groups.enumerated()), id: \.offset) { g, text in Text("   group \(g + 1): \(text)").font(.caption.monospaced()).foregroundStyle(.secondary) }
-                    }
-                }
-            }
-        case .color:
-            ColorPicker("Pick a colour", selection: $picked, supportsOpacity: false).onChange(of: picked) { _, c in input = StartColor.hex(of: c) }
-            if let c = DevUtilities.parseColor(input) {
-                let v = DevUtilities.describeColor(c)
-                RoundedRectangle(cornerRadius: 6).fill(Color(red: c.r, green: c.g, blue: c.b)).frame(height: 28)
-                LabeledContent("Hex") { out(v.hex) }; LabeledContent("RGB") { out(v.rgb) }; LabeledContent("HSL") { out(v.hsl) }
-            } else { Text("Type #1B2A4A, rgb(27, 42, 74) or hsl(220, 47%, 20%), or pick one.").foregroundStyle(.secondary) }
-        case .compare:
-            let d = DevUtilities.diffLines(input, second)
-            Text("\(d.same) lines the same · \(d.removed.count) only on the left · \(d.added.count) only on the right").font(.caption).foregroundStyle(.secondary)
-            ForEach(Array(d.removed.prefix(200).enumerated()), id: \.offset) { Text("− " + $1).foregroundStyle(Color.red).font(.system(.callout, design: .monospaced)) }
-            ForEach(Array(d.added.prefix(200).enumerated()), id: \.offset) { Text("+ " + $1).foregroundStyle(Color.green).font(.system(.callout, design: .monospaced)) }
-        case .hash:
-            out(DevUtilities.hash(input, hashKind))
         }
     }
 }

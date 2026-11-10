@@ -11,7 +11,8 @@ BrowserSetu has no analytics, no telemetry, no accounts and no server of its own
 | Search suggestions | **off until the person turns it on** | the text typed in the address bar | the search engine the person chose | Disclose if Apple's definitions treat the chosen provider as a third-party recipient of user-entered data. No BrowserSetu server sees it. |
 | A submitted search | the person submits | the query | the chosen search engine | Same. |
 | Site icons | an icon is shown | an icon request | the site | No identifiers. |
-| Filter-list updates | **off by default**; when pressed or enabled | the list address | the list publisher | No cookies, referrer, cache validators beyond the request, or identifiers. |
+| Address-bar name look-up | typing, when the best match is a site already in history or bookmarks | a DNS look-up of that site's name only, at most once a minute per name | the DNS resolver | Never in a private tab, never with a proxy on, never what is typed. Sends nothing to the site. |
+| Filter-list updates | first launch and when a higher level needs a missing list, then only when pressed or when automatic updates (off by default) are on | the list address | the list publisher | No cookies, referrer, cache validators beyond the request, or identifiers. |
 | Chrome Web Store extension | the person adds one by address | one package request | Google's store | HTTPS only, restricted to Google's download host. |
 | Update check (downloadable Mac build only) | daily, can be turned off | the app's version | github.com | Sparkle; not in the App Store or iPhone builds. |
 | iCloud sync | opt-in | bookmarks, and settings and open tabs if chosen | the person's own iCloud | Sealed with the person's own passphrase before upload; BrowserSetu cannot read it. Verify the current questionnaire wording for data transmitted through iCloud. |

@@ -1,0 +1,18 @@
+{
+  "manifestVersion": 1,
+  "apiVersion": 1,
+  "runtime": "declarative",
+  "id": "org.example.sample-files",
+  "name": "Sample Files",
+  "version": "1.0.0",
+  "description": "Suggests download addresses and names for the example file pages on files.example.org. A teaching sample: it only ever names reserved example domains.",
+  "author": { "name": "Browser Setu examples" },
+  "entry": "rules.json",
+  "capabilities": ["resolve", "filename", "category"],
+  "hostPermissions": ["https://files.example.org/*"],
+  "proposeHosts": ["https://cdn.example.org/*"],
+  "storage": { "quotaBytes": 4096 },
+  "settings": [
+    { "name": "quality", "title": "Quality", "type": "string", "default": "standard", "options": ["standard", "high"] }
+  ]
+}

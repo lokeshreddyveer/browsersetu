@@ -75,12 +75,35 @@ extension BrowserModel {
         if name == activeWorkspace { applyWorkspaceTheme() }
     }
 
-    /// The accent the interface uses now: the active workspace's own if it has one, otherwise the general choice in Settings.
+    /// Saves (or with nil, removes) a workspace's gradient theme. The colours are kept inside the readable ranges; a gradient that cannot be made from the colours
+    /// given is refused. Choosing a gradient does not touch the workspace's accent swatch: a swatch chosen by hand still wins.
+    @discardableResult
+    func setWorkspaceGradient(_ name: String, _ gradient: WorkspaceGradient?) -> Bool {
+        guard let i = workspaces.firstIndex(where: { $0.name == name }) else { return false }
+        var clean: WorkspaceGradient?
+        if let gradient {
+            guard let valid = gradient.validated() else { notice = "A gradient needs two or three colours."; return false }
+            clean = valid
+        }
+        workspaceGradientMutate(i, clean)
+        if name == activeWorkspace { applyWorkspaceTheme() }
+        return true
+    }
+
+    /// The gradient of the workspace in front, if it has one.
+    var activeWorkspaceGradient: WorkspaceGradient? { workspaces.first { $0.name == activeWorkspace }?.gradient }
+
+    /// The accent the interface uses now: the workspace's own swatch if it has one, then its gradient's first colour (made readable in each look), otherwise the
+    /// general choice in Settings.
     func applyWorkspaceTheme() {
-        let own = workspaces.first { $0.name == activeWorkspace }?.accent.flatMap(AccentChoice.init(rawValue:))
+        let workspace = workspaces.first { $0.name == activeWorkspace }
+        let own = workspace?.accent.flatMap(AccentChoice.init(rawValue:))
         Theme.accent = (own ?? accent).color
         // A theme brings its own accent, unless the workspace has one of its own.
         if themeIsActive, own == nil, !accentChosen { Theme.accent = activeTheme.accent.color }
+        if own == nil, let gradient = workspace?.gradient, let light = gradient.accent(dark: false), let dark = gradient.accent(dark: true) {
+            Theme.accent = Color.workspaceAdaptive(light: light, dark: dark)
+        }
         objectWillChange.send()
     }
 

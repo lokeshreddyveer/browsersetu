@@ -55,7 +55,8 @@ extension BrowserModel {
     }
 
     private func saveSyncLedger() {
-        saveSetting("sync_ledger", encodedMap(["state": syncLedger]))
+        // The stored copy never holds a saved password: a keyed fingerprint stands in for it, and the Keychain supplies the real one on load.
+        saveSetting("sync_ledger", encodedMap(["state": SyncLedgerGuard.redacted(syncLedger, profile: profileName)]))
         saveSetting("sync_clock", encodedMap(["clock": syncClock]))
         saveSetting("sync_seq", String(syncSeq))
         saveSetting("sync_seen", encodedMap(syncSeen))
@@ -66,7 +67,7 @@ extension BrowserModel {
         observeLocalChanges()
         syncSeq += 1
         saveSyncLedger()
-        let tabs = tabs.filter { !$0.isPrivate && !$0.isBlank }.compactMap { tab in
+        let tabs = tabs.filter { $0.privacy.keepsTraces && !$0.isBlank }.compactMap { tab in
             tab.url.map { BackupPayload.Tab(url: $0.absoluteString, title: tab.displayTitle, group: tab.group.isEmpty ? nil : tab.group) }
         }
         var snapshot = BackupPayload(created: Date(), bookmarks: [], settings: [:])
@@ -223,11 +224,13 @@ extension BrowserModel {
         guard let index = syncDevices.firstIndex(where: { $0.id == id }) else { return }
         syncDevices[index].status = .blocked
         saveSyncDevices()
+        wifiKeys.unpin(id)                                          // its Wi-Fi key goes too: it has to be approved again to sync
         cloudSync?.revoke(deviceID: id)
         logSync("Blocked \(syncDevices[index].name)")
     }
 
     func forgetSyncDevice(_ id: String) {
+        wifiKeys.unpin(id)
         syncDevices.removeAll { $0.id == id }
         saveSyncDevices()
     }
@@ -295,10 +298,10 @@ extension BrowserModel {
     func pushCloud(passphrase: String) async {
         let snapshot = makeSyncSnapshot()
         let sealed = await Task.detached(priority: .utility) { try? SyncRules.sealedFitting(snapshot, passphrase: passphrase) }.value
-        guard let sealed else { syncStatus = "Could not prepare the data to sync."; recordSyncOutcome(push: true, error: "Could not prepare the data to sync."); return }
+        guard let sealed else { syncStatus = SyncProblem.prepare.message; recordSyncOutcome(push: true, error: SyncProblem.prepare.message); return }
         guard cloudSync?.push(sealed, deviceID: syncDeviceID) == true else {
             syncStatus = "There is too much to sync: iCloud’s sync space (1 MB for everything) would be exceeded. Turn off history or open-tab sync, or remove some bookmarks."
-            recordSyncOutcome(push: true, error: "Too much to sync for iCloud’s 1 MB space. Turn off history or open tabs, or remove some bookmarks.")
+            recordSyncOutcome(push: true, error: SyncProblem.tooLarge.message)
             logSync("Could not upload: too large for iCloud’s sync space")
             return
         }
@@ -326,7 +329,7 @@ extension BrowserModel {
         }
         if waiting > 0 { syncStatus = "\(waiting) device\(waiting == 1 ? " is" : "s are") waiting for your approval below." }
         else { syncStatus = wrongPhrase > 0 && taken == 0 ? "Another device uses a different sync passphrase." : (taken == 0 ? "No other device has synced yet." : "Synced.") }
-        if wrongPhrase > 0, taken == 0, waiting == 0 { recordSyncOutcome(push: false, error: "Another device uses a different sync passphrase.") }
+        if wrongPhrase > 0, taken == 0, waiting == 0 { recordSyncOutcome(push: false, error: SyncProblem.passphrase.message) }
         else { recordSyncOutcome(push: false, error: nil) }
     }
 
@@ -346,8 +349,79 @@ extension BrowserModel {
     /// The snapshot as it goes over the Wi-Fi link. The link is already encrypted with the one-time code, so it is not sealed again.
     func wifiSnapshot() -> Data? { try? JSONEncoder().encode(makeSyncSnapshot()) }
 
-    /// A snapshot arrived over Wi-Fi: take it in, and answer with this device's own so both sides end up the same.
-    func receiveWiFiSnapshot(_ data: Data) -> Data? {
+    /// The same, with this device's key and proof added so the other device can tell it is really this one (see WiFiTrust). This is what goes over the link.
+    func signedWiFiSnapshot() -> Data? {
+        var snapshot = makeSyncSnapshot()
+        WiFiTrust.sign(&snapshot, secret: wifiKeys.ownSecret())
+        return try? JSONEncoder().encode(snapshot)
+    }
+
+    private func signed(_ data: Data?) -> Data? {
+        guard let data, var snapshot = try? JSONDecoder().decode(BackupPayload.self, from: data) else { return nil }
+        WiFiTrust.sign(&snapshot, secret: wifiKeys.ownSecret())
+        return try? JSONEncoder().encode(snapshot)
+    }
+
+    /// A snapshot arrived over Wi-Fi. It is taken in only if the device that sent it is approved and proves who it is (asking the person the first time); then this
+    /// device's own snapshot goes back so both sides end up the same. Anything else changes nothing.
+    func acceptWiFiSnapshot(_ data: Data) async -> Data? {
+        guard let snapshot = try? JSONDecoder().decode(BackupPayload.self, from: data) else { return nil }
+        guard await authorizeWiFiPeer(snapshot) else { return nil }
+        return signed(mergeWiFiSnapshot(data))
+    }
+
+    /// The answer to a snapshot this device sent: the same checks apply, because the device that answered is also asking to change this one's data.
+    func acceptWiFiReply(_ reply: Data?, deviceName: String) async {
+        guard let reply, let snapshot = try? JSONDecoder().decode(BackupPayload.self, from: reply) else { syncStatus = "The other device did not answer."; return }
+        guard await authorizeWiFiPeer(snapshot) else { return }
+        mergeWiFiReply(snapshot, deviceName: deviceName)
+    }
+
+    /// Whether the device behind a Wi-Fi snapshot may change this device's data. Asks the person the first time, and says what would be exchanged.
+    private func authorizeWiFiPeer(_ snapshot: BackupPayload) async -> Bool {
+        let id = snapshot.deviceID ?? ""
+        let known = syncDevices.first { $0.id == id }
+        switch WiFiTrust.judge(snapshot, ownDeviceID: syncDeviceID, status: known?.status, pinned: wifiKeys.pinnedSecret(for: id)) {
+        case .reject(let why):
+            syncStatus = why
+            logSync("Refused a Wi-Fi sync: \(why)")
+            return false
+        case .accept:
+            _ = registerSyncDevice(id: id, name: snapshot.device)
+            return true
+        case .askToTrust:
+            let name = (snapshot.device?.isEmpty == false ? snapshot.device! : "Another device")
+            let exchanged = SyncCategory.allCases.filter { syncs($0) }.map(\.title).joined(separator: ", ")
+            let choice = await Dialogs.choose(
+                title: "Sync with “\(name)”?",
+                message: "A device called “\(name)” that has your code wants to sync with this one. If you approve, the two will exchange: \(exchanged.isEmpty ? "nothing (every kind is switched off)" : exchanged). "
+                    + "Passwords are exchanged only if “Saved passwords” is on here. Approve it only if you just started this on that device; it can sync with this one again later without asking, until you block it in Sync settings.",
+                buttons: ["Approve and Sync", "Block This Device", "Not Now"])
+            switch choice {
+            case 0:
+                if let key = snapshot.wifiKey.flatMap({ Data(base64Encoded: $0) }) { wifiKeys.pin(key, for: id) }
+                _ = registerSyncDevice(id: id, name: snapshot.device)
+                if let index = syncDevices.firstIndex(where: { $0.id == id }), syncDevices[index].status != .approved {
+                    syncDevices[index].status = .approved
+                    saveSyncDevices()
+                }
+                logSync("Approved \(name) for Wi-Fi sync")
+                return true
+            case 1:
+                _ = registerSyncDevice(id: id, name: snapshot.device)
+                blockSyncDevice(id)
+                wifiKeys.unpin(id)
+                syncStatus = "Blocked “\(name)”."
+                return false
+            default:
+                syncStatus = "Not synced: you did not approve “\(name)”."
+                return false
+            }
+        }
+    }
+
+    /// Merges a snapshot that has already been checked. Never call this with data that has not gone through `acceptWiFiSnapshot`.
+    func mergeWiFiSnapshot(_ data: Data) -> Data? {
         guard let snapshot = try? JSONDecoder().decode(BackupPayload.self, from: data) else { return nil }
         guard snapshot.syncGroup == syncGroupName else {
             syncStatus = "That device syncs in the group “\(snapshot.syncGroup ?? "none")”, not “\(syncGroupName)”. Use the same group name on both."
@@ -358,8 +432,8 @@ extension BrowserModel {
         return wifiSnapshot()
     }
 
-    func finishWiFiSync(reply: Data?, deviceName: String) {
-        guard let reply, let snapshot = try? JSONDecoder().decode(BackupPayload.self, from: reply) else { syncStatus = "The other device did not answer."; return }
+    /// Merges the answer to a snapshot this device sent, once it has been checked.
+    func mergeWiFiReply(_ snapshot: BackupPayload, deviceName: String) {
         guard snapshot.syncGroup == syncGroupName else {
             syncStatus = "That device syncs in the group “\(snapshot.syncGroup ?? "none")”, not “\(syncGroupName)”. Use the same group name on both."
             return

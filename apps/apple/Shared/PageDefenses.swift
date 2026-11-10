@@ -18,12 +18,35 @@ struct WebPolicy: Equatable {
     var autoplayExceptions = Set<String>()
     /// Presses "reject" on consent banners, and hides the ones left.
     var cookieBanners = false
+    /// Sites where cookie banners are left alone, and whether a banner that cannot be refused may be hidden (it is then reported as hidden, never as refused).
+    var consentOffSites = Set<String>()
+    var hideUnrefusableBanners = true
     /// Send no referrer to other sites.
     var referrerSameSiteOnly = false
+    /// Tells sites, with the standard Global Privacy Control signal, not to sell or share what they learn about the visitor.
+    var globalPrivacyControl = false
+    /// Links lose their `ping` attribute, which would report every click to a third party.
+    var blockLinkPings = false
+    /// Websites (name without "www.") that load in WebKit's Lockdown Mode: no JIT, no WebGL, few fonts and media formats. Safer, but some pages break.
+    var lockdownHosts = Set<String>()
+    /// Pages cannot reach this device or the home network, except the sites named here (name without "www.").
+    var blockLocalNetwork = false
+    var localNetworkAllowed = Set<String>()
+    /// Refuses Google's analytics, advertising and font servers, and the embedded social-network widgets.
+    var blockGoogleServices = false
+    var blockSocialWidgets = false
+    /// The click (with a key held) that opens a link in Glance instead of following it; `.none` leaves it to the link's menu.
+    var glanceTrigger: GlanceTrigger = .none
     /// Developer capture of the page's console, WebSocket connections and failed resources (runs in the page's own world).
     var devCapture = false
     /// A remembered playback speed for each website (name without "www.").
     var videoSpeeds: [String: Double] = [:]
+    /// Light websites are shown dark (see AdaptiveDark.swift); the sites named are darkened by choice, or never touched (name without "www.").
+    var darkPages: DarkPages = .off
+    var darkSites = Set<String>()
+    var darkSitesOff = Set<String>()
+    /// SponsorBlock's settings; nil (no script at all) while it is off or not agreed to.
+    var sponsorBlock: SponsorPolicy?
 }
 
 // MARK: - AMP links
@@ -63,9 +86,56 @@ enum AMPLinks {
 /// The page scripts behind the switches above. Plain text only; they are installed by `UserScriptInstaller`, the one file that puts scripts into pages.
 /// None of them can send anything back to the app.
 enum PageScripts {
+    /// Sets `host` to the website the person is on: the top page's, also from inside a frame from another site. A frame cannot read the top page's address when the two
+    /// are from different sites, but the browser tells it the addresses of the pages around it (`ancestorOrigins`), and the last of them is the top page. A frame that
+    /// used its own name here would give every page that embeds it the same answer, which is what lets one tracker tell the sites apart from the others.
+    static let topHostJS = """
+    var host = location.hostname.toLowerCase();
+    try { host = window.top.location.hostname.toLowerCase(); } catch (e) {
+      try { var ao = location.ancestorOrigins; if (ao && ao.length) host = new URL(ao[ao.length - 1]).hostname.toLowerCase(); } catch (e2) {}
+    }
+    """
+
     private static func json(_ value: Any) -> String {
         (try? String(data: JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed]), encoding: .utf8)) ?? "null"
     }
+
+    /// The script side of Global Privacy Control, for systems before 27 where WebKit cannot add the request header itself.
+    static let globalPrivacyControl = """
+    (function () {
+      try {
+        if (navigator.globalPrivacyControl === true) { return; }
+        Object.defineProperty(Navigator.prototype, 'globalPrivacyControl', { get: function () { return true; }, configurable: true, enumerable: true });
+      } catch (e) {}
+    })();
+    """
+
+    /// Removes the `ping` attribute from links, now and as the page adds them, so a click is not reported to a third party.
+    static let noLinkPings = """
+    (function () {
+      try {
+        function clean(root) {
+          var list = root.querySelectorAll ? root.querySelectorAll('a[ping],area[ping]') : [];
+          for (var i = 0; i < list.length; i++) { list[i].removeAttribute('ping'); }
+        }
+        function start() {
+          clean(document);
+          new MutationObserver(function (records) {
+            for (var i = 0; i < records.length; i++) {
+              var r = records[i];
+              if (r.type === 'attributes') { r.target.removeAttribute('ping'); continue; }
+              for (var j = 0; j < r.addedNodes.length; j++) {
+                var n = r.addedNodes[j];
+                if (n.nodeType === 1) { if (n.hasAttribute && n.hasAttribute('ping')) { n.removeAttribute('ping'); } clean(n); }
+              }
+            }
+          }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['ping'] });
+        }
+        if (document.documentElement) { start(); }
+        else { document.addEventListener('DOMContentLoaded', start); }
+      } catch (e) {}
+    })();
+    """
 
     /// Canvas, WebGL read-back, audio and processor count. The change is a pattern worked out from a number picked at random each time the app starts and the
     /// site's name, so within one site and one run the answers agree with each other, and another site (or the next run) gets different ones.
@@ -73,8 +143,7 @@ enum PageScripts {
         """
         (function () {
           var seed = \(seed), skip = \(json(Array(exceptions).sorted()));
-          var host = location.hostname.toLowerCase();
-          try { host = window.top.location.hostname.toLowerCase(); } catch (e) {}
+          \(topHostJS)
           host = host.replace(/^www\\./, '');
           if (skip.some(function (s) { return host === s || host.endsWith('.' + s); })) return;
           var h = seed >>> 0;
@@ -146,6 +215,24 @@ enum PageScripts {
             var real = navigator.hardwareConcurrency || 4, shown = Math.min(real, [4, 6, 8][h % 3]);
             Object.defineProperty(Navigator.prototype, 'hardwareConcurrency', { get: function () { return shown; }, configurable: true });
           } catch (e) {}
+          // The size of text and of page elements is scaled by a factor within three millionths, different for each site: far below anything a layout shows,
+          // but the exact widths a site measures to recognise installed fonts no longer repeat.
+          try {
+            var scale = 1 + (rng(7)() - 0.5) * 0.000006;
+            var mt = CanvasRenderingContext2D.prototype.measureText;
+            CanvasRenderingContext2D.prototype.measureText = function () {
+              var m = mt.apply(this, arguments);
+              try { var w = m.width * scale; return new Proxy(m, { get: function (t, k) { var v = t[k]; return k === 'width' ? w : (typeof v === 'function' ? v.bind(t) : v); } }); } catch (e) { return m; }
+            };
+            var rectOf = function (original) {
+              return function () {
+                var r = original.apply(this, arguments);
+                try { return new DOMRect(r.x * scale, r.y * scale, r.width * scale, r.height * scale); } catch (e) { return r; }
+              };
+            };
+            Element.prototype.getBoundingClientRect = rectOf(Element.prototype.getBoundingClientRect);
+            Range.prototype.getBoundingClientRect = rectOf(Range.prototype.getBoundingClientRect);
+          } catch (e) {}
         })();
         """
     }
@@ -176,22 +263,31 @@ enum PageScripts {
     /// Runs in every page and frame, before the page's own scripts. A page may start media (`play()`, an `autoplay` attribute, a video that begins on its own) only within six
     /// seconds of a real tap, click or key press. Scrolling is neither: on a phone a scroll counts as a touch to WebKit, which is how a feed could start videos while you scrolled.
     /// The six seconds cover the page that opens after a tap and starts its own player. Sites in `exceptions` are left alone.
-    static func noAutoplay(exceptions: Set<String>) -> String {
+    static func noAutoplay(exceptions: Set<String>, grant: String = "") -> String {
         """
         (function () {
           var skip = \(json(Array(exceptions).sorted()));
-          var host = location.hostname.toLowerCase();
-          try { host = window.top.location.hostname.toLowerCase(); } catch (e) {}
+          \(topHostJS)
           host = host.replace(/^www\\./, '');
           if (skip.some(function (s) { return host === s || host.endsWith('.' + s); })) return;
-          var armedUntil = 0;
-          function arm(e) { if (e.isTrusted) armedUntil = Date.now() + 6000; }
-          ['click', 'keydown', 'pointerup', 'touchend'].forEach(function (name) { if (name === 'click' || name === 'keydown') window.addEventListener(name, arm, true); });
-          try { var stored = Number(sessionStorage.getItem('__bsArm') || 0); if (Date.now() - stored < 8000) armedUntil = Date.now() + 6000; } catch (e) {}
-          window.addEventListener('click', function (e) { if (e.isTrusted) { try { sessionStorage.setItem('__bsArm', String(Date.now())); } catch (x) {} } }, true);
+          // The page counts as "touched" from the first real tap, click or key press on it, and stays so: a video started afterwards (the one after an
+          // advert, the next in a playlist, a player that builds a new element) is the viewer's doing. Before that, nothing may start by itself.
+          var touched = false;
+          function touch(e) { if (e.isTrusted) { touched = true; try { sessionStorage.setItem('__bsArm', String(Date.now())); } catch (x) {} } }
+          ['click', 'keydown', 'touchend', 'pointerup'].forEach(function (name) { window.addEventListener(name, touch, true); });
+          // Following a link to a video on the same website keeps the permission for the first seconds of the next page.
+          try { if (Date.now() - Number(sessionStorage.getItem('__bsArm') || 0) < 8000) touched = true; } catch (e) {}
+          try { if (navigator.userActivation && navigator.userActivation.hasBeenActive) touched = true; } catch (e) {}
+          // The browser's own controls (the player panel's Play button) are the viewer's doing, but reach the page as a script, not as a tap. Just before such a command the browser sends this
+          // event, whose name is chosen at random each time the app starts and is known only to the browser and to this script (a page cannot read this script). It lets playback start for
+          // the next few seconds. The listener is registered with the original method, so a page that later replaces addEventListener cannot see or reuse it.
+          var granted = 0;
+          var grantName = \(json(grant));
+          if (grantName) { try { EventTarget.prototype.addEventListener.call(window, grantName, function () { granted = Date.now(); }); } catch (e) {} }
+          function viewerActive() { return granted > 0 && Date.now() - granted < 8000; }
           var realPlay = HTMLMediaElement.prototype.play;
           HTMLMediaElement.prototype.play = function () {
-            if (Date.now() <= armedUntil || this.controls) return realPlay.apply(this, arguments);
+            if (touched || viewerActive()) return realPlay.apply(this, arguments);
             try { this.pause(); } catch (e) {}
             return Promise.reject(new DOMException('Playback needs a tap first.', 'NotAllowedError'));
           };
@@ -205,7 +301,7 @@ enum PageScripts {
           } catch (e) {}
           window.addEventListener('play', function (e) {
             var el = e.target;
-            if (el && el.pause && !el.controls && Date.now() > armedUntil) { try { el.pause(); } catch (x) {} }
+            if (el && el.pause && !touched && !viewerActive()) { try { el.pause(); } catch (x) {} }
           }, true);
         })();
         """
@@ -258,6 +354,14 @@ extension BrowserModel {
         loadYouTubeRules(get)
         blockAutoplay = get("block_autoplay") != "0"
         hideCookieBanners = get("cookie_banners") != "0"
+        hideUnrefusableBanners = get("cookie_banners_hide") != "0"
+        consentOffSites = list("consent_off")
+        sponsorActions = Self.decodeMap(get("sponsor_actions"), as: String.self)
+        sponsorOffSites = list("sponsor_off")
+        if let raw = get("sponsor_consent"), let seconds = Double(raw) { sponsorConsentDate = Date(timeIntervalSince1970: seconds) } else { sponsorConsentDate = nil }
+        if let server = get("sponsor_server"), SponsorBlockService.validServer(server) { sponsorServer = server }
+        sponsorBlockEnabled = get("sponsor_on") == "1" && sponsorConsentDate != nil
+        consentLog = (get("consent_log")?.data(using: .utf8)).flatMap { try? JSONDecoder().decode([ConsentRecord].self, from: $0) } ?? []
         videoSpeeds = Self.decodeMap(get("video_speeds"), as: Double.self)
         autoplayExceptions = list("autoplay_exceptions")
     }
@@ -295,7 +399,8 @@ struct PageDefensesSection: View {
                 Toggle("Keep the YouTube ad rules up to date", isOn: $model.keepYouTubeRulesFresh)
                 YouTubeRulesRow()
             }
-            Toggle("Randomize canvas, audio and processor details", isOn: $model.randomizeFingerprint)
+            Toggle("Randomize canvas, audio and processor details (experimental)", isOn: $model.randomizeFingerprint)
+                .settingsNoted("Off unless you turn it on. It works by changing what a page's own scripts read, so a site that looks for that can tell; it does not cover fonts, screen size or graphics-card names, and it can upset pages that need exact pixels. Use “Not randomized on” for a site it breaks.")
             if model.randomizeFingerprint, !model.fingerprintExceptions.isEmpty {
                 ShowMoreRows(model.fingerprintExceptions.sorted(), id: \.self) { site in
                     HStack {

@@ -6,8 +6,10 @@ import SwiftUI
 struct InlineBar: View {
     @EnvironmentObject var model: BrowserModel
     let leadingInset: CGFloat
+    /// The width this bar has, so it can fold its optional buttons into More when the window is narrow.
+    let width: CGFloat
 
-    static let height: CGFloat = 40
+    static let height: CGFloat = LayoutMetrics.toolbarHeight
     /// The strip that holds the tabs, and the gap between it and the selected tab's field, as in Safari.
     static let content: CGFloat = 30
     static let inset: CGFloat = 2
@@ -17,32 +19,38 @@ struct InlineBar: View {
     static func fieldWidth(window: CGFloat) -> CGFloat { min(520, max(240, window * 0.4)) }
 
     var body: some View {
+        // The same fold rule as the standard toolbar: below about 720 points the optional buttons move into More, so the tabs and the address field keep room.
+        // At full width nothing changes, and One Row still keeps its three buttons.
+        let priority = ToolbarPriority(fitting: width, leadingInset: leadingInset, extras: model.toolbarExtrasCount)
         HStack(spacing: 10) {
             Color.clear.frame(width: leadingInset - 4, height: 1)
-            ChromeButton(symbol: "sidebar.left", help: "Toggle Sidebar", identifier: "sidebar-button") { model.sidebarVisible.toggle() }
+            ChromeButton(symbol: "sidebar.left", help: "Toggle Sidebar", identifier: "sidebar-button") { model.toggleSidebar() }
             if let tab = model.active {
-                HStack(spacing: 0) { NavigationButtons(tab: tab, showForward: true, hideReload: true) }
+                HStack(spacing: 0) { NavigationButtons(tab: tab, showForward: priority.showForward, hideReload: true) }
             }
             InlineTabs(address: model.addressBar)
             HStack(spacing: 0) {
                 ExtensionActionButtons(center: model.extensionCenter)
                 ToolbarExtras()
-                if let url = model.active?.url, model.active?.isBlank == false {
+                if priority.showOptional, let url = model.active?.url, model.active?.isBlank == false {
                     ShareLink(item: url) { Image(systemName: "square.and.arrow.up") }
                         .buttonStyle(ChromeButtonStyle()).help("Share").accessibilityLabel("Share")
                 }
-                if model.shows(.bookmark) {
+                if model.shows(.bookmark) && priority.showBookmark {
                     ChromeButton(symbol: model.activeBookmarked ? "star.fill" : "star", help: "Bookmark This Page", identifier: "bookmark-button",
                                  tint: model.activeBookmarked ? .yellow : nil) { model.toggleBookmark() }
                         .disabled(model.active?.isBlank ?? true)
                 }
-                if model.shows(.downloads) { DownloadsToolbarButton(coordinator: model.downloads) }
+                if model.shows(.media) && priority.showDownloads { MediaToolbarButton() }
+                if model.shows(.downloads) && priority.showDownloads { DownloadsToolbarButton(coordinator: model.downloads) }
                 // One Row always keeps these three, as it always has.
-                ChromeButton(symbol: "plus", help: "New Tab", identifier: "new-tab-button") { model.newTab() }
-                ChromeButton(symbol: "square.on.square", help: "Show Tab Overview", identifier: "overview-button") {
-                    model.overviewVisible ? model.hideOverview() : model.showOverview()
+                if priority.showOptional {
+                    ChromeButton(symbol: "plus", help: "New Tab", identifier: "new-tab-button") { model.newTab() }
+                    ChromeButton(symbol: "square.on.square", help: "Show Tab Overview", identifier: "overview-button") {
+                        model.overviewVisible ? model.hideOverview() : model.showOverview()
+                    }
                 }
-                MoreMenu(priority: ToolbarPriority(width: 1000))
+                MoreMenu(priority: priority)
             }
         }
         .padding(.trailing, 8)
@@ -122,6 +130,8 @@ struct InlineTabs: View {
             .onAppear { publish(span) }
             .onChange(of: span) { _, new in publish(new) }
         }
+        // The Essentials sit to the left of the row of tabs; the row gets the width that is left.
+        .safeAreaInset(edge: .leading, spacing: 0) { EssentialsInline(size: 28).padding(.leading, 8) }
         .acceptsDroppedTabs(model)
         .accessibilityIdentifier("tab-bar")
     }

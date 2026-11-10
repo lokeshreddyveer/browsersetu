@@ -235,6 +235,10 @@ final class DownloadsAndFilesTests: XCTestCase {
     }
 
     func testSortingSendsANewDownloadIntoItsKindFolderAndNeverOutsideTheDownloadsFolder() {
+        // This runs against the real Downloads folder, which may already hold the person's own "Documents" folder from organised downloads: it is never touched.
+        // Only a folder this test itself caused to exist, and only if it is still empty, is removed.
+        let kindFolder = DownloadCoordinator.directory.appendingPathComponent("Documents", isDirectory: true)
+        let existedBefore = FileManager.default.fileExists(atPath: kindFolder.path)
         let c = DownloadCoordinator()
         c.organize = true
         let started = c.begin(suggestedName: "../../escape.pdf", cancel: {})
@@ -242,7 +246,9 @@ final class DownloadsAndFilesTests: XCTestCase {
         XCTAssertTrue(started.destination.path.hasPrefix(DownloadCoordinator.directory.path))
         XCTAssertEqual(started.destination.lastPathComponent, "escape.pdf")
         c.discard(started.id)
-        try? FileManager.default.removeItem(at: DownloadCoordinator.directory.appendingPathComponent("Documents", isDirectory: true))
+        if !existedBefore, (try? FileManager.default.contentsOfDirectory(atPath: kindFolder.path))?.isEmpty == true {
+            try? FileManager.default.removeItem(at: kindFolder)
+        }
     }
 
     func testAnInterruptedDownloadCanBeResumedOrDismissed() {
@@ -417,7 +423,7 @@ final class ScriptsAndSecretsTests: XCTestCase {
         script.enabled = true
         let code = UserScriptInstaller.wrapped(script)
         XCTAssertTrue(code.contains("doThing();"))
-        XCTAssertTrue(code.contains("host.endsWith('.' + s)"))
+        XCTAssertTrue(code.contains("new RegExp(source, 'i').test(href)"), "pages are matched by their own address, as data")
         XCTAssertFalse(code.contains("alert(1);//\", sites"), "the name is JSON text, so a quote in it cannot end the string")
         XCTAssertTrue(code.contains("\\\"); alert(1);"), "a quote in the name is escaped")
     }

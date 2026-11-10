@@ -97,34 +97,51 @@ extension BrowserModel {
     }
 }
 
+/// Which image addresses the preview grid may fetch (when a person taps one): an ordinary http or https address on the open internet, not this device or the home network.
+enum PreviewImageRules {
+    static func allowed(_ text: String) -> URL? {
+        guard let url = URL(string: text), let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https", let host = url.host?.lowercased(), !host.isEmpty else { return nil }
+        if host == "localhost" || host.hasSuffix(".localhost") || host.hasSuffix(".local") || host.hasSuffix(".internal") || host.hasSuffix(".lan") { return nil }
+        if host.contains(":") { return nil }      // an IPv6 address: not a public image host worth the risk
+        let parts = host.split(separator: ".").compactMap { Int($0) }
+        if parts.count == 4 {
+            let (a, b) = (parts[0], parts[1])
+            if a == 10 || a == 127 || a == 0 || (a == 192 && b == 168) || (a == 172 && (16...31).contains(b)) || (a == 169 && b == 254) || (a == 100 && (64...127).contains(b)) { return nil }
+        }
+        return url
+    }
+}
+
 struct PageToolsView: View {
-    enum Tool: String, CaseIterable, Identifiable { case images = "Images", tables = "Tables", documents = "Documents", outline = "Outline", details = "Details", video = "Video", text = "Text", versions = "Versions", listen = "Listen"; var id: String { rawValue } }
+    enum Tool: String, CaseIterable, Identifiable {
+        case page = "Page", images = "Images", tables = "Tables", documents = "Documents", outline = "Outline", details = "Details", video = "Video", text = "Text", versions = "Versions", listen = "Listen"
+        var id: String { rawValue }
+        /// The tools that read the page's content first (the rest work at once).
+        var readsPageContent: Bool { [.images, .tables, .documents, .outline, .details, .listen].contains(self) }
+        /// "Page" is the menu bar's page commands in one place; only the Mac has that menu bar.
+        static var available: [Tool] {
+            #if os(macOS)
+            allCases
+            #else
+            allCases.filter { $0 != .page }
+            #endif
+        }
+    }
     @EnvironmentObject var model: BrowserModel
     @StateObject private var reader = SpeechReader()
-    @State private var tool: Tool = .images
+    @State private var tool: Tool = Tool.available.first ?? .images
     @State private var pageText = ""
     @State private var details: [FoundDetail] = []
 
     var body: some View {
         VStack(spacing: 0) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ForEach(Tool.allCases) { item in
-                        Button { tool = item } label: {
-                            Text(item.rawValue).font(.callout.weight(tool == item ? .semibold : .regular))
-                                .padding(.horizontal, 12).padding(.vertical, 6)
-                                .background(tool == item ? Color.accentColor.opacity(0.18) : Color.clear, in: Capsule())
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(12)
-            }
+            toolPicker.padding(.horizontal, 16).padding(.vertical, 10)
             Divider()
             Group {
-                if model.extractingPage { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
+                if model.extractingPage && tool.readsPageContent { ProgressView("Reading the page…").controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity) }
                 else {
                     switch tool {
+                    case .page: pageActions
                     case .images: images
                     case .tables: tables
                     case .documents: documents
@@ -147,7 +164,33 @@ struct PageToolsView: View {
         .accessibilityIdentifier("page-tools")
     }
 
+    /// On the Mac a native segmented control: the sheet is always wide enough for all the tools (see the sheet's minimum width), and a segmented control shortens a label rather than cutting a tool
+    /// off at the edge, as the old row of buttons did. A menu elsewhere (a phone is too narrow for ten segments).
+    @ViewBuilder private var toolPicker: some View {
+        #if os(macOS)
+        Picker("Page tool", selection: $tool) { ForEach(Tool.available) { Text($0.rawValue).tag($0) } }
+            .pickerStyle(.segmented).labelsHidden()
+            .accessibilityLabel("Page tool")
+            .accessibilityIdentifier("page-tools-picker")
+        #else
+        Picker("Page tool", selection: $tool) { ForEach(Tool.available) { Text($0.rawValue).tag($0) } }
+            .pickerStyle(.menu).labelsHidden().frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityLabel("Page tool")
+            .accessibilityIdentifier("page-tools-picker")
+        #endif
+    }
+
+    @ViewBuilder private var pageActions: some View {
+        #if os(macOS)
+        PageActionsView()
+        #else
+        EmptyView()
+        #endif
+    }
+
     private var extract: PageExtract { model.pageExtract ?? PageExtract() }
+    /// Images whose preview was asked for. None is fetched until its own tap: the page's addresses are the page's to name, not this panel's to open on its own.
+    @State private var shownImages = Set<String>()
 
     private func empty(_ title: String, _ symbol: String) -> some View {
         ContentUnavailableView(title, systemImage: symbol, description: Text("Nothing of this kind was found on the page in front."))
@@ -159,10 +202,24 @@ struct PageToolsView: View {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 10)], spacing: 10) {
                     ForEach(extract.images) { image in
                         VStack(alignment: .leading, spacing: 4) {
-                            AsyncImage(url: URL(string: image.url)) { phase in
-                                switch phase {
-                                case .success(let loaded): loaded.resizable().scaledToFill()
-                                default: Rectangle().fill(.quaternary)
+                            Group {
+                                if shownImages.contains(image.url), !(model.active?.leavesNoTrace ?? true), let url = PreviewImageRules.allowed(image.url) {
+                                    AsyncImage(url: url) { phase in
+                                        switch phase {
+                                        case .success(let loaded): loaded.resizable().scaledToFill()
+                                        default: Rectangle().fill(.quaternary)
+                                        }
+                                    }
+                                } else {
+                                    Button { shownImages.insert(image.url) } label: {
+                                        ZStack {
+                                            Rectangle().fill(.quaternary)
+                                            Image(systemName: "photo").font(.title3).foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    .buttonStyle(.plain)
+                                    .disabled(PreviewImageRules.allowed(image.url) == nil || (model.active?.leavesNoTrace ?? true))
+                                    .accessibilityLabel("Show this image")
                                 }
                             }
                             .frame(height: 100).clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))

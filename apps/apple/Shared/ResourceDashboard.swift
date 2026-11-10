@@ -12,7 +12,7 @@ struct ResourceDashboardView: View {
     private var asleep: [TabController] { tabs.filter(\.isDiscarded) }
 
     var body: some View {
-        List {
+        PanelList {
             GovernorSection(governor: model.governor)
             Section {
                 HStack { Label("Memory used by Browser Setu", systemImage: "memorychip"); Spacer(); Text(Self.format(memory)).monospacedDigit().foregroundStyle(.secondary) }

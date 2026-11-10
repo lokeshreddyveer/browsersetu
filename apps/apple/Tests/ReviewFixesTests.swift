@@ -22,8 +22,9 @@ final class ReviewFixesTests: XCTestCase {
         first.windows.closedWindows = [ClosedWindow(urls: [URL(string: "https://example.net/window")!])]
         XCTAssertTrue(first.tabs.contains(where: \.isPrivate))
 
-        for window in first.windows.all { window.closeEverythingInThisWindow() }
-        first.windows.closedWindows = []
+        Dialogs.testHandler = { _, _, _ in 1 }
+        defer { Dialogs.testHandler = nil }
+        await first.panic()
 
         XCTAssertTrue(first.closedTabs.isEmpty, "Reopen Closed Tab must not reveal what was open")
         XCTAssertTrue(second.closedTabs.isEmpty, "…in any window")

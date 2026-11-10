@@ -105,6 +105,19 @@ enum DownloadScanner {
     }
 }
 
+extension DownloadScanner {
+    /// What is worth telling the person before a finished download is opened: only the worst kind (a document that is really a program). Reads the name and the first bytes, nothing else.
+    static func warning(forFileAt url: URL) -> String? {
+        var header: [UInt8] = []
+        // Only an ordinary file on a local volume is read: never a folder, a pipe, or a file that would first have to be fetched from a network volume or iCloud.
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .volumeIsLocalKey, .ubiquitousItemDownloadingStatusKey]
+        guard let v = try? url.resourceValues(forKeys: keys), v.isRegularFile == true, v.volumeIsLocal != false,
+              v.ubiquitousItemDownloadingStatus == nil || v.ubiquitousItemDownloadingStatus == .current else { return nil }
+        if let h = try? FileHandle(forReadingFrom: url) { defer { try? h.close() }; header = Array((try? h.read(upToCount: 16)) ?? Data()) }
+        return assess(name: url.lastPathComponent, header: header).first { $0.severity == .danger }?.text
+    }
+}
+
 /// User-agent choices for sites that want a different browser, device or page.
 struct UserAgentPreset: Identifiable, Equatable {
     let id: String
@@ -185,7 +198,7 @@ extension BrowserModel {
         if siteNotes[key] != nil { settings.append("notes") }
         if siteAppearance[key] != nil { settings.append("appearance") }
         if siteUserAgents[key] != nil { settings.append("browser identity") }
-        if darkSites.contains(key) { settings.append("dark pages") }
+        if darkSites.contains(key) || darkSitesOff.contains(key) { settings.append("dark pages") }
         if jsOffSites.contains(key) { settings.append("JavaScript off") }
         if neverSleepSites.contains(key) { settings.append("never sleeps") }
         if fingerprintExceptions.contains(key) { settings.append("not randomized") }
@@ -218,7 +231,7 @@ extension BrowserModel {
         if siteNotes[key] != nil { var m = siteNotes; m[key] = nil; setSiteNotes(m); changed += 1 }
         if siteAppearance[key] != nil { setSiteAppearance(host, nil); changed += 1 }
         if siteUserAgents[key] != nil { setSiteUserAgent(host, nil); changed += 1 }
-        if darkSites.contains(key) { setDarkSite(host, false); changed += 1 }
+        if darkSites.contains(key) || darkSitesOff.contains(key) { setDarkChoice(host: host, .automatic); changed += 1 }
         if jsOffSites.contains(key) { setScripts(host: host, allowed: true); changed += 1 }
         if neverSleepSites.contains(key) { setNeverSleeps(host: host, false); changed += 1 }
         if fingerprintExceptions.contains(key) { setFingerprintException(host: host, allowed: false); changed += 1 }
@@ -320,10 +333,37 @@ extension BrowserModel {
         for tab in tabs where FaviconStore.key(forHost: tab.url?.host) == key { tab.engine.setUserAgent(siteUserAgent(forHost: tab.url?.host)); if !tab.isBlank { tab.reload() } }
     }
 
+    /// Changes several privacy switches and tells the engine once at the end, not after each one (every push reinstalls scripts on every open tab).
+    func changingPrivacySwitches(_ changes: () -> Void) {
+        policyPushSuspended = true
+        changes()
+        policyPushSuspended = false
+        pushWebPolicy()
+    }
+
     func pushWebPolicy() {
+        guard !policyPushSuspended else { return }
         engine.setWebPolicy(WebPolicy(blockWebRTC: blockWebRTC, exceptions: webRTCExceptions, randomizeFingerprint: randomizeFingerprint,
                                       fingerprintExceptions: fingerprintExceptions, deAMP: deAMP, blockVideoAds: blockVideoAds, youtubeRules: youtubeRules,
-                                      blockAutoplay: blockAutoplay, autoplayExceptions: autoplayExceptions, cookieBanners: hideCookieBanners, referrerSameSiteOnly: referrerMode == .sameSite, devCapture: devCapture, videoSpeeds: videoSpeeds))
+                                      blockAutoplay: blockAutoplay, autoplayExceptions: autoplayExceptions, cookieBanners: hideCookieBanners, consentOffSites: consentOffSites, hideUnrefusableBanners: hideUnrefusableBanners, referrerSameSiteOnly: referrerMode == .sameSite,
+                                      globalPrivacyControl: globalPrivacyControl, blockLinkPings: blockLinkPings, lockdownHosts: lockdownHosts,
+                                      blockLocalNetwork: blockLocalNetwork, localNetworkAllowed: localNetworkAllowed, blockGoogleServices: blockGoogleServices, blockSocialWidgets: blockSocialWidgets, glanceTrigger: glanceEnabled ? glanceTrigger : .none, devCapture: devCapture, videoSpeeds: videoSpeeds,
+                                      darkPages: darkPages, darkSites: darkSites, darkSitesOff: darkSitesOff, sponsorBlock: sponsorPolicy))
+    }
+
+    /// Loads the site in Lockdown Mode from the next load on: no JIT, no WebGL, few fonts and media formats. Some pages will not work.
+    func setLockdown(host: String?, on: Bool) {
+        guard let key = FaviconStore.key(forHost: host) else { return }
+        if on { lockdownHosts.insert(key) } else { lockdownHosts.remove(key) }
+        saveSetting("lockdown_hosts", encodedMap(["list": Array(lockdownHosts).sorted()]))
+        pushWebPolicy()
+    }
+
+    func setLocalNetworkAllowed(host: String?, on: Bool) {
+        guard let key = FaviconStore.key(forHost: host) else { return }
+        if on { localNetworkAllowed.insert(key) } else { localNetworkAllowed.remove(key) }
+        saveSetting("local_network_allowed", encodedMap(["list": Array(localNetworkAllowed).sorted()]))
+        pushWebPolicy()
     }
 
     func setWebRTCException(host: String?, allowed: Bool) {

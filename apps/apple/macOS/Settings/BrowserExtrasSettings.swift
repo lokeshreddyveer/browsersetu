@@ -103,6 +103,13 @@ struct TabHoverAndStacksSection: View {
             Text("A card with the page as you last saw it, its title and address. Pages you have not left yet show only the title.")
         }
         Section {
+            Toggle("Hide the tab strip while only one tab is open", isOn: $model.hideSingleTabStrip)
+                .settingsNoted("It comes back as soon as there is a second tab. Applies to the strip under the toolbar.")
+            Toggle("Settle the sidebar on its standard width when resizing", isOn: $model.snapSidebarWidth)
+        } header: {
+            Text("Strip and Sidebar")
+        }
+        Section {
             Toggle("Stack tabs of a group together in the tab strip", isOn: $model.tabStacks)
         } header: {
             Text("Tab Stacks")
@@ -123,7 +130,7 @@ struct WebPanelsSection: View {
             if model.webPanels.isEmpty { Text("No web panels").foregroundStyle(.secondary) }
             ForEach(model.webPanels) { panel in
                 HStack {
-                    VStack(alignment: .leading) { Text(panel.name).fontWeight(.medium); Text(panel.url).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+                    VStack(alignment: .leading) { Text(panel.name).fontWeight(.medium); Text(panel.url).settingsNote().lineLimit(1) }
                     Spacer()
                     Button("Open") { model.toggleWebPanel(panel.id) }.buttonStyle(.borderless)
                     Button(role: .destructive) { model.webPanels.removeAll { $0.id == panel.id }; if model.openPanelID == panel.id { model.openPanelID = nil } } label: { Image(systemName: "trash") }
@@ -186,7 +193,7 @@ struct CommandChainsSection: View {
                     HStack {
                         Label(chain.name, systemImage: "link")
                         Spacer()
-                        Text("\(chain.steps.count) step\(chain.steps.count == 1 ? "" : "s")").font(.caption).foregroundStyle(.secondary)
+                        Text("\(chain.steps.count) step\(chain.steps.count == 1 ? "" : "s")").settingsNote()
                     }
                 }
             }
@@ -238,7 +245,7 @@ struct BreakAndPageActionsSection: View {
         Section {
             Button(model.breakActive ? "End Break (Resume Media)" : "Break: Pause All Media Now") { model.toggleBreakMode() }
             Text("Pauses video and sound in every tab, and plays again only what it paused. It is also in the toolbar's right-click menu and the command palette.")
-                .font(.caption).foregroundStyle(.secondary)
+                .settingsNote()
         } header: {
             Text("Break Mode")
         }

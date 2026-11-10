@@ -10,24 +10,52 @@ final class BrowserUITests: XCTestCase {
         root = "bs-ui-\(UUID().uuidString)"
         _ = try? String(contentsOf: URL(string: "http://127.0.0.1:18765/_reset")!, encoding: .utf8)
         app = XCUIApplication()
-        app.launchArguments += ["-UITestRoot", root]
+        app.launchArguments += ["-UITestRoot", root, "-UIState", "none"]
         app.launch()
         try requireForeground()
+        FocusDiagnostics.report(app: app, label: "launched", test: self)
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "could not be opened")).firstMatch.waitForExistence(timeout: 1.5),
                        "profile failed to open: test data folder is not writable by the app")
     }
 
     override func tearDown() {
+        // A test that failed leaves the app's own window and its accessibility tree behind, so the cause can be read afterwards instead of guessed.
+        if let run = testRun, !run.hasSucceeded, let app, app.state == .runningForeground || app.state == .runningBackground {
+            let shot = XCTAttachment(screenshot: app.windows["browser-AppWindow-1"].safeScreenshot()); shot.name = "failure-window"; shot.lifetime = .keepAlways; add(shot)
+            let tree = XCTAttachment(string: app.debugDescription); tree.name = "failure-hierarchy"; tree.lifetime = .keepAlways; add(tree)
+        }
         app?.terminate()
     }
 
     /// Keystrokes go to the frontmost app. If it is not ours, skip rather than type into someone else's window.
     func requireForeground() throws {
+        // Ask for THIS process (the app under test) to come to the front: another copy of the app, the installed one, shares its identifier.
+        app.activate()
         let ok = app.wait(for: .runningForeground, timeout: 10)
         try XCTSkipUnless(ok, "Browser Setu is not the frontmost app; refusing to send keystrokes")
     }
 
     func omnibox() -> XCUIElement { app.textFields["omnibox"] }
+
+    /// Waits until a field has stopped moving (its frame is the same for three looks in a row). Clicking the address bar swells it out of the tab, and keys sent while it is still moving can be lost with the
+    /// field editor that is replaced under them; a person types after it has settled.
+    func settle(_ element: XCUIElement, timeout: TimeInterval = 4) {
+        let end = Date().addingTimeInterval(timeout)
+        var last = element.frame, same = 0
+        while Date() < end, same < 3 {
+            Thread.sleep(forTimeInterval: 0.1)
+            let now = element.frame
+            same = now == last ? same + 1 : 0
+            last = now
+        }
+    }
+
+    /// The field that takes typing right now. On a blank tab the design hands the address bar's job to the search field in the middle of the page ("start-search": it already has the keyboard, and clicking
+    /// the address bar leaves it there), so that is where an address is typed; on a loaded page it is the address bar itself.
+    func typingField() -> XCUIElement {
+        let start = app.textFields["start-search"]
+        return start.exists && start.isHittable ? start : omnibox()
+    }
     func tabChips() -> XCUIElementQuery { app.descendants(matching: .any).matching(identifier: "tab-chip") }
 
     func serverSaw(_ path: String) -> Bool {
@@ -42,9 +70,12 @@ final class BrowserUITests: XCTestCase {
 
     func navigate(to address: String) {
         guard app.state == .runningForeground else { XCTFail("lost foreground; not typing"); return }
-        let box = omnibox()
-        XCTAssertTrue(box.waitForExistence(timeout: 10), "address bar not found")
+        // Some layouts have no address bar on a blank tab: the search box in the page takes its place.
+        XCTAssertTrue(omnibox().waitForExistence(timeout: 10) || app.textFields["start-search"].waitForExistence(timeout: 3), "no field to type an address into")
+        let box = typingField()
+        FocusDiagnostics.report(app: app, label: "before-click", test: self)
         box.click()
+        FocusDiagnostics.report(app: app, label: "after-click", test: self)
         box.typeText(address)
         XCTAssertEqual(box.value as? String, address, "native typing must preserve every character")
         capture("address-before-return")
@@ -75,8 +106,9 @@ final class BrowserUITests: XCTestCase {
         XCTAssertTrue(waitFor(15) { chip.exists && chip.label == "Page" }, "page did not load")
         app.typeKey("d", modifierFlags: .command)
         app.typeKey("b", modifierFlags: [.command, .shift])
-        let url = "http://127.0.0.1:18765/page"
-        let row = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@ OR title CONTAINS %@", url, url, url)).firstMatch
+        // The Bookmarks list shows a bookmark by its title and its host ("Page, 127.0.0.1"), not by the whole address.
+        let listed = "Page, 127.0.0.1"
+        let row = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@ OR title CONTAINS %@", listed, listed, listed)).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 8), "bookmark not listed: \(String(app.debugDescription.prefix(2500)))")
     }
 
@@ -103,6 +135,9 @@ final class BrowserUITests: XCTestCase {
         XCTAssertTrue(waitFor(15) { self.tabChips().firstMatch.label == "Page" })
         let box = omnibox()
         box.click()
+        // The field is typed into only once it has the keyboard (clicking it starts editing); typing before that loses the first characters.
+        XCTAssertTrue(waitFor(6) { (box.value(forKey: "hasKeyboardFocus") as? Bool) == true }, "the address bar did not take the keyboard after the click")
+        settle(box)
         app.typeKey("a", modifierFlags: .command)
         app.typeText("pag")
         XCTAssertEqual(box.value as? String, "pag")
@@ -113,15 +148,20 @@ final class BrowserUITests: XCTestCase {
 
     func testSidebarToggle() {
         XCTAssertTrue(omnibox().waitForExistence(timeout: 10))
+        let sidebar = app.descendants(matching: .any).matching(identifier: "sidebar").firstMatch
+        XCTAssertFalse(sidebar.exists, "the sidebar starts closed in this layout")
         app.typeKey("l", modifierFlags: [.command, .shift])
-        XCTAssertTrue(app.buttons["hide-sidebar"].waitForExistence(timeout: 6), "sidebar did not open")
+        XCTAssertTrue(sidebar.waitForExistence(timeout: 6), "sidebar did not open")
+        app.typeKey("l", modifierFlags: [.command, .shift])
+        XCTAssertTrue(waitFor(6) { !sidebar.exists }, "the same shortcut did not close it again")
     }
 
     func testCommandPaletteOpensAndRunsACommand() {
         XCTAssertTrue(omnibox().waitForExistence(timeout: 10))
         app.typeKey("k", modifierFlags: .command)
-        XCTAssertTrue(app.staticTexts["Toggle Sidebar"].waitForExistence(timeout: 6), "palette did not list commands")
-        app.typeText("new priv")
+        // The palette lists only its first dozen commands before anything is typed, so the check is for the first of them rather than one whose place in the list may change.
+        XCTAssertTrue(app.staticTexts["New Tab"].waitForExistence(timeout: 6), "palette did not list commands")
+        app.typeText("new private tab")
         XCTAssertTrue(app.staticTexts["New Private Tab"].waitForExistence(timeout: 4))
         app.typeKey(.return, modifierFlags: [])
         XCTAssertTrue(waitFor(6) { self.tabChips().count == 2 }, "palette command did not run")
@@ -147,7 +187,7 @@ final class BrowserUITests: XCTestCase {
     }
 
     func capture(_ name: String) {
-        let shot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        let shot = XCTAttachment(screenshot: app.windows.firstMatch.safeScreenshot())
         shot.name = name
         shot.lifetime = .keepAlways
         add(shot)
@@ -185,10 +225,11 @@ final class BrowserUITests: XCTestCase {
         layout("Sidebar")
         XCTAssertTrue(app.buttons["hide-sidebar"].waitForExistence(timeout: 6))
         XCTAssertEqual(tabChips().count, 1)
-        XCTAssertTrue(omnibox().exists)
+        // In this layout the address bar is not always on screen (the shortcut brings it out, below); the sidebar holds the tabs.
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "sidebar").firstMatch.exists)
         capture("sidebar-expanded")
         app.buttons["hide-sidebar"].click()
-        let window = app.windows.firstMatch
+        let window = app.windows["browser-AppWindow-1"]          // the main window: "firstMatch" can be another, narrower window of the app, whose left edge is not the window's
         window.coordinate(withNormalizedOffset: CGVector(dx: 0.002, dy: 0.5)).hover()
         XCTAssertTrue(app.buttons["pin-sidebar"].waitForExistence(timeout: 5), "left edge must reveal")
         capture("sidebar-edge-reveal")
@@ -198,16 +239,17 @@ final class BrowserUITests: XCTestCase {
         XCTAssertTrue(app.buttons["pin-sidebar"].waitForExistence(timeout: 5))
         app.buttons["pin-sidebar"].click()
         XCTAssertTrue(app.buttons["hide-sidebar"].waitForExistence(timeout: 5))
+        // Load a page in this layout (on a blank tab the search box in the page is where the address goes).
+        navigate(to: "127.0.0.1:18765/page2")
+        XCTAssertTrue(waitFor(15) { self.serverSaw("/page2") })
+        layout("Classic")
+        // The shield sits with the address bar (the Classic toolbar has it): its popover names the protection level.
+        XCTAssertTrue(app.buttons["shield-button"].waitForExistence(timeout: 8))
         app.buttons["shield-button"].click()
         XCTAssertTrue(app.staticTexts["Protected"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.descendants(matching: .any)["protection-level"].exists)
         capture("vayusetu-popover")
         app.typeKey(.escape, modifierFlags: [])
-        app.typeKey("l", modifierFlags: .command)
-        XCTAssertTrue(omnibox().waitForExistence(timeout: 5))
-        omnibox().typeText("127.0.0.1:18765/page2\n")
-        XCTAssertTrue(waitFor(15) { self.serverSaw("/page2") })
-        layout("Classic")
         let corner = window.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 1)).withOffset(CGVector(dx: -2, dy: -2))
         let target = window.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 540, dy: 440))
         corner.press(forDuration: 0.1, thenDragTo: target)

@@ -17,6 +17,7 @@ struct StartupSettingsSection: View {
                 Text("Start with a new tab").tag("blank")
                 Text("Open my homepage").tag("homepage")
             }
+            .settingsNoted(model.startup == "restore" ? "Restored tabs load only when you select them." : "")
             if model.startup == "homepage" {
                 TextField("https://example.com", text: $model.homepage).textFieldStyle(.roundedBorder).autocorrectionDisabled()
                 if !model.homepage.isEmpty && model.homepageURL == nil {
@@ -24,8 +25,8 @@ struct StartupSettingsSection: View {
                         .font(.caption).foregroundStyle(.orange)
                 }
             }
-            Text(model.startup == "restore" ? "Restored tabs load only when you select them." : " ").font(.caption).foregroundStyle(.secondary)
             NewTabSettings()
+            PrivateOpenSettings()
         }
     }
 }
@@ -63,13 +64,37 @@ struct SearchSettingsSection: View {
                 }
             }
             Section {
+                Picker("In private tabs", selection: $model.privateSearchID) {
+                    Text("Same as above").tag("")
+                    ForEach(SearchEngines.presets) { Text($0.name).tag($0.id) }
+                }
+                    .settingsNoted("Searches typed in a private tab can use another engine, so your private questions do not meet your usual one.")
+            }
+            Section {
+                Toggle("Learn from what I open and choose", isOn: $model.learnSuggestions)
+                    .settingsNoted("The address bar puts the sites you use most, in the workspace you are in, and the results you picked before for the same typing, first. It is worked out on this device from your own history and kept in this profile only. Nothing from a private tab is used.")
+                TextField("Never learn from these sites (separated by commas)", text: Binding(
+                    get: { model.suggestionExcludedHosts.joined(separator: ", ") },
+                    set: { model.suggestionExcludedHosts = SuggestionExclusions.parse($0) }))
+                    .autocorrectionDisabled()
+                Button("Reset Learned Suggestions", role: .destructive) {
+                    let model = model
+                    Task { @MainActor in
+                        let answer = await Dialogs.choose(title: "Reset learned suggestions?", message: "The address bar forgets which sites you use and which results you chose. Your history and bookmarks are not touched.", buttons: ["Reset", "Cancel"])
+                        if answer == 0 { model.resetLearnedSuggestions() }
+                    }
+                }
+                .disabled(model.suggestionLearning.isEmpty)
+            } header: { Text("Learned Suggestions") }
+            Section {
                 Toggle("Show suggestions from the search engine", isOn: $model.searchSuggestionsEnabled)
                     .disabled(SearchSuggestions.endpoint(forSearchTemplate: model.searchTemplate) == nil)
                 Text(SearchSuggestions.endpoint(forSearchTemplate: model.searchTemplate) == nil
                      ? "This search engine does not offer suggestions to browsers. Your own tabs, bookmarks and history are still suggested."
                      : "While you type, what you have typed is sent to \(SearchEngines.preset(for: model.searchTemplate)?.name ?? "the search engine") so it can suggest searches. Nothing is sent from private tabs, or for anything that looks like a web address. Your own tabs, bookmarks and history are always suggested on this device. Turn this off to send nothing until you press Return.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .settingsNote()
             }
+            SearXNGSection()
         }
         .motion(.easeOut(duration: 0.22), value: selection)
         .motion(.easeOut(duration: 0.2), value: invalid)
@@ -116,7 +141,7 @@ struct VayuLevelSection: View {
             Text(privacy.configuration.mode == .custom
                  ? "A custom setup from an earlier version is in use. Choosing a level replaces it."
                  : privacy.configuration.mode.summary)
-                .font(.caption).foregroundStyle(.secondary)
+                .settingsNote()
             if !allOn {
                 Label("Some protection is switched off.", systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
                 Button("Turn On All Protection") { privacy.setAdBlocking(true); privacy.setAntiTracking(true) }
@@ -127,7 +152,7 @@ struct VayuLevelSection: View {
                 LabeledContent("Last updated", value: privacy.configuration.lastSuccessfulUpdate?.formatted(date: .abbreviated, time: .shortened) ?? "Never")
                 Button(privacy.isUpdatingLists ? "Updating…" : "Update Now") { Task { await privacy.updateLists() } }
                     .disabled(privacy.isUpdatingLists)
-                if let status = privacy.listUpdateStatus { Text(status).font(.caption).foregroundStyle(.secondary) }
+                if let status = privacy.listUpdateStatus { Text(status).settingsNote() }
             }
             Button("Privacy Information…") { showInfo = true }
         } header: {
@@ -150,7 +175,11 @@ struct SecurityFactsSection: View {
             Picker("Referrer sent to other sites", selection: $model.referrerMode) {
                 ForEach(ReferrerMode.allCases) { Text($0.title).tag($0) }
             }
-            Text(model.referrerMode.summary).font(.caption).foregroundStyle(.secondary)
+                .settingsNoted(model.referrerMode.summary)
+            Toggle("Send the Global Privacy Control signal", isOn: $model.globalPrivacyControl)
+                .settingsNoted("Asks websites not to sell or share what they learn about you. Applies from the next page you open. On iOS and macOS 27 or later it is sent with every request; on earlier systems only pages that check for it in their own scripts see it.")
+            Toggle("Stop links reporting clicks", isOn: $model.blockLinkPings)
+                .settingsNoted("Some links tell a third party when you click them (the ping attribute). This removes that.")
             Label("Websites are upgraded to HTTPS when WebKit knows they support it.", systemImage: "lock")
             Label("WebKit’s deceptive-website warning is on.", systemImage: "exclamationmark.shield")
             Label("A link that would open another app asks you first.", systemImage: "arrow.up.forward.app")
@@ -174,7 +203,7 @@ struct ThreatListSection: View {
             Button("Import a List of Hosts…") { importing = true }
             if !model.threatList.isEmpty { Button("Remove the List", role: .destructive) { model.clearThreatList() } }
             Text("Pages on this list show a warning before they load. The list is a text file you choose, one host per line (hosts-file and ad-block formats work too). It stays on this device, and no address you visit is sent anywhere.")
-                .font(.caption).foregroundStyle(.secondary)
+                .settingsNote()
         }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.plainText, .text, .data]) { result in
             if case .success(let url) = result { model.importThreatList(from: url) }
@@ -220,7 +249,7 @@ struct ProxySection: View {
             if model.proxy != nil { Button("Forget This Proxy", role: .destructive) { model.forgetProxy(); host = ""; port = ""; user = ""; password = "" } }
             Text(model.proxyEnabled ? "Page loads go through \(model.proxy?.summary ?? "your proxy"). If the proxy cannot be reached, pages do not load; nothing falls back to a direct connection. Site icons are paused so they cannot reveal your address, but blocking-list updates are not sent through the proxy."
                  : "Enter a proxy you already have. This is not a VPN: only the browser’s page loads use it, and your network can still see the proxy’s address. The password is kept in the Keychain.")
-                .font(.caption).foregroundStyle(.secondary)
+                .settingsNote()
         }
         .onAppear {
             guard let saved = model.proxy else { return }
@@ -259,8 +288,7 @@ struct ClearOnQuitSection: View {
             Picker("Clear", selection: $model.clearOnQuit) {
                 ForEach(ClearOnQuit.allCases) { Text($0.title).tag($0) }
             }
-            Text("What you choose is deleted as Browser Setu opens next, before any page loads. Clearing cookies and website data signs you out of sites. Bookmarks and passwords are never touched.")
-                .font(.caption).foregroundStyle(.secondary)
+                .settingsNoted("What you choose is deleted as Browser Setu opens next, before any page loads. Clearing cookies and website data signs you out of sites. Bookmarks and passwords are never touched.")
         }
     }
 }
@@ -279,7 +307,7 @@ struct SearchShortcutsSection: View {
             }
             ShowMoreRows(model.customSearchShortcuts.sorted(by: { $0.key < $1.key }), id: \.key) { key, template in
                 HStack {
-                    VStack(alignment: .leading) { Text(key).fontWeight(.medium); Text(template).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+                    VStack(alignment: .leading) { Text(key).fontWeight(.medium); Text(template).settingsNote().lineLimit(1) }
                     Spacer()
                     Button(role: .destructive) { var map = model.customSearchShortcuts; map[key] = nil; model.setSearchShortcuts(map) } label: { Image(systemName: "trash").accessibilityLabel("Delete") }.buttonStyle(.borderless)
                 }
@@ -332,6 +360,7 @@ struct SavedSignInsSection: View {
     @State private var editing: WebLogin?
     @State private var adding = false
     @State private var findings: [String: BreachCheck.Finding] = [:]
+    @State private var audit = PasswordAuditReport()
     @State private var checking = false
     @State private var checkSummary: String?
     @State private var checkTask: Task<Void, Never>?
@@ -340,15 +369,21 @@ struct SavedSignInsSection: View {
         Section {
             Toggle("Offer to save passwords", isOn: Binding(get: { saving }, set: { saving = $0; model.setSaveLogins($0) }))
             Toggle("Keep my passwords in iCloud Keychain", isOn: Binding(get: { model.passwordsInICloudKeychain }, set: { on in Task { await model.setPasswordsInICloudKeychain(on) } }))
-            Text("Your saved passwords appear on your other Apple devices that use the same Apple Account, sealed end to end by Apple. Off keeps them on this device only. Needs iCloud Keychain on, and Browser Setu on those devices.")
-                .font(.caption).foregroundStyle(.secondary)
+                .settingsNoted("Your saved passwords appear on your other Apple devices that use the same Apple Account, sealed end to end by Apple. Off keeps them on this device only. Needs iCloud Keychain on, and Browser Setu on those devices.")
             ShowMoreRows(logins) { login in
                 HStack {
                     VStack(alignment: .leading) {
                         Text(URL(string: login.origin)?.host ?? login.origin).fontWeight(.medium)
-                        Text(login.user).font(.caption).foregroundStyle(.secondary)
+                        Text(login.user).settingsNote()
                         if PasswordStrength.evaluate(login.password, user: login.user).isWeak {
                             Label("Weak password", systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
+                        }
+                        if !login.related.isEmpty { Text("Also used on " + login.related.compactMap { URL(string: $0)?.host }.joined(separator: ", ")).settingsNote() }
+                        if let other = duplicateOf(login) {
+                            HStack(spacing: 6) {
+                                Label("Probably the same account as \(URL(string: other.origin)?.host ?? other.origin)", systemImage: "square.on.square").font(.caption).foregroundStyle(.orange)
+                                Button("Merge") { Task { if await model.requireAuthentication("Merge two saved sign-ins") { _ = WebLoginVault.merge(login, other, profile: model.profileName); load() } } }.buttonStyle(.borderless).font(.caption)
+                            }
                         }
                         if let finding = findings[login.id], finding.isProblem {
                             Label(problemText(finding), systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange)
@@ -368,7 +403,7 @@ struct SavedSignInsSection: View {
                     Button(checking ? "Checking…" : "Check Passwords for Leaks…") { startCheck() }.disabled(checking)
                     if checking { ProgressView().controlSize(.small) }
                 }
-                if let checkSummary { Text(checkSummary).font(.caption).foregroundStyle(.secondary).transition(.opacity) }
+                if let checkSummary { Text(checkSummary).settingsNote().transition(.opacity) }
             }
             if !model.neverSaveOrigins.isEmpty {
                 ShowMoreRows(model.neverSaveOrigins.sorted(), id: \.self) { origin in
@@ -380,7 +415,7 @@ struct SavedSignInsSection: View {
                 HStack {
                     VStack(alignment: .leading) {
                         Text(entry.host).fontWeight(.medium)
-                        Text(entry.user + (entry.realm.isEmpty ? "" : " · " + entry.realm) + (entry.isCurrentFormat ? "" : " · saved by an older version, you will be asked again")).font(.caption).foregroundStyle(.secondary)
+                        Text(entry.user + (entry.realm.isEmpty ? "" : " · " + entry.realm) + (entry.isCurrentFormat ? "" : " · saved by an older version, you will be asked again")).settingsNote()
                     }
                     Spacer()
                     Button(role: .destructive) {
@@ -399,7 +434,13 @@ struct SavedSignInsSection: View {
         .sheet(isPresented: $adding, onDismiss: load) { LoginEditor(original: nil) }
     }
 
-    private func load() { entries = SignInVault.list(profile: model.profileName); logins = WebLoginVault.list(profile: model.profileName); saving = model.saveLoginsEnabled }
+    private func load() { entries = SignInVault.list(profile: model.profileName); logins = WebLoginVault.list(profile: model.profileName); saving = model.saveLoginsEnabled; audit = PasswordAudit.analyze(logins) }
+
+    /// The other saved copy of what looks like the same account, if there is one.
+    private func duplicateOf(_ login: WebLogin) -> WebLogin? {
+        guard let group = audit.duplicates.first(where: { $0.contains(login.id) }), let otherID = group.first(where: { $0 != login.id }) else { return nil }
+        return logins.first { $0.id == otherID }
+    }
 
     private func problemText(_ finding: BreachCheck.Finding) -> String {
         var parts: [String] = []
@@ -446,8 +487,21 @@ struct DarkPagesSection: View {
             Picker("Show light pages dark", selection: $model.darkPages) {
                 ForEach(DarkPages.allCases) { Text($0.title).tag($0) }
             }
-            Text("Inverts light pages, keeping pictures and video as they are. Pages that are already dark are left alone. With “Only sites I choose”, use Dark Page in the page menu on each site.")
-                .font(.caption).foregroundStyle(.secondary)
+                .settingsNoted("Light websites are shown dark: brightness is flipped and colours kept, and pictures, video and frames are left as they are. A site that already has a dark look is left alone, and a site that has one is asked for it first. The page is held back for a moment until it has been judged, so a light page is never seen white. Nothing leaves the device. Choose a site on its own under This Site… › Dark page, or with Darken in the page menu.")
+            ShowMoreRows(model.darkSites.sorted(), id: \.self) { site in
+                HStack {
+                    Label("\(site) is always dark", systemImage: "moon.fill").font(.callout)
+                    Spacer()
+                    Button("Reset") { model.setDarkChoice(host: site, .automatic) }.buttonStyle(.borderless)
+                }
+            }
+            ShowMoreRows(model.darkSitesOff.sorted(), id: \.self) { site in
+                HStack {
+                    Label("\(site) is never darkened", systemImage: "sun.max").font(.callout)
+                    Spacer()
+                    Button("Reset") { model.setDarkChoice(host: site, .automatic) }.buttonStyle(.borderless)
+                }
+            }
         }
     }
 }
@@ -458,8 +512,7 @@ struct SiteIconsSection: View {
     var body: some View {
         Section("Site Icons") {
             Toggle("Show each site’s icon", isOn: $model.fetchSiteIcons)
-            Text("After a page loads in a normal tab, the browser downloads that site’s small icon from the site itself and keeps it on this device, to show beside its name in suggestions and lists. No cookies or account details are sent, and nothing is fetched in private tabs. Turning this off deletes the saved icons. Clearing browsing data deletes them too.")
-                .font(.caption).foregroundStyle(.secondary)
+                .settingsNoted("After a page loads in a normal tab, the browser downloads that site’s small icon from the site itself and keeps it on this device, to show beside its name in suggestions and lists. No cookies or account details are sent, and nothing is fetched in private tabs. Turning this off deletes the saved icons. Clearing browsing data deletes them too.")
         }
     }
 }
@@ -470,8 +523,7 @@ struct LinkCleaningSection: View {
     var body: some View {
         Section("Link Cleaning") {
             Toggle("Remove tracking parameters from links", isOn: $model.stripTrackingParameters)
-            Text("Strips campaign and click identifiers such as utm_source and fbclid before a page loads. Other parts of the link are left alone. Nothing is downloaded or sent.")
-                .font(.caption).foregroundStyle(.secondary)
+                .settingsNoted("Strips campaign and click identifiers such as utm_source and fbclid before a page loads. Other parts of the link are left alone. Nothing is downloaded or sent.")
             if model.strippedLinkCount > 0 { LabeledContent("Cleaned this session", value: "\(model.strippedLinkCount)") }
         }
     }
@@ -568,7 +620,7 @@ struct WebsiteDataSection: View {
         Section("Website Data") {
             Button("Manage Website Data…") { show = true }
             Text("See which websites have stored cookies and other data in this profile, and remove any of them.")
-                .font(.caption).foregroundStyle(.secondary)
+                .settingsNote()
         }
         .sheet(isPresented: $show) { SiteDataSheet().environmentObject(model) }
     }
@@ -585,7 +637,7 @@ struct MemorySettingsSection: View {
             Picker("When memory is needed", selection: $model.memoryMode) {
                 ForEach(MemoryMode.allCases) { Text($0.title).tag($0) }
             }
-            Text(model.memoryMode.summary).font(.caption).foregroundStyle(.secondary)
+                .settingsNoted(model.memoryMode.summary)
             if model.memoryMode == .custom {
                 Picker("Keep this many recent tabs", selection: $model.customMemory.keepRecent) {
                     ForEach(CustomMemoryPolicy.keepChoices, id: \.self) { Text("\($0)").tag($0) }
@@ -596,7 +648,7 @@ struct MemorySettingsSection: View {
             }
             Toggle("Switch to Battery Saver on a low battery or a hot device", isOn: $model.batteryAware)
             if let why = model.governor.effective.reason, model.governor.effective.mode != model.memoryMode {
-                Label("Battery Saver is in force because \(why).", systemImage: "leaf").font(.caption).foregroundStyle(.secondary)
+                Label("Battery Saver is in force because \(why).", systemImage: "leaf").settingsNote()
             }
             Toggle("Never release pinned tabs", isOn: $model.keepPinnedTabs)
             Toggle("Ask before closing a pinned tab", isOn: $model.protectPinned)
@@ -623,7 +675,7 @@ struct ResourceMonitorSection: View {
             #if os(iOS)
             if model.showSpeedPill { Toggle("Pop up when the speed changes a lot", isOn: $model.speedPopups) }
             if model.showSpeedPill, !model.speedActivityStatus.isEmpty {
-                Text(model.speedActivityStatus).font(.caption).foregroundStyle(.secondary)
+                Text(model.speedActivityStatus).settingsNote()
             }
             #endif
             LabeledContent("Memory used by Browser Setu", value: ByteCountFormatter.string(fromByteCount: Int64(memory), countStyle: .memory))
@@ -667,11 +719,12 @@ struct DefaultBrowserSection: View {
             Button(isDefault ? "Browser Setu Is the Default" : "Make Browser Setu the Default") { makeDefault() }
                 .disabled(isDefault)
             Text("Links you click in Mail, Messages and other apps would open here. macOS asks you to confirm.")
-                .font(.caption).foregroundStyle(.secondary)
+                .settingsNote()
             #else
-            Button("Open iPhone Settings") { if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) } }
-            Text("Apple only lets an app be the default browser after it has been granted the default browser entitlement. Until then, links from other apps open in Safari, and “Share” can send a page here.")
-                .font(.caption).foregroundStyle(.secondary)
+            // iOS 18.3 and later can open the list of default apps itself (Settings › Apps › Default Apps). Before that, the only page an app can open is its own.
+            Button(defaultAppsAvailable ? "Open Default Apps in Settings" : "Open Browser Setu in Settings") { openSettings() }
+            Text("Browser Setu appears in the Default Browser App list only after Apple has granted it the default browser entitlement, which has to be requested. Until then, links from other apps open in Safari, and “Share” can send a page here.")
+                .settingsNote()
             #endif
         }
         #if os(macOS)
@@ -679,6 +732,16 @@ struct DefaultBrowserSection: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in refresh() }
         #endif
     }
+
+    #if os(iOS)
+    private var defaultAppsAvailable: Bool { if #available(iOS 18.3, *) { return true } else { return false } }
+
+    private func openSettings() {
+        var target = URL(string: UIApplication.openSettingsURLString)
+        if #available(iOS 18.3, *), let apps = URL(string: UIApplication.openDefaultApplicationsSettingsURLString) { target = apps }
+        if let target { UIApplication.shared.open(target) }
+    }
+    #endif
 
     #if os(macOS)
     private func refresh() {
@@ -718,25 +781,12 @@ struct BookmarkTransferSection: View {
             Button("Import Bookmarks…") { importing = true }
             Button("Export Bookmarks…") { document = BookmarkHTMLDocument(text: model.bookmarksHTML()); exporting = true }
             Toggle("Show bookmarks in Spotlight", isOn: $model.spotlightBookmarks)
-            Text("Works with the HTML file that Safari, Chrome, Brave and Firefox export. Only web addresses are imported, and bookmarks you already have are not added twice. Spotlight lists only your bookmarks (their titles and sites), on this device; history and open pages are never added. Handoff passes the page in front, never a private tab, to your other devices signed in to the same Apple Account.")
-                .font(.caption).foregroundStyle(.secondary)
+                .settingsNoted("Works with the HTML file that Safari, Chrome, Brave and Firefox export. Only web addresses are imported, and bookmarks you already have are not added twice. Spotlight lists only your bookmarks (their titles and sites), on this device; history and open pages are never added. Handoff passes the page in front, never a private tab, to your other devices signed in to the same Apple Account.")
         }
-        .fileImporter(isPresented: $importing, allowedContentTypes: [.html]) { result in
+        .fileImporter(isPresented: $importing, allowedContentTypes: ImportKind.bookmarks.contentTypes) { result in
             guard case .success(let url) = result else { return }
-            // Read and parsed away from the main thread, then added in small batches, so a file with thousands of bookmarks never freezes the window.
-            let picked = url
-            Task {
-                let parsed: [BookmarkHTML.Entry]? = await Task.detached(priority: .userInitiated) {
-                    let scoped = picked.startAccessingSecurityScopedResource()
-                    defer { if scoped { picked.stopAccessingSecurityScopedResource() } }
-                    guard let data = try? Data(contentsOf: picked), data.count < 50_000_000 else { return nil }
-                    return BookmarkHTML.parse(String(decoding: data, as: UTF8.self))
-                }.value
-                guard let parsed else { model.notice = "That file could not be read."; return }
-                let r = await model.importBookmarks(entries: parsed)
-                model.notice = r.added == 0 && r.skipped == 0 ? "No bookmarks were found in that file."
-                    : "Imported \(r.added) bookmark\(r.added == 1 ? "" : "s")" + (r.skipped > 0 ? ", skipped \(r.skipped) already saved." : ".")
-            }
+            // One implementation, shared with the setup assistant and the import sheet: read and parsed away from the main thread, then added in small batches.
+            Task { model.notice = await ImportActions.bookmarks(from: url, model: model) }
         }
         .fileExporter(isPresented: $exporting, document: document, contentType: .html,
                       defaultFilename: "Browser Setu Bookmarks") { result in
@@ -781,19 +831,9 @@ struct ImportExportSection: View {
                 if r.added > 0 { askToDelete = true }
             }
         }
-        .fileImporter(isPresented: $importingHistory, allowedContentTypes: [.json]) { result in
+        .fileImporter(isPresented: $importingHistory, allowedContentTypes: ImportKind.history.contentTypes) { result in
             guard case .success(let url) = result else { return }
-            Task {
-                let visits: [HistoryImport.Visit]? = await Task.detached(priority: .userInitiated) {
-                    let scoped = url.startAccessingSecurityScopedResource()
-                    defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-                    guard let data = try? Data(contentsOf: url), data.count < 400_000_000 else { return nil }
-                    return HistoryImport.parse(json: data)
-                }.value
-                guard let visits else { model.notice = "That file could not be read."; return }
-                let count = await model.importHistory(visits)
-                model.notice = count == 0 ? "No web pages were found in that file." : "Imported \(count) page\(count == 1 ? "" : "s") of history."
-            }
+            Task { model.notice = await ImportActions.history(from: url, model: model) }
         }
         .fileExporter(isPresented: $exportingPasswords, document: csvDocument, contentType: .commaSeparatedText, defaultFilename: "Browser Setu Passwords") { result in
             csvDocument = PasswordCSVDocument(text: "")
@@ -837,7 +877,7 @@ struct BackupSection: View {
             Button("Export an Encrypted Backup…") { Task { if await model.requireAuthentication("Export a backup of your settings and bookmarks") { exportSheet = true } } }
             Button("Restore from a Backup…") { Task { if await model.requireAuthentication("Restore a backup") { importing = true } } }
             Text("A backup holds your bookmarks and Browser Setu settings, locked with a passphrase you choose. Your saved passwords go in only if you tick that box; cookies and history never do. Save the file in iCloud Drive to keep it safe off this device. Browser Setu cannot recover a forgotten passphrase.")
-                .font(.caption).foregroundStyle(.secondary)
+                .settingsNote()
         }
         .sheet(isPresented: $exportSheet) {
             PassphraseSheet(title: "Export a Backup", confirmLabel: "Create Backup", askTwice: true, action: { passphrase in
@@ -962,8 +1002,7 @@ struct AboutSection: View {
             LabeledContent("Build", value: Self.build)
             LabeledContent("Web engine", value: engineText)
             LabeledContent("Privacy lists", value: listsText)
-            Text("Browser Setu uses the system’s web engine, so a system update is also how the engine’s security fixes arrive. Updates never change your privacy settings.")
-                .font(.caption).foregroundStyle(.secondary)
+                .settingsNoted("Browser Setu uses the system’s web engine, so a system update is also how the engine’s security fixes arrive. Updates never change your privacy settings.")
             Button("Acknowledgements and Licences…") { showLicences = true }
         }
         .sheet(isPresented: $showLicences) { AcknowledgementsSheet() }

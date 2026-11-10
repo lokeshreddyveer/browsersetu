@@ -10,10 +10,13 @@ enum TrackingParameters {
         "li_fat_id", "igshid", "mc_eid", "mc_cid", "_hsenc", "_hsmi", "__hssc", "__hstc", "__hsfp", "hsctatracking",
         "mkt_tok", "vero_id", "oly_enc_id", "oly_anon_id", "_openstat", "wickedid", "rb_clickid", "irclickid",
         "ck_subscriber_id", "ref_src", "ref_url", "s_cid", "sc_cid",
+        // Google's cross-site linker and ad-source ids, Instagram and Facebook share ids, Pinterest and Adobe click ids, newsletter ids.
+        "_gl", "gad_source", "gad_campaignid", "srsltid", "igsh", "mibextid", "fb_ref", "fb_source", "epik", "ndclid", "s_kwcid", "ef_id", "_kx",
+        "trk_contact", "trk_msg", "trk_module", "trk_sid",
     ]
 
-    /// Families of campaign parameters (`utm_source`, `utm_campaign`, …).
-    static let prefixes: [String] = ["utm_", "mtm_", "pk_", "matomo_", "piwik_", "hsa_"]
+    /// Families of campaign parameters (`utm_source`, `utm_campaign`, …) and Amazon's referral ids.
+    static let prefixes: [String] = ["utm_", "mtm_", "pk_", "matomo_", "piwik_", "hsa_", "pf_rd_", "pd_rd_"]
 
     static func isTracking(_ name: String) -> Bool {
         let lower = name.lowercased()

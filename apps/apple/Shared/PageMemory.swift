@@ -56,20 +56,30 @@ extension BrowserModel {
 
     private func samplePage() async {
         guard rememberReadingPosition || keepFormDrafts,
-              let tab = active, !tab.isPrivate, !tab.isBlank, !tab.isLoading, let url = tab.url,
+              let tab = active, !tab.leavesNoTrace, !tab.isBlank, !tab.isLoading, let url = tab.url,
               let key = PageMemoryKey.key(for: url) else { return }
         if rememberReadingPosition, let fraction = await tab.engine.scrollFraction() {
-            if PageMemoryRules.worthRemembering(fraction) { readingPositions[key] = ReadingPosition(fraction: fraction, date: Date()) }
-            else { readingPositions[key] = nil }
-            readingPositions = PageMemoryRules.prune(readingPositions) { $0.date }
+            // Written only when something moved: this runs every few seconds, and each write encodes and saves the whole map and tells the other windows.
+            let before = readingPositions[key]
+            if PageMemoryRules.worthRemembering(fraction) {
+                if abs((before?.fraction ?? -1) - fraction) > 0.01 {
+                    readingPositions[key] = ReadingPosition(fraction: fraction, date: Date())
+                    readingPositions = PageMemoryRules.prune(readingPositions) { $0.date }
+                }
+            } else if before != nil { readingPositions[key] = nil }
         }
         if keepFormDrafts, let raw = await tab.engine.formDraftFields() {
             let fields = raw.compactMap { item -> FormDraft.Field? in
                 guard let k = item["key"] as? String, let v = item["value"] as? String else { return nil }
                 return FormDraft.Field(key: k, value: v)
             }
-            if fields.isEmpty { formDrafts[key] = nil } else { formDrafts[key] = FormDraft(fields: fields, date: Date()) }
-            formDrafts = PageMemoryRules.prune(formDrafts) { $0.date }
+            let now = fields.map { "\($0.key)=\($0.value)" }
+            let was = formDrafts[key]?.fields.map { "\($0.key)=\($0.value)" }
+            if fields.isEmpty { if was != nil { formDrafts[key] = nil } }
+            else if was != now {
+                formDrafts[key] = FormDraft(fields: fields, date: Date())
+                formDrafts = PageMemoryRules.prune(formDrafts) { $0.date }
+            }
         }
     }
 
@@ -80,7 +90,7 @@ extension BrowserModel {
         if let fraction = sessionScroll.removeValue(forKey: tab.id) {
             Task { try? await Task.sleep(for: .seconds(0.8)); await tab.engine.scrollTo(fraction: fraction) }
         }
-        guard !tab.isPrivate, let url = tab.url, url.fragment == nil, let key = PageMemoryKey.key(for: url) else { return }
+        guard tab.privacy.keepsTraces, let url = tab.url, url.fragment == nil, let key = PageMemoryKey.key(for: url) else { return }
         if rememberReadingPosition, let saved = readingPositions[key], PageMemoryRules.worthRemembering(saved.fraction) {
             Task {
                 try? await Task.sleep(for: .seconds(0.8))
@@ -122,7 +132,7 @@ struct GesturesSection: View {
             Toggle("Pinch to zoom", isOn: $model.gesturePinchZoom)
         } header: { Text("Gestures") } footer: {
             #if os(iOS)
-            Text("Swipe the address bar up for the tab overview. Press and hold a link to preview it.")
+            Text("Swipe the address pill sideways to move between tabs and up for all tabs. With the toolbar folded into pills, swipe up on the pill to open it, and swipe down on the open bar to fold it. Swipe the tabs pill toward the page for the tab list. Press and hold a link to preview it.")
             #else
             Text("Double-tap with two fingers to zoom in on part of a page.")
             #endif

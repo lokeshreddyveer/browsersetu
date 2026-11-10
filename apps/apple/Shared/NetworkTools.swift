@@ -194,7 +194,8 @@ enum NetworkSession {
 
     static func used() -> (down: UInt64, up: UInt64) {
         guard let now = NetworkSpeedMonitor.counters() else { return (0, 0) }
-        return (now.down &- baseline.down, now.up &- baseline.up)
+        // The sum falls when an interface goes down or a 32-bit counter wraps: that is zero more traffic, not a number near 2^64 (which would stop the app below).
+        return (now.down >= baseline.down ? now.down - baseline.down : 0, now.up >= baseline.up ? now.up - baseline.up : 0)
     }
 }
 
@@ -226,7 +227,7 @@ struct NetworkToolsView: View {
 
     var body: some View {
         let path = NetworkConditions.shared.info
-        List {
+        PanelList {
             Section("Connection") {
                 LabeledContent("Status", value: path.online ? "Online" : "Offline")
                 LabeledContent("Kind", value: path.links.isEmpty ? "None" : path.links.joined(separator: ", "))

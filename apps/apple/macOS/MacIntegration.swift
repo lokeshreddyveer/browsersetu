@@ -15,6 +15,11 @@ final class MacAppDelegate: NSObject, NSApplicationDelegate {
         NSApp.servicesProvider = ServicesProvider.shared
         NSUpdateDynamicServices()
         MenuBarSearch.shared.installIfWanted()
+        // Hidden working files a crashed or killed media-processing run left in the downloads folder (only files this feature named, whose process is gone).
+        if NSClassFromString("XCTestCase") == nil {
+            let launched = Date(), folder = DownloadCoordinator.directory
+            DispatchQueue.global(qos: .utility).async { _ = FFmpegProcessing.sweepOrphans(in: folder, launchedBefore: launched) }
+        }
         #if DIRECT_BUILD
         AgentBridge.shared.sync()
         #endif
@@ -23,6 +28,7 @@ final class MacAppDelegate: NSObject, NSApplicationDelegate {
     /// Quitting: windows that close now are the app ending, not the person closing them, so what each held is kept for the next start.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         frontModel()?.windows.terminating = true
+        SuggestionLearning.flushAll()          // what the address bar learned in the last two seconds is not lost
         return .terminateNow
     }
 
@@ -40,6 +46,7 @@ final class MacAppDelegate: NSObject, NSApplicationDelegate {
             menu.addItem(item)
         }
         add("New Tab", "plus") { _ = $0.newTab() }
+        add("New Private Window", "eye.slash.fill") { $0.openPrivateWindow() }
         add("New Private Tab", "eye.slash") { _ = $0.openTab(url: nil, isPrivate: true) }
         add("New Guest Window", "person.crop.circle.badge.questionmark") { $0.openGuestWindow() }
         menu.addItem(.separator())

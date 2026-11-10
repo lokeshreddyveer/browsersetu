@@ -51,7 +51,14 @@ final class ToolkitFeaturesTests: XCTestCase {
         XCTAssertEqual(log.sites(on: base).map(\.host), ["b.com", "a.com"])
         XCTAssertEqual(log.total(on: base), 130)
         for d in 1...40 { log.add(seconds: 5, host: "c.com", on: base.addingTimeInterval(Double(d) * 86_400)) }
-        XCTAssertLessThanOrEqual(log.days.count, SiteTimeLog.keepDays)
+        // Adding forgets nothing by itself: how long days are kept is the retention setting's choice (default 90 days), applied by `prune`.
+        XCTAssertEqual(log.days.count, 41)
+        log.prune(keepingDays: 30, now: base.addingTimeInterval(40 * 86_400))
+        XCTAssertLessThanOrEqual(log.days.count, 31, "thirty days back, and today")
+        XCTAssertNotNil(log.days[SiteTimeLog.day(base.addingTimeInterval(40 * 86_400))], "today is kept")
+        XCTAssertNil(log.days[SiteTimeLog.day(base)], "the first day is gone")
+        var all = log; all.prune(keepingDays: 0, now: base.addingTimeInterval(400 * 86_400))
+        XCTAssertEqual(all.days.count, log.days.count, "0 keeps everything")
         XCTAssertEqual(SiteTimeLog.clock(0), "0 min")
         XCTAssertEqual(SiteTimeLog.clock(30), "1 min")
         XCTAssertEqual(SiteTimeLog.clock(4000), "1 h 7 min")

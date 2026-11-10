@@ -36,8 +36,8 @@ final class NetworkSpeedMonitor: ObservableObject {
         let at = Date()
         if let last, at.timeIntervalSince(last.at) > 0.2 {
             let seconds = at.timeIntervalSince(last.at)
-            down = Double(now.down &- last.down) / seconds
-            up = Double(now.up &- last.up) / seconds
+            down = Double(now.down >= last.down ? now.down - last.down : 0) / seconds
+            up = Double(now.up >= last.up ? now.up - last.up : 0) / seconds
             if down < 0 || down > 1e11 { down = 0 }
             if up < 0 || up > 1e11 { up = 0 }
         }

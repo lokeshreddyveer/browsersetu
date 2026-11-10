@@ -183,7 +183,7 @@ struct BookmarkToolsView: View {
     private var unsure: [BookmarkItem] { bookmarks.filter { if case .unsure = results[$0.url] { return true } else { return false } } }
 
     var body: some View {
-        List {
+        PanelList {
             Section("Smart Collections") {
                 let collections = BookmarkTools.smartCollections(bookmarks, tags: model.bookmarkTags)
                 if collections.isEmpty { Text("Collections appear as you save and tag bookmarks.").foregroundStyle(.secondary) }

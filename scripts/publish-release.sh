@@ -9,7 +9,7 @@ VERSION="${1:?usage: publish-release.sh <version> <build> [notes]}"; BUILD="${2:
 REPO="${RELEASES_REPO:-lokeshreddyveer/browsersetu}"
 DMG="dist/BrowserSetu-$VERSION.dmg"
 [ -f "$DMG" ] || { echo "✘ $DMG not found; run scripts/release.sh $VERSION $BUILD first"; exit 1; }
-SPARKLE_BIN="$(find apps/apple/build ~/Documents/iptv/macos/.build -type d -path '*artifacts/sparkle/Sparkle/bin' 2>/dev/null | head -1)"
+SPARKLE_BIN="$(find build/release/SourcePackages apps/apple/build ~/Documents/iptv/macos/.build -type d -path '*artifacts/sparkle/Sparkle/bin' 2>/dev/null | head -1 || true)"
 [ -n "$SPARKLE_BIN" ] || { echo "✘ Sparkle's tools were not found (build the Direct scheme once so the package is fetched)"; exit 1; }
 SIGN="$("$SPARKLE_BIN/sign_update" --account browsersetu "$DMG")"        # sparkle:edSignature="…" length="…"
 TAG="v$VERSION"
@@ -54,5 +54,6 @@ if os.path.exists(path):
     items = re.sub(r"    <item>(?:(?!</item>).)*?<sparkle:version>" + re.escape(build) + r"</sparkle:version>.*?</item>\n", "", items, flags=re.S)
 open(path, "w").write(head + item + items + "  </channel>\n</rss>\n")
 PY
-git add appcast.xml && git commit -qm "Update feed for Browser Setu $VERSION" && git push -q origin HEAD
+[ "$(git rev-parse --abbrev-ref HEAD)" = main ] || { echo "✘ the update feed is read from main; switch to main first"; exit 1; }
+git add appcast.xml && git commit -qm "Update feed for Browser Setu $VERSION" -- appcast.xml && git push -q origin HEAD
 echo "✔ $TAG is published and the update feed offers it"

@@ -94,7 +94,7 @@ final class SettingsWindowTests: XCTestCase {
 
     func testPanelsAreTheImplementedOnesInSafariOrder() {
         XCTAssertEqual(SettingsPanel.allCases.map(\.rawValue),
-                       ["general", "appearance", "tabs", "search", "privacy", "ai", "websites", "profiles", "performance", "extensions", "shortcuts", "advanced"])
+                       ["general", "appearance", "tabs", "search", "downloads", "privacy", "ai", "websites", "profiles", "performance", "extensions", "shortcuts", "advanced"])
         XCTAssertEqual(Set(SettingsPanel.allCases.map(\.symbol)).count, SettingsPanel.allCases.count, "each panel has its own icon")
         for panel in SettingsPanel.allCases {
             XCTAssertFalse(panel.title.isEmpty); XCTAssertGreaterThan(panel.height, 240); XCTAssertLessThan(panel.height, 800)
@@ -105,11 +105,11 @@ final class SettingsWindowTests: XCTestCase {
         let root = NSTemporaryDirectory() + "bs-set-persist-\(UUID().uuidString)"
         let a = BrowserModel(engine: WebKitEngine(), root: root, profile: "default")
         await a.start()
-        XCTAssertTrue(a.setSearchTemplate("https://www.google.com/search?q={}"))
+        XCTAssertTrue(a.setSearchTemplate("https://duckduckgo.com/?q={}"))
         XCTAssertFalse(a.setSearchTemplate("http://insecure.example/?q={}"))
-        XCTAssertEqual(a.searchTemplate, "https://www.google.com/search?q={}", "a refused address leaves the choice alone")
+        XCTAssertEqual(a.searchTemplate, "https://duckduckgo.com/?q={}", "a refused address leaves the choice alone")
         let b = BrowserModel(engine: WebKitEngine(), root: root, profile: "default")
-        XCTAssertEqual(b.searchTemplate, "https://www.google.com/search?q={}", "it is still chosen after a restart")
+        XCTAssertEqual(b.searchTemplate, "https://duckduckgo.com/?q={}", "it is still chosen after a restart")
     }
 
     func testTabPositionMapsToTheLayout() async throws {
@@ -358,14 +358,14 @@ final class SearchChoiceTests: XCTestCase {
         BrowserModel(engine: WebKitEngine(), root: root ?? NSTemporaryDirectory() + "bs-sc-\(UUID().uuidString)", profile: "default")
     }
 
-    func testAFreshProfileSearchesWithBraveAndASavedChoiceWins() async throws {
+    func testAFreshProfileSearchesWithTheDefaultAndASavedChoiceWins() async throws {
         let root = NSTemporaryDirectory() + "bs-sc-\(UUID().uuidString)"
         let a = model(root)
         await a.start()
         XCTAssertEqual(a.searchTemplate, SearchEngines.defaultEngine.template)
-        XCTAssertTrue(a.setSearchTemplate(SearchEngines.presets[2].template))
+        XCTAssertTrue(a.setSearchTemplate(SearchEngines.presets[1].template))
         let b = model(root)
-        XCTAssertEqual(b.searchTemplate, SearchEngines.presets[2].template, "the engine chosen from the address bar is kept")
+        XCTAssertEqual(b.searchTemplate, SearchEngines.presets[1].template, "the engine chosen from the address bar is kept")
     }
 
     func testRemoteSuggestionsGoAfterTheFirstRowAndNeverRepeatTheTypedText() async throws {

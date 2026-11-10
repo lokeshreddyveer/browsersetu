@@ -18,6 +18,14 @@ public struct PolicySnapshot: Equatable, Sendable {
     public let droppedForBudget: Int
     /// Syntax this engine cannot enforce (scriptlets, regex, redirects...). Counted, never silently turned into something else.
     public let unsupportedRules: Int
+    /// Blocks written after every exception, so no exception can cancel them ($important).
+    public let importantRules: Int
+    /// What each list turned into, line by line: network rules, exceptions, hiding, page rules, and what was left out and why.
+    public let diagnostics: [ListDiagnostics]
+    /// The procedural cosmetic rules and scriptlets the browser's own page scripts run (WebKit's content blocker cannot).
+    public let scriptRules: ScriptRuleSet
+    /// Changes when `scriptRules` does, so the page scripts are only reinstalled when they changed.
+    public let scriptIdentifier: String
     /// Lists that could not be read or validated, with the reason.
     public let failedLists: [String: String]
     public let listNames: [String]
@@ -61,8 +69,22 @@ public enum PolicyBuilder {
     static let endpointLabel = "Third-party tracking-endpoint requests"
 
     /// `downloaded` maps a catalogue URL to the cached list text.
+    /// What a build came to. Turning protection off, or having nothing to install, is not a failure: the old rules are meant to go. A failure is: the old rules must stay.
+    public enum Outcome: Sendable {
+        case built(PolicySnapshot)
+        case disabled
+        case nothingToInstall
+        case failed(String)
+    }
+
+    /// The snapshot, or nil when there is none (off, nothing to install, or a failure; use `outcome` to tell these apart).
     public static func build(configuration: PrivacyConfiguration, downloaded: [String: Data] = [:]) -> PolicySnapshot? {
-        guard configuration.isEnabled else { return nil }
+        if case .built(let snapshot) = outcome(configuration: configuration, downloaded: downloaded) { return snapshot }
+        return nil
+    }
+
+    public static func outcome(configuration: PrivacyConfiguration, downloaded: [String: Data] = [:]) -> Outcome {
+        guard configuration.isEnabled else { return .disabled }
         let effective = configuration.effective
 
         var subscriptionRules: [FilterRule] = []
@@ -70,6 +92,9 @@ public enum PolicyBuilder {
         var failed: [String: String] = [:]
         var names: [String] = []
         var unsupported = 0
+        var important: [String] = []
+        var scripts = ScriptRuleSet()
+        var diagnostics: [ListDiagnostics] = []
 
         func addDomainList(id: String, name: String, data: Data) {
             do {
@@ -77,6 +102,10 @@ public enum PolicyBuilder {
                 subscriptionRules += parsed.rules
                 unsupported += parsed.rejected
                 names.append(name)
+                var diagnostic = ListDiagnostics(name: name)
+                diagnostic.lines = parsed.rules.count + parsed.rejected
+                diagnostic.domainRules = parsed.rules.count
+                diagnostics.append(diagnostic)
             } catch {
                 failed[name] = (error as? LocalizedError)?.errorDescription ?? "Could not be read."
             }
@@ -86,24 +115,35 @@ public enum PolicyBuilder {
         if effective.tracking { addDomainList(id: BundledLists.tracking.id, name: BundledLists.tracking.name, data: Data(BundledLists.tracking.text.utf8)) }
         if effective.sessionRecording { addDomainList(id: BundledLists.sessionRecording.id, name: BundledLists.sessionRecording.name, data: Data(BundledLists.sessionRecording.text.utf8)) }
 
+        // A $badfilter line in any list switches off the identical rule in every list.
+        var disabled = Set<String>()
+        for url in effective.downloadedLists { if let data = downloaded[url], data.count <= byteLimit { disabled.formUnion(FilterClassifier.badfilterTargets(in: data)) } }
+
         for url in effective.downloadedLists {
             let name = FilterCatalog.entry(forURL: url)?.name ?? url
             guard let data = downloaded[url] else { failed[name] = "Not downloaded yet."; continue }
             guard data.count <= byteLimit else { failed[name] = FilteringIssue.tooLarge.errorDescription ?? "Too large."; continue }
-            let abp = ABPContentParser.parse(data)
-            content.append(abp)
-            unsupported += abp.unsupported
+            var classified = FilterClassifier.parse(data, name: name, disabled: disabled)
+            content.append(classified.content)
+            important += classified.important
+            scripts.append(classified.scripts)
+            unsupported += classified.diagnostics.unsupported
             // A list may hold only page rules; that is fine as long as something was read.
-            if let parsed = try? FilterParser.parse(data, source: name) {
+            if let parsed = try? FilterParser.parse(classified.domainText ?? data, source: name) {
                 subscriptionRules += parsed.rules
-                unsupported += parsed.rejected
+                // Not counted again: the host-rule reader rejects every line that is not a plain host, and the classifier has already given each of those its own category and reason.
+                classified.diagnostics.domainRules = max(classified.diagnostics.domainRules, parsed.rules.count)
                 names.append(name)
-            } else if !abp.isEmpty {
+            } else if !classified.content.isEmpty || !classified.important.isEmpty || !classified.scripts.isEmpty {
                 names.append(name)
             } else {
                 failed[name] = "No supported rules were found."
             }
+            diagnostics.append(classified.diagnostics)
         }
+        important = Array(important.prefix(FilterClassifier.importantLimit))
+        // The same sites that are excepted from the network rules are excepted from the scriptlets and procedural hiding.
+        scripts.exceptions = configuration.siteExceptions.sorted()
 
         // De-duplicate, then drop names already covered by a blocked parent domain (same idea as VayuSetu's fitter).
         var seen = Set<String>()
@@ -129,7 +169,7 @@ public enum PolicyBuilder {
         // lists. Nothing is thrown away unless it would take more than `maxLists` lists.
         var dropped = 0
         let exceptionJSON = configuration.siteExceptions.compactMap(siteException)
-        let repeated = userRules.count + exceptionJSON.count
+        let repeated = userRules.count + exceptionJSON.count + important.count
         let firstRoom = Self.rulesPerList - repeated
         if content.count + extras.count > firstRoom {
             let trimmedSet = SafariRuleCompiler.trimmed(content, to: max(0, firstRoom - extras.count))
@@ -148,7 +188,7 @@ public enum PolicyBuilder {
         dropped += rest.count
         unique = blockChunks.flatMap { $0 } + allows
 
-        guard !unique.isEmpty || !content.isEmpty || !extras.isEmpty else { return nil }
+        guard !unique.isEmpty || !content.isEmpty || !extras.isEmpty || !important.isEmpty else { return .nothingToInstall }
 
         do {
             let userPart: Data? = userRules.isEmpty ? nil : try SafariRuleCompiler.compile(userRules)
@@ -158,24 +198,24 @@ public enum PolicyBuilder {
                 if index > 0 && chunk.isEmpty { continue }
                 let domainPart: Data? = rules.isEmpty ? nil : try SafariRuleCompiler.compile(rules)
                 let pre = index == 0 ? content.blocks + content.hides + extras : []
-                let post = (index == 0 ? content.allows : []) + exceptionJSON
-                guard var combined = SafariRuleCompiler.stitch(pre: pre, domain: domainPart, post: post) else { return nil }
+                let post = (index == 0 ? content.allows + important : []) + exceptionJSON
+                guard var combined = SafariRuleCompiler.stitch(pre: pre, domain: domainPart, post: post) else { return .failed("The rules could not be put together.") }
                 if let userPart { combined = join(combined, userPart) }
-                guard combined.count <= 25_000_000 else { return nil }
+                guard combined.count <= 25_000_000 else { return .failed("The rules are too large for the browser to load.") }
                 lists.append(combined)
             }
-            guard let combined = lists.first else { return nil }
+            guard let combined = lists.first else { return .failed("No rules were produced.") }
             var hasher = SHA256()
             for list in lists { hasher.update(data: list) }
             let digest = hasher.finalize().map { String(format: "%02x", $0) }.joined()
-            return PolicySnapshot(
+            return .built(PolicySnapshot(
                 rulesJSON: combined, additionalRulesJSON: Array(lists.dropFirst()), identifier: "setu-" + digest.prefix(20),
                 domainBlockRules: unique.count, urlBlockRules: content.blocks.count, elementHidingRules: content.hides.count,
                 userRules: userRules.count, siteExceptions: exceptionJSON.count, droppedForBudget: dropped,
-                unsupportedRules: unsupported, failedLists: failed, listNames: names,
-                strictExtras: extraLabels)
+                unsupportedRules: unsupported, importantRules: important.count, diagnostics: diagnostics, scriptRules: scripts, scriptIdentifier: scripts.digest,
+                failedLists: failed, listNames: names, strictExtras: extraLabels))
         } catch {
-            return nil
+            return .failed((error as? LocalizedError)?.errorDescription ?? "The rules could not be built.")
         }
     }
 

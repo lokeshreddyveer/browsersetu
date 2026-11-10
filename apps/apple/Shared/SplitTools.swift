@@ -83,7 +83,7 @@ extension BrowserModel {
 
     /// Kept when a split closes, so "Reopen Last Split" can bring the same two pages back.
     func rememberSplit() {
-        guard let left = active, !left.isPrivate, let leftURL = left.url, let right = splitTab, let rightURL = right.url else { return }
+        guard let left = active, !left.isPrivate, let leftURL = left.url, let right = splitTab, !right.isPrivate, let rightURL = right.url else { return }
         let layout = SplitTemplate(name: "Last split", left: leftURL.absoluteString, right: rightURL.absoluteString, vertical: splitOrientation == .stacked)
         lastSplit = layout
         saveSetting("last_split", encodedMap(["list": [layout]]))
@@ -112,7 +112,7 @@ struct ComparePagesView: View {
 
     var body: some View {
         if let c = model.comparison {
-            List {
+            PanelList {
                 Section {
                     LabeledContent("Alike", value: "\(Int((c.similarity * 100).rounded()))%")
                     LabeledContent("Lines in both", value: "\(c.shared)")

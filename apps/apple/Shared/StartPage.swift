@@ -1,7 +1,28 @@
 import SwiftUI
 
 private struct StartBottomInsetKey: EnvironmentKey { static let defaultValue: CGFloat = 0 }
+private struct StartTopInsetKey: EnvironmentKey { static let defaultValue: CGFloat = 0 }
+private struct StartOverPhotoKey: EnvironmentKey { static let defaultValue = false }
+private struct StartPointerGlowKey: EnvironmentKey { static let defaultValue = false }
+private extension EnvironmentValues {
+    /// The soft pointer light is on: glass controls also catch a small highlight on their edge where the pointer is.
+    var startPointerGlow: Bool {
+        get { self[StartPointerGlowKey.self] }
+        set { self[StartPointerGlowKey.self] = newValue }
+    }
+
+    /// The page is drawn over the person's own picture: cards and the search field become glass instead of solid tints.
+    var startOverPhoto: Bool {
+        get { self[StartOverPhotoKey.self] }
+        set { self[StartOverPhotoKey.self] = newValue }
+    }
+}
 extension EnvironmentValues {
+    /// Room the page leaves at its head for a bar that floats over it (the iPhone's bar layouts with the bar at the top).
+    var startTopInset: CGFloat {
+        get { self[StartTopInsetKey.self] }
+        set { self[StartTopInsetKey.self] = newValue }
+    }
     /// Room the page leaves at its foot for a toolbar that floats over it (the iPhone's dock).
     var startBottomInset: CGFloat {
         get { self[StartBottomInsetKey.self] }
@@ -18,12 +39,44 @@ struct StartPageView: View {
     let isPrivate: Bool
     @Environment(\.colorScheme) private var scheme
     @Environment(\.startBottomInset) private var bottomInset
+    @Environment(\.startTopInset) private var topInset
     @State private var addingFavorite = false
+    /// The first visit after setup: a welcome in the greeting and a burst of confetti, once for this profile.
+    @State private var welcoming = false
+    @State private var confetti = false
     @State private var newURL = ""
     @State private var newName = ""
+    /// Held, not observed: only the background redraws when the pointer moves.
+    @State private var pointer = StartPointer()
+    /// The collection's picture is chosen once for each page that appears (a new tab moves a rotation on; coming back to this one does not).
+    @State private var choseWallpaper = false
+    @State private var onScreen = false
+    @State private var lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+    @ObservedObject private var activity = AppActivity.shared
     #if os(iOS)
     @StateObject private var voice = VoiceSearch()
+    @State private var motion = StartMotion()
     #endif
+
+    /// The person's own picture is behind the page.
+    private var overPhoto: Bool { !isPrivate && model.startBackground == .image && model.startImageData != nil }
+    /// A picture or a gradient preset is behind the page: cards and buttons are glass, and ink follows what is behind.
+    private var overArt: Bool { overPhoto || (!isPrivate && model.startBackground == .preset) }
+
+    /// Over a picture or a preset, text and glass take light or dark ink to suit the middle of it, whatever the system appearance is; everywhere else they follow the system.
+    private var contentScheme: ColorScheme {
+        guard overArt, model.startLook.adaptiveText else { return scheme }
+        if model.startBackground == .preset { return StartPreset.named(model.startPreset).isDark ? .dark : .light }
+        guard let dark = StartReadability.prefersDarkInk(model.startAnalysis, dim: model.startImageDim, brightness: model.startLook.brightness) else { return scheme }
+        return dark ? .light : .dark
+    }
+
+    private var playsVideo: Bool {
+        overPhoto && AnimatedWallpaperRules.mayPlay(switchedOn: model.startVideoOn, hasVideo: model.startHasVideo, isPrivate: isPrivate, reduceMotion: reduceMotion,
+                                                    lowPower: lowPower, windowActive: scenePhase == .active && activity.isActive, onScreen: onScreen)
+    }
 
     /// The Customize size choice scales the greeting and the search box as well as the site tiles.
     private var startScale: CGFloat { model.startTile.points / 52 }
@@ -56,6 +109,9 @@ struct StartPageView: View {
                             privateNote
                         } else {
                             if model.showFavorites { FavoritesGrid(addingFavorite: $addingFavorite).startEntrance(1) }
+                            #if os(macOS)
+                            if model.showFavorites && model.favorites.isEmpty { GettingStartedStrip().startEntrance(1) }
+                            #endif
                             if model.showContinue, let tab = model.continueTab { ContinueCard(tab: tab).startEntrance(2) }
                             if model.showFrequent || model.showRecentlyClosed { HistoryChips().startEntrance(3) }
                             if !model.inbox.isEmpty { SentToThisDevice() }
@@ -67,9 +123,10 @@ struct StartPageView: View {
                         HStack(spacing: 10) {
                             PrivacyLine()
                             Menu { ToolsMenuItems(model: model) } label: {
-                                Label("Tools", systemImage: "wrench.and.screwdriver").font(.system(size: 11.5)).foregroundStyle(.secondary)
-                                    .padding(.horizontal, 12).frame(height: 28)
-                                    .background(Capsule().fill(Color.primary.opacity(0.06)))
+                                Image(systemName: "wrench.and.screwdriver").font(.system(size: 12.5)).foregroundStyle(.secondary)
+                                    .frame(width: 32, height: 32)
+                                    .startChip()
+                                    .accessibilityLabel("Tools")
                             }
                             .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
                             CustomizeMenu()
@@ -77,6 +134,7 @@ struct StartPageView: View {
                         .startEntrance(4)
                         .padding(.top, 20)
                         .padding(.bottom, bottomInset)
+                        .padding(.top, topInset)
                     }
                 }
                 .frame(maxWidth: contentWidth)
@@ -86,9 +144,57 @@ struct StartPageView: View {
             }
             // One screen when it fits; it scrolls (and never clips) on a small phone, in landscape, or with large text.
             .scrollBounceBehavior(.basedOnSize)
+            .environment(\.colorScheme, contentScheme)
+            .environment(\.startOverPhoto, overArt)
+            .environment(\.startPointerGlow, overArt && model.startLook.pointerGlow)
         }
+        #if os(macOS)
+        .onContinuousHover { phase in
+            guard overPhoto, model.startLook.pointerGlow || model.startLook.parallax else { if pointer.point != nil { pointer.point = nil }; return }
+            switch phase {
+            case .active(let location): pointer.point = location
+            case .ended: pointer.point = nil
+            }
+        }
+        #endif
         .background(background)
         .motion(.easeOut(duration: 0.25), value: model.startBackground)
+        .onAppear {
+            onScreen = true
+            #if DEBUG
+            WallpaperDebug.visibleStartPages += 1
+            WallpaperDebug.log("start page appeared (visible \(WallpaperDebug.visibleStartPages))")
+            #endif
+            AppActivity.shared.recheck()
+            if !choseWallpaper { choseWallpaper = true; if !isPrivate { model.refreshWallpaper(dark: scheme == .dark, newPage: true) } }
+            #if os(iOS)
+            updateMotion()
+            #endif
+        }
+        .onDisappear {
+            onScreen = false
+            #if DEBUG
+            WallpaperDebug.visibleStartPages = max(0, WallpaperDebug.visibleStartPages - 1)
+            WallpaperDebug.log("start page disappeared (visible \(WallpaperDebug.visibleStartPages))")
+            #endif
+            #if os(iOS)
+            motion.stop(from: pointer)
+            #endif
+        }
+        #if DEBUG
+        .onChange(of: playsVideo) { _, now in
+            WallpaperDebug.log("playsVideo=\(now) [photo=\(overPhoto) on=\(model.startVideoOn) has=\(model.startHasVideo) reduce=\(reduceMotion) low=\(lowPower) scene=\(scenePhase == .active) activity=\(activity.isActive) onScreen=\(onScreen)]")
+        }
+        #endif
+        // Light and dark can have their own pictures; changing the appearance changes the picture.
+        .onChange(of: scheme) { _, now in if !isPrivate { model.refreshWallpaper(dark: now == .dark) } }
+        .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange)) { _ in lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled }
+        #if os(iOS)
+        .onChange(of: model.startLook.motion) { _, _ in updateMotion() }
+        .onChange(of: lowPower) { _, _ in updateMotion() }
+        .onChange(of: reduceMotion) { _, _ in updateMotion() }
+        .onChange(of: activity.isActive) { _, _ in updateMotion() }
+        #endif
         .alert("Add Favorite", isPresented: $addingFavorite) {
             TextField("Website address", text: $newURL)
             TextField("Name (optional)", text: $newName)
@@ -96,8 +202,31 @@ struct StartPageView: View {
             Button("Cancel", role: .cancel) { newURL = ""; newName = "" }
         }
         .overlay { if model.startDrawerOpen, !isPrivate { StartDrawer() } }
+        // The first visit after setup is a small celebration: a burst of confetti over the page and a welcome where the greeting is.
+        .overlay { if confetti { SetupConfetti().transition(.opacity) } }
+        .onChange(of: model.showSetup) { _, now in if !now { celebrateFirstVisit() } }
         .accessibilityIdentifier("start-page")
     }
+
+    /// Once for this profile, and only right after the setup assistant closes.
+    private func celebrateFirstVisit() {
+        guard !isPrivate, model.settingValue("start_welcomed") != "1" else { return }
+        model.saveSetting("start_welcomed", "1")
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.4)) { welcoming = true; confetti = true }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(4.2))
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.6)) { confetti = false }
+            try? await Task.sleep(for: .seconds(2.6))
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.6)) { welcoming = false }
+        }
+    }
+
+    #if os(iOS)
+    /// Tilt reaches the picture only when it is asked for, and never in Low Power Mode, with Reduce Motion on, or in a private tab.
+    private func updateMotion() {
+        if overPhoto, model.startLook.motion, !lowPower, !reduceMotion, onScreen, activity.isActive { motion.start(into: pointer) } else { motion.stop(from: pointer) }
+    }
+    #endif
 
     // MARK: Pieces
 
@@ -105,11 +234,14 @@ struct StartPageView: View {
         let hour = Calendar.current.component(.hour, from: Date())
         let word = switch hour { case 5..<12: "Good morning"; case 12..<17: "Good afternoon"; case 17..<22: "Good evening"; default: "Good night" }
         let custom = model.startTitle.trimmingCharacters(in: .whitespaces)
-        let title = isPrivate ? "Private Browsing" : (!custom.isEmpty ? custom : (model.showGreeting ? word : "Browser Setu"))
+        let title = isPrivate ? "Private Browsing" : (welcoming ? "Welcome to Browser Setu" : (!custom.isEmpty ? custom : (model.showGreeting ? word : "Browser Setu")))
         return VStack(spacing: 6) {
-            if !isPrivate, model.showGreeting {
-                Text(Date().formatted(.dateTime.weekday(.wide).day().month(.wide)))
-                    .font(.system(size: 12, weight: .semibold)).tracking(0.9).textCase(.uppercase).foregroundStyle(accent.opacity(0.9))
+            if !isPrivate { SetuLockup(size: 12, latin: false).padding(.bottom, 10) }
+            if !isPrivate, model.showGreeting || welcoming {
+                Text(welcoming ? "You’re all set" : Date().formatted(.dateTime.weekday(.wide).day().month(.wide)))
+                    .font(.system(size: 12, weight: .semibold)).tracking(0.9).textCase(.uppercase)
+                    // The accent colour is not chosen for the picture behind it (teal on green was hard to read): over a picture the date takes the page's ink.
+                    .foregroundStyle(overArt ? AnyShapeStyle(Color.primary.opacity(0.78)) : AnyShapeStyle(accent.opacity(0.9)))
             }
             Text(title)
                 .font(.system(size: 34 * startScale, weight: .semibold, design: model.startFont.design)).foregroundStyle(.primary.opacity(0.92))
@@ -126,6 +258,12 @@ struct StartPageView: View {
         #if os(macOS)
         StartSearchField()
         #else
+        if UIDevice.current.userInterfaceIdiom == .phone, !model.topBarHidden, !model.chromeCollapsed {
+            // In the bar layouts the address bar is on screen already: a second search box under it was a second place to type. Only the voice button stays.
+            VoiceButton(voice: voice, round: true)
+                .onAppear { voice.onFinish = { words in model.navigate(input: words) } }
+                .onChange(of: voice.problem) { _, message in if let message { model.notice = message; voice.problem = nil } }
+        } else {
         HStack(spacing: 8) {
         Button { model.openSearchPanel() } label: {
             HStack(spacing: 10) {
@@ -148,6 +286,7 @@ struct StartPageView: View {
         // While a search is being typed, the one real field is the only field.
         .opacity(model.floatingAddressVisible ? 0 : 1)
         .motion(.easeOut(duration: 0.18), value: model.floatingAddressVisible)
+        }
         #endif
     }
 
@@ -168,10 +307,19 @@ struct StartPageView: View {
         Group {
             if isPrivate { Color.platformBackground }
             else if model.startBackground == .image {
-                if let data = model.startImageData, let image = Image(platformData: data) {
-                    Color.clear.overlay(image.resizable().scaledToFill().blur(radius: model.startImageBlur).overlay(Color.black.opacity(model.startImageDim))).clipped()
-                } else if scheme == .dark { Color(red: 0.047, green: 0.059, blue: 0.090) } else { Color.platformBackground }
+                if let data = model.startImageData {
+                    // Two pictures cross-fade (old out, new in) with no black frame between; with Reduce Motion the change is immediate. The decoded pictures come
+                    // from the cache, so nothing is decoded while it fades.
+                    let identity = WallpaperImages.identity(data)
+                    ZStack {
+                        StartBackdrop(data: data, look: model.startLook, dim: model.startImageDim, blur: model.startImageBlur, analysis: model.startAnalysis, pointer: pointer, playsVideo: playsVideo)
+                            .id(identity)
+                            .transition(.opacity)
+                    }
+                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.6), value: identity)
+                } else if scheme == .dark { Color(red: 0.047, green: 0.059, blue: 0.090) } else { DaylightBackdrop() }
             }
+            else if model.startBackground == .preset { StartPresetBackground(preset: StartPreset.named(model.startPreset), drifting: model.startAnimatedGradient) }
             else if model.startBackground == .color { StartColor.color(model.startColorA) }
             else if model.startBackground == .blend {
                 LinearGradient(colors: [StartColor.color(model.startColorA), StartColor.color(model.startColorB, fallback: StartColor.defaultB)], startPoint: .top, endPoint: .bottom)
@@ -184,11 +332,19 @@ struct StartPageView: View {
             else if scheme == .dark {
                 ZStack {
                     Color(red: 0.047, green: 0.059, blue: 0.090)                       // #0C0F17
-                    RadialGradient(colors: [StartTone.glow().opacity(0.85), .clear],   // #111B30
-                                   center: .init(x: 0.5, y: 0.42), startRadius: 0, endRadius: 520)
+                    if let data = BundledBackdrops.data("earthset"), let image = Image(platformData: data) {
+                        // A real photograph, slowly drifting, darkened so the page on top stays easy to read.
+                        DriftingPhoto(image: image)
+                            .overlay(LinearGradient(colors: [.black.opacity(0.30), .black.opacity(0.66)], startPoint: .top, endPoint: .bottom))
+                    } else {
+                        RadialGradient(colors: [StartTone.glow().opacity(0.85), .clear],   // #111B30
+                                       center: .init(x: 0.5, y: 0.42), startRadius: 0, endRadius: 520)
+                    }
+                    SetuArcs()
                 }
+                .clipped()
             } else {
-                LinearGradient(colors: [accent.opacity(0.05), Color.platformBackground], startPoint: .top, endPoint: .center).background(Color.platformBackground)
+                ZStack { DaylightBackdrop(); SetuArcs() }
             }
         }
         .ignoresSafeArea()
@@ -201,12 +357,29 @@ struct StartPageView: View {
 private struct StartCardStyle: ViewModifier {
     var radius: CGFloat = 16
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.startOverPhoto) private var overPhoto
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparencySetting
+    @Environment(\.colorSchemeContrast) private var contrast
+    /// Reduce Transparency, and Increase Contrast, both make the glass solid.
+    private var reduceTransparency: Bool { reduceTransparencySetting || contrast == .increased }
 
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
-        content
-            .background(shape.fill(ThemeState.raised?.opacity(0.62) ?? Color.primary.opacity(scheme == .dark ? 0.075 : 0.05)))
-            .overlay(shape.strokeBorder(Color.primary.opacity(scheme == .dark ? 0.09 : 0.07), lineWidth: 0.5))
+        if overPhoto && ThemeState.raised == nil {
+            // Over the person's picture: a quiet glass (or, with Reduce Transparency, a solid tint), with a thin lit edge at the top.
+            content
+                .background {
+                    if reduceTransparency { shape.fill(scheme == .dark ? Color(red: 0.10, green: 0.11, blue: 0.15) : Color(white: 0.96)) }
+                    else { shape.fill(.ultraThinMaterial) }
+                }
+                .overlay(shape.strokeBorder(LinearGradient(colors: [Color.white.opacity(scheme == .dark ? 0.22 : 0.5), Color.white.opacity(0.04)], startPoint: .top, endPoint: .bottom), lineWidth: 0.6))
+                .shadow(color: .black.opacity(scheme == .dark ? 0.22 : 0.10), radius: 8, y: 2)
+                .modifier(StartSpecular(radius: radius))
+        } else {
+            content
+                .background(shape.fill(ThemeState.raised?.opacity(0.62) ?? Color.primary.opacity(scheme == .dark ? 0.075 : 0.05)))
+                .overlay(shape.strokeBorder(Color.primary.opacity(scheme == .dark ? 0.09 : 0.07), lineWidth: 0.5))
+        }
     }
 }
 
@@ -215,17 +388,94 @@ private struct StartFieldStyle: ViewModifier {
     var radius: CGFloat = 28
     var focused = false
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.startOverPhoto) private var overPhoto
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparencySetting
+    @Environment(\.colorSchemeContrast) private var contrast
+    /// Reduce Transparency, and Increase Contrast, both make the glass solid.
+    private var reduceTransparency: Bool { reduceTransparencySetting || contrast == .increased }
 
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
-        content
-            .background(shape.fill(ThemeState.raised?.opacity(0.85) ?? (scheme == .dark ? Color(red: 0.115, green: 0.138, blue: 0.195) : Color.white.opacity(0.9))))
-            .overlay(shape.strokeBorder(focused ? Theme.accent.opacity(0.85) : Color.primary.opacity(scheme == .dark ? 0.10 : 0.08), lineWidth: focused ? 1.5 : 0.5))
-            .shadow(color: focused ? Theme.accent.opacity(0.25) : .black.opacity(scheme == .dark ? 0.30 : 0.08), radius: focused ? 14 : 10, y: 3)
+        if overPhoto && ThemeState.raised == nil {
+            // Clear glass at rest; while typing it becomes more opaque, so the text is always easy to read.
+            let solid = scheme == .dark ? Color(red: 0.115, green: 0.138, blue: 0.195) : Color.white
+            content
+                .background {
+                    if reduceTransparency { shape.fill(solid) }
+                    else { shape.fill(.regularMaterial); shape.fill(solid.opacity(focused ? 0.55 : 0.12)) }
+                }
+                .overlay(shape.strokeBorder(focused ? Theme.accent.opacity(0.85) : Color.white.opacity(scheme == .dark ? 0.22 : 0.55), lineWidth: focused ? 1.5 : 0.7))
+                .shadow(color: focused ? Theme.accent.opacity(0.25) : .black.opacity(scheme == .dark ? 0.30 : 0.12), radius: focused ? 14 : 10, y: 3)
+                .modifier(StartSpecular(radius: radius))
+        } else {
+            content
+                .background(shape.fill(ThemeState.raised?.opacity(0.85) ?? (scheme == .dark ? Color(red: 0.115, green: 0.138, blue: 0.195) : Color.white.opacity(0.9))))
+                .overlay(shape.strokeBorder(focused ? Theme.accent.opacity(0.85) : Color.primary.opacity(scheme == .dark ? 0.10 : 0.08), lineWidth: focused ? 1.5 : 0.5))
+                .shadow(color: focused ? Theme.accent.opacity(0.25) : .black.opacity(scheme == .dark ? 0.30 : 0.08), radius: focused ? 14 : 10, y: 3)
+        }
+    }
+}
+
+/// A thin highlight on the edge of a glass control, brightest where the pointer is. It keeps its own small state, so moving the pointer redraws this one control and
+/// nothing else, and it is only there when the pointer light is on.
+private struct StartSpecular: ViewModifier {
+    var radius: CGFloat
+    @Environment(\.startPointerGlow) private var enabled
+    @State private var location: CGPoint?
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content
+                .overlay {
+                    GeometryReader { geo in
+                        if let location {
+                            RoundedRectangle(cornerRadius: radius, style: .continuous)
+                                .strokeBorder(RadialGradient(colors: [Color.white.opacity(0.85), Color.white.opacity(0)],
+                                                             center: UnitPoint(x: location.x / max(geo.size.width, 1), y: location.y / max(geo.size.height, 1)),
+                                                             startRadius: 0, endRadius: 80), lineWidth: 1.2)
+                                .transition(.opacity)
+                        }
+                    }
+                    .allowsHitTesting(false)
+                }
+                .onContinuousHover { phase in
+                    switch phase {
+                    case .active(let point): location = point
+                    case .ended: location = nil
+                    }
+                }
+                .animation(.easeOut(duration: 0.18), value: location == nil)
+        } else {
+            content
+        }
+    }
+}
+
+/// A small pill or round button (the protection line, Tools, Customize): a faint tint on the page's own background, glass over a picture so it never disappears into a busy one.
+private struct StartChipStyle: ViewModifier {
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.startOverPhoto) private var overPhoto
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparencySetting
+    @Environment(\.colorSchemeContrast) private var contrast
+    /// Reduce Transparency, and Increase Contrast, both make the glass solid.
+    private var reduceTransparency: Bool { reduceTransparencySetting || contrast == .increased }
+
+    func body(content: Content) -> some View {
+        if overPhoto {
+            content
+                .background {
+                    if reduceTransparency { Capsule().fill(scheme == .dark ? Color(red: 0.10, green: 0.11, blue: 0.15) : Color(white: 0.96)) }
+                    else { Capsule().fill(.ultraThinMaterial) }
+                }
+                .overlay(Capsule().strokeBorder(Color.white.opacity(scheme == .dark ? 0.2 : 0.5), lineWidth: 0.6))
+        } else {
+            content.background(Capsule().fill(Color.primary.opacity(0.06)))
+        }
     }
 }
 
 private extension View {
+    func startChip() -> some View { modifier(StartChipStyle()).modifier(StartSpecular(radius: 16)) }
     func startCard(radius: CGFloat = 16) -> some View { modifier(StartCardStyle(radius: radius)) }
     func startField(radius: CGFloat = 28, focused: Bool = false) -> some View { modifier(StartFieldStyle(radius: radius, focused: focused)) }
 }
@@ -235,8 +485,9 @@ private struct HoverLift: ViewModifier {
     @State private var hovering = false
     func body(content: Content) -> some View {
         content
-            .scaleEffect(hovering ? 1.035 : 1)
+            .scaleEffect(hovering ? 1.03 : 1)
             .offset(y: hovering ? -2 : 0)
+            .shadow(color: .black.opacity(hovering ? 0.16 : 0), radius: hovering ? 8 : 0, y: hovering ? 4 : 0)
             .motion(.spring(response: 0.25, dampingFraction: 0.75), value: hovering)
             .onHover { hovering = $0 }
     }
@@ -326,6 +577,61 @@ private struct SiteCard: View {
     }
 }
 
+/// One name and one identity per site, so "my.equifax.com" and "signin.my.equifax.com" are a single tile called "Equifax".
+enum SiteName {
+    /// The site a host belongs to: its last two labels (three under a country domain such as co.uk), without www.
+    static func key(_ host: String?) -> String {
+        guard var h = host?.lowercased(), !h.isEmpty else { return "" }
+        if h.hasPrefix("www.") { h.removeFirst(4) }
+        let parts = h.split(separator: ".").map(String.init)
+        guard parts.count > 2, let last = parts.last else { return h }
+        let secondLevel = ["co", "com", "org", "net", "gov", "ac"]
+        let keep = (last.count == 2 && secondLevel.contains(parts[parts.count - 2])) ? 3 : 2
+        return parts.suffix(keep).joined(separator: ".")
+    }
+
+    /// "equifax.com" reads as "Equifax".
+    static func display(_ host: String?) -> String {
+        let key = key(host)
+        guard let first = key.split(separator: ".").first.map(String.init), !first.isEmpty else { return "" }
+        return first.prefix(1).uppercased() + first.dropFirst()
+    }
+}
+
+/// A site as an icon tile with its name beneath, the same size and look as a favorite.
+private struct ShortcutTile: View {
+    @EnvironmentObject var model: BrowserModel
+    let title: String
+    let url: String
+    var symbol: String?
+    let action: () -> Void
+
+    private var size: CGFloat { model.startTile.points }
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 8) {
+                Group {
+                    if let symbol {
+                        Image(systemName: symbol).font(.system(size: size * 0.5, weight: .medium)).foregroundStyle(Theme.accent)
+                    } else {
+                        SiteTile(url: url, title: title, size: size)
+                    }
+                }
+                .frame(width: size + 22, height: size + 22)
+                .startCard(radius: (size + 22) * 0.28)
+                Text(title.isEmpty ? displayHost(URL(string: url)) : title)
+                    .scaledFont(12).lineLimit(1).truncationMode(.tail).foregroundStyle(.primary.opacity(0.85)).frame(maxWidth: 92)
+            }
+            .frame(maxWidth: .infinity)
+            .keyboardFocusRing(radius: 14)
+        }
+        .buttonStyle(.plain).focusEffectDisabled()
+        .hoverLift()
+        .accessibilityLabel(title.isEmpty ? displayHost(URL(string: url)) : title)
+    }
+}
+
 /// Cards in two columns on a phone and three on a wide window.
 private struct CardGrid<Content: View>: View {
     @ViewBuilder var content: () -> Content
@@ -350,15 +656,16 @@ private struct FavoritesGrid: View {
     @State private var editURL = ""
     @State private var editName = ""
     private let columns = [GridItem(.adaptive(minimum: 84, maximum: 110), spacing: 12, alignment: .top)]
+    private var accentColor: Color { Theme.accent }
 
     var body: some View {
         let all = model.orderedFavorites
         let limit = 8
         let items = showAll ? Array(all.prefix(capacity)) : Array(all.prefix(limit))
         VStack(spacing: 12) {
-            SectionHeader(title: "Favorites", count: all.count)
+            if !all.isEmpty { SectionHeader(title: "Favorites", count: all.count) }
             if all.isEmpty {
-                emptyCard.transition(.opacity)
+                emptyCard.frame(maxWidth: .infinity).transition(.opacity)
             } else {
                 LazyVGrid(columns: columns, spacing: 12) {
                     ForEach(items, id: \.url) { favorite in tile(favorite) }
@@ -423,19 +730,19 @@ private struct FavoritesGrid: View {
     /// With no favorites yet, one clear dashed box says what this row is for and how to fill it.
     private var emptyCard: some View {
         addMenu {
-            HStack(spacing: 12) {
-                Image(systemName: "plus").font(.system(size: 16, weight: .regular)).foregroundStyle(.secondary)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Pin your favorite sites here").scaledFont(13, weight: .medium).foregroundStyle(.primary.opacity(0.85))
-                    Text("One tap away from every new tab. Nothing is added unless you choose it.").scaledFont(12).foregroundStyle(.secondary)
+            // One small line, not a box: nothing is added unless you choose it.
+            VStack(spacing: 14) {
+                SetuGhostTiles()
+                HStack(spacing: 8) {
+                    Image(systemName: "plus").font(.system(size: 13, weight: .semibold)).foregroundStyle(accentColor)
+                    Text("Add a favorite").scaledFont(13, weight: .medium).foregroundStyle(.primary.opacity(0.85))
                 }
-                Spacer(minLength: 0)
+                .padding(.horizontal, 16).frame(height: 38)
+                .startCard(radius: 19)
+                .contentShape(Capsule())
+                .keyboardFocusRing(radius: 19)
             }
-            .padding(.horizontal, 18).padding(.vertical, 14)
-            .frame(maxWidth: .infinity)
-            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Color.secondary.opacity(0.45), style: StrokeStyle(lineWidth: 1, dash: [5, 4])))
-            .contentShape(Rectangle())
-            .keyboardFocusRing(radius: 16)
+            .frame(maxWidth: .infinity, alignment: .center)
         }
         .accessibilityLabel("Add a favorite site")
     }
@@ -518,6 +825,12 @@ private struct HistoryChips: View {
 
     struct OftenSite: Identifiable { let id: String; let title: String; let url: String; let isLocal: Bool }
 
+    /// Up to eight closed tabs, newest first, with one chip for each site.
+    private func reopenChips(_ all: [(offset: Int, element: ClosedTab)]) -> [(offset: Int, element: ClosedTab)] {
+        var seen = Set<String>()
+        return Array(all.filter { seen.insert(SiteName.key($0.element.url.host)).inserted }.prefix(8))
+    }
+
     private func isLocal(_ host: String?) -> Bool {
         guard let host else { return false }
         return !PublicAddress.isPublicHost(host)   // one definition of "not on the public internet", shared with the lookups
@@ -530,7 +843,7 @@ private struct HistoryChips: View {
         var seen = Set<String>(), titles = Set<String>(), result: [OftenSite] = [], localCount = 0, firstLocal: OftenSite?
         for site in model.frequentSites(limit: 24) where !favorites.contains(site.url) {
             let url = URL(string: site.url)
-            let key = (url?.host ?? "") + (url?.path ?? "")
+            let key = SiteName.key(url?.host)
             guard seen.insert(key).inserted else { continue }
             let title = site.title.trimmingCharacters(in: .whitespacesAndNewlines)
             let readable = title.isEmpty || title == site.url ? displayHost(url) : title
@@ -547,9 +860,9 @@ private struct HistoryChips: View {
 
     var body: some View {
         #if os(iOS)
-        let limit = 4
+        let limit = 8
         #else
-        let limit = 6
+        let limit = 12
         #endif
         let shown = !model.showFrequent ? [] : (showAllOften ? often : Array(often.prefix(limit)))
         let continueURL = model.continueTab?.url?.absoluteString
@@ -561,9 +874,11 @@ private struct HistoryChips: View {
             if !shown.isEmpty {
                 VStack(spacing: 10) {
                     SectionHeader(title: "Often visited", count: often.count)
-                    CardGrid {
+                    // The same icon tiles as Favorites, so the page reads as one set of shortcuts.
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 84, maximum: 110), spacing: 12, alignment: .top)], spacing: 12) {
                         ForEach(shown) { site in
-                            SiteCard(title: site.title, detail: site.isLocal ? "On this computer" : displayHost(URL(string: site.url)), url: site.url, symbol: site.isLocal ? "laptopcomputer" : nil) { model.open(urlString: site.url) }
+                            ShortcutTile(title: site.isLocal ? site.title : SiteName.display(URL(string: site.url)?.host), url: site.url, symbol: site.isLocal ? "laptopcomputer" : nil) { model.open(urlString: site.url) }
+                                .contextMenu { Button("Open in New Tab") { model.open(urlString: site.url, newTab: true) } }
                         }
                     }
                     if often.count > limit { ShowMoreButton(expanded: $showAllOften, hidden: often.count - limit) }
@@ -571,13 +886,26 @@ private struct HistoryChips: View {
             }
             if !closed.isEmpty {
                 VStack(spacing: 10) {
-                    SectionHeader(title: "Recently closed", count: allClosed.count)
-                    CardGrid {
-                        ForEach(closed, id: \.offset) { index, tab in
-                            SiteCard(title: tab.title.isEmpty ? displayHost(tab.url) : tab.title, detail: displayHost(tab.url), url: tab.url.absoluteString, symbol: "arrow.uturn.backward") { model.reopenClosedTab(at: index) }
+                    SectionHeader(title: "Reopen", count: allClosed.count)
+                    // One quiet row you can swipe, a chip per closed tab, one site once.
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(reopenChips(allClosed), id: \.offset) { index, tab in
+                                Button { model.reopenClosedTab(at: index) } label: {
+                                    HStack(spacing: 7) {
+                                        SiteTile(url: tab.url.absoluteString, title: tab.title, size: 20)
+                                        Text(SiteName.display(tab.url.host)).scaledFont(13, weight: .medium).foregroundStyle(.primary.opacity(0.9)).lineLimit(1)
+                                        Image(systemName: "arrow.uturn.backward").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+                                    }
+                                    .padding(.horizontal, 12).frame(height: 38)
+                                    .startCard(radius: 19)
+                                    .contentShape(Capsule())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Reopen \(tab.title.isEmpty ? displayHost(tab.url) : tab.title)")
+                            }
                         }
                     }
-                    if allClosed.count > 3 { ShowMoreButton(expanded: $showAllClosed, hidden: min(allClosed.count, 10) - 3) }
                 }
             }
         }
@@ -649,12 +977,12 @@ private struct PrivacyLine: View {
             Button { model.sheet = .dashboard } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "checkmark.shield.fill").font(.system(size: 11)).foregroundStyle(Theme.accent)
-                    Text("Protection on · \(rules.formatted()) rules" + (cleaned > 0 ? " · \(cleaned) tracking link\(cleaned == 1 ? "" : "s") cleaned" : ""))
-                        .font(.system(size: 11.5)).lineLimit(1)
+                    Text(cleaned > 0 ? "Protection on · \(cleaned) link\(cleaned == 1 ? "" : "s") cleaned" : "Protection on")
+                        .font(.system(size: 12, weight: .medium)).lineLimit(1)
                 }
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 12).frame(height: 28)
-                .background(Capsule().fill(Color.primary.opacity(0.06)))
+                .startChip()
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Protection is on with \(rules) rules. Open the privacy dashboard.")
@@ -669,9 +997,10 @@ private struct CustomizeMenu: View {
 
     var body: some View {
         Button { animated(.easeOut(duration: 0.22)) { model.startDrawerOpen = true } } label: {
-            Label("Customize", systemImage: "slider.horizontal.3").font(.system(size: 11.5)).foregroundStyle(.secondary)
-                .padding(.horizontal, 12).frame(height: 28)
-                .background(Capsule().fill(Color.primary.opacity(0.06)))
+            Image(systemName: "slider.horizontal.3").font(.system(size: 12.5)).foregroundStyle(.secondary)
+                .frame(width: 32, height: 32)
+                .startChip()
+                .accessibilityLabel("Customize")
         }
         .buttonStyle(.plain).focusEffectDisabled()
         .keyboardFocusRing(radius: 14)
@@ -729,7 +1058,12 @@ private struct StartSearchField: View {
             if focused || overList {
                 SuggestionsList(address: address)
                     // Solid, so the page behind it never shows through the list; in the theme's own colour when one is in use.
-                    .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(ThemeState.raised ?? Color(red: 0.075, green: 0.090, blue: 0.135)))
+                    .background {
+                        let panel = RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        // A solid base with a material over it: legible whatever is behind, and it still looks like part of the glass around it.
+                        panel.fill((ThemeState.raised ?? Color(red: 0.075, green: 0.090, blue: 0.135)).opacity(0.88))
+                        panel.fill(.regularMaterial).opacity(0.6)
+                    }
                     .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5))
                     .shadow(color: .black.opacity(0.35), radius: 18, y: 8)
                     .padding(.top, 64)
@@ -801,3 +1135,66 @@ enum StartTone {
         }
     }
 }
+
+
+#if os(macOS)
+/// The first minutes: three quiet next steps on a fresh start page, gone once there is a favorite.
+private struct GettingStartedStrip: View {
+    @State private var importing = false
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Text("Make it yours").font(.system(size: 11.5, weight: .semibold)).tracking(0.9).textCase(.uppercase).foregroundStyle(.secondary)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 210, maximum: 340), spacing: 12, alignment: .top)], spacing: 12) { cards }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Getting started")
+        .sheet(isPresented: $importing) { ImportSheet() }
+    }
+
+    @ViewBuilder private var cards: some View {
+        GettingStartedCard(symbol: "paintpalette.fill", title: "Choose a look", detail: "Themes, colours and wallpapers", tint: Theme.accent) { SettingsRouter.open(.appearance) }
+        GettingStartedCard(symbol: "checkmark.shield.fill", title: "Make it your default", detail: "Open every link in Browser Setu", tint: .purple) { SettingsRouter.open(.general) }
+        GettingStartedCard(symbol: "square.and.arrow.down.fill", title: "Bring your things", detail: "Bookmarks, passwords and history from another browser", tint: .orange) { importing = true }
+    }
+}
+
+/// One thing to do first: a lit icon tile, what it is and a line of why. It rises a little under the pointer, and settles when pressed.
+private struct GettingStartedCard: View {
+    let symbol: String
+    let title: String
+    let detail: String
+    let tint: Color
+    let action: () -> Void
+    @State private var hovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: symbol).font(.system(size: 16, weight: .semibold)).foregroundStyle(.white)
+                    .frame(width: 40, height: 40)
+                    .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(LinearGradient(colors: [tint, tint.opacity(0.62)], startPoint: .topLeading, endPoint: .bottomTrailing)))
+                    .shadow(color: tint.opacity(0.35), radius: 6, y: 3)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).scaledFont(13, weight: .semibold).foregroundStyle(.primary.opacity(0.92)).fixedSize(horizontal: false, vertical: true)
+                    Text(detail).scaledFont(11.5).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                .multilineTextAlignment(.leading)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 12)
+            .frame(maxWidth: .infinity, minHeight: 78, alignment: .leading)
+            .startCard(radius: 16)
+            .offset(y: hovering && !reduceMotion ? -2 : 0)
+            .shadow(color: .black.opacity(hovering ? 0.16 : 0), radius: hovering ? 10 : 0, y: hovering ? 5 : 0)
+            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: hovering)
+        .accessibilityLabel(title)
+        .accessibilityHint(detail)
+    }
+}
+#endif

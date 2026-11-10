@@ -63,7 +63,8 @@ final class PDFEditorSession: ObservableObject {
     func saveCopy(suffix: String = "edited") -> URL? {
         guard let document else { return nil }
         let target = PDFEdit.copyURL(for: source, suffix: suffix)
-        guard document.write(to: target) else { return nil }
+        // Written to a temporary file, opened again and checked, and only then moved into place: a failure leaves nothing behind, and the original is never touched.
+        guard PDFEdit.writeValidated(document, to: target) else { return nil }
         savedCopy = target
         return target
     }
@@ -111,6 +112,9 @@ struct PDFEditorView: View {
     @EnvironmentObject var model: BrowserModel
     @StateObject private var session: PDFEditorSession
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.sheetProvidesDone) private var sheetProvidesDone
+    /// The number of changes when a copy was last saved: edits after that are what a close would lose.
+    @State private var savedAtChanges = 0
     @State private var tool = PDFTool.browse
     @State private var drag: (start: CGPoint, now: CGPoint, trail: [CGPoint])?
     @State private var showPages = false
@@ -121,6 +125,8 @@ struct PDFEditorView: View {
     @State private var signature: PDFEdit.Signature?
     @State private var signaturePicture: CGImage?
     @State private var merging = false
+    @State private var organizing = false
+    @State private var addingPictures = false
     @State private var protecting = false
     @State private var passwordDraft = ""
     @State private var extracting = false
@@ -133,10 +139,23 @@ struct PDFEditorView: View {
     var body: some View {
         VStack(spacing: 0) {
             if session.locked { lockedView }
-            else if session.document == nil { Text("This file could not be opened as a PDF.").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity) }
+            else if session.document == nil {
+                // A file that will not open is said in the same design as every other failure, and only this panel is affected: nothing else is replaced.
+                let info = BrowserErrorInfo(kind: .fileFailure, url: session.source, detail: "It may be damaged, or not a PDF at all. Nothing was changed.")
+                VStack { ErrorInlineView(info: info, actions: [.chooseAnotherFile]) { _ in dismiss() }.frame(maxWidth: 460).padding(24) }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
             else { editor }
         }
         .frame(minWidth: 640, minHeight: 560)
+        .sheet(isPresented: $organizing) { PDFPageOrganizer(session: session).environmentObject(model) }
+        .fileImporter(isPresented: $addingPictures, allowedContentTypes: [.image], allowsMultipleSelection: true) { result in
+            guard case .success(let urls) = result else { return }
+            let scoped = urls.map { ($0, $0.startAccessingSecurityScopedResource()) }
+            defer { for (url, ok) in scoped where ok { url.stopAccessingSecurityScopedResource() } }
+            let added = session.appendPictures(urls)
+            model.notice = added > 0 ? "Added \(added) page\(added == 1 ? "" : "s"). Undo takes them out." : "Those pictures could not be read."
+        }
         .sheet(isPresented: $signing) { SignatureSheet { picked, picture in signature = picked; signaturePicture = picture; tool = .sign } }
         .fileImporter(isPresented: $merging, allowedContentTypes: [.pdf]) { result in
             guard case .success(let url) = result, let doc = session.document else { return }
@@ -144,6 +163,11 @@ struct PDFEditorView: View {
             if let other = PDFDocument(url: url), !other.isLocked { PDFEdit.append(other, to: doc); session.changes += 1; model.notice = "Added \(other.pageCount) page\(other.pageCount == 1 ? "" : "s")." }
             else { model.notice = "That PDF could not be added (it may need a password)." }
         }
+        // Edits that are in no saved copy would be lost: Done and Escape ask first. Save writes a copy (the original is never changed); if that fails the editor stays open.
+        .guardsUnsavedChanges(isDirty: session.changes > 0 && session.changes != savedAtChanges, save: {
+            if let url = session.saveCopy() { savedAtChanges = session.changes; model.notice = "Saved \(url.lastPathComponent)."; return nil }
+            return "The copy could not be saved."
+        })
         .alert("Text", isPresented: $askText) {
             TextField("Type here", text: $textDraft)
             Button("Add") { if let p = textPoint, let spot = session.locate(p) { session.added(PDFEdit.addText(textDraft, on: spot.page, at: spot.point, color: .black), on: spot.page) }; textDraft = "" }
@@ -206,7 +230,9 @@ struct PDFEditorView: View {
                     Button("Move Up") { act { PDFEdit.move($0, from: session.currentPageIndex, to: session.currentPageIndex - 1) } }
                     Button("Move Down") { act { PDFEdit.move($0, from: session.currentPageIndex, to: session.currentPageIndex + 1) } }
                     Divider()
+                    Button("Organize Pages…") { organizing = true }
                     Button("Add Pages from Another PDF…") { merging = true }
+                    Button("Add Pictures as Pages…") { addingPictures = true }
                     Button("Extract Pages…") { extracting = true }
                 }
                 Button { showPages.toggle() } label: { Label("Thumbnails", systemImage: "sidebar.left") }.buttonStyle(.bordered)
@@ -232,7 +258,8 @@ struct PDFEditorView: View {
                 Button("Save a Protected Copy…") { protecting = true }
             }
             if let copy = session.savedCopy { ShareLink(item: copy) { Image(systemName: "square.and.arrow.up").accessibilityLabel("Share the saved copy") } }
-            Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
+            // The sheet's own Done (top bar) is the one, with Escape; this one is only for when the editor is shown without it.
+            if !sheetProvidesDone { Button("Done") { dismiss() }.keyboardShortcut(.cancelAction) }
         }
         .padding(10)
     }
@@ -243,7 +270,7 @@ struct PDFEditorView: View {
         case .pen: "Draw on the page."
         case .text: "Click where the text should go."
         case .rectangle, .oval: "Drag to draw the shape."
-        case .sign: signature == nil && signaturePicture == nil ? "Choose a signature first." : "Drag a box where the signature goes, or click to place it at the usual size."
+        case .sign: signature == nil && signaturePicture == nil ? "Choose a signature first. A drawn, typed or picture signature is only a picture on the page: it is not a certificate-backed digital signature." : "Drag a box where the signature goes (a picture on the page, not a certificate-backed digital signature), or click to place it at the usual size."
         case .redact: "Drag over what to hide. Nothing changes until you black the areas out."
         }
     }
@@ -344,26 +371,36 @@ struct PDFEditorView: View {
 
     private func applyRedactions() {
         guard let document = session.document else { return }
+        // The pages are looked up before any is replaced (replacing a page makes the marks' page objects stale).
+        let marks = redactions.map { ($0, document.index(for: $0.page)) }
         var pages = Set<Int>()
-        for item in redactions { if let i = Optional(document.index(for: item.page)), i != NSNotFound { pages.insert(i) } }
-        for index in pages {
-            let rects = redactions.filter { document.index(for: $0.page) == index }.map(\.rect)
-            _ = PDFEdit.redact(rects, onPageAt: index, of: document)
+        for (_, i) in marks where i != NSNotFound { pages.insert(i) }
+        var done = Set<Int>(), failed = Set<Int>()
+        for index in pages.sorted() {
+            let rects = marks.filter { $0.1 == index }.map { $0.0.rect }
+            if PDFEdit.redact(rects, onPageAt: index, of: document) { done.insert(index) } else { failed.insert(index) }
         }
-        session.changes += 1; session.view.document = document
-        model.notice = "Blacked out for good. These pages can no longer be searched or selected."
-        redactions = []; tool = .browse
+        session.changes += done.isEmpty ? 0 : 1; session.view.document = document
+        if failed.isEmpty {
+            model.notice = "Blacked out for good. These pages can no longer be searched or selected."
+            redactions = []; tool = .browse
+        } else {
+            // Never claim a page was blacked out when it was not: the marks for those pages stay, so nothing is lost and nothing is shared unredacted by mistake.
+            let list = failed.sorted().map { String($0 + 1) }.joined(separator: ", ")
+            model.notice = "Page \(list) could not be blacked out, so it is unchanged and still has its text. Its marks are kept."
+            redactions = marks.filter { failed.contains($0.1) }.map { $0.0 }
+        }
     }
 
     private func save() {
-        if let url = session.saveCopy() { model.notice = "Saved \(url.lastPathComponent)." } else { model.notice = "The copy could not be saved." }
+        if let url = session.saveCopy() { savedAtChanges = session.changes; model.notice = "Saved \(url.lastPathComponent)." } else { model.notice = "The copy could not be saved." }
     }
 
     private func saveProtected() {
         defer { passwordDraft = "" }
         guard let document = session.document else { return }
         let target = PDFEdit.copyURL(for: session.source, suffix: "protected")
-        if PDFEdit.writeProtected(document, to: target, password: passwordDraft) { session.savedCopy = target; model.notice = "Saved \(target.lastPathComponent). It asks for the password to open." }
+        if PDFEdit.writeValidated(document, to: target, password: passwordDraft) { session.savedCopy = target; model.notice = "Saved \(target.lastPathComponent). It asks for the password to open." }
         else { model.notice = "The protected copy could not be saved." }
     }
 
@@ -375,7 +412,7 @@ struct PDFEditorView: View {
         for n in pages { if let p = document.page(at: n - 1)?.copy() as? PDFPage { out.insert(p, at: out.pageCount) } }
         _ = (first, last)
         let target = PDFEdit.copyURL(for: session.source, suffix: "pages \(rangeDraft.replacingOccurrences(of: "/", with: "-"))")
-        model.notice = out.write(to: target) ? "Saved \(target.lastPathComponent)." : "The pages could not be saved."
+        model.notice = PDFEdit.writeValidated(out, to: target) ? "Saved \(target.lastPathComponent)." : "The pages could not be saved."
         rangeDraft = ""
     }
 }

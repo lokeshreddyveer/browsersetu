@@ -15,7 +15,7 @@ enum PanelMode: String, CaseIterable, Identifiable {
 }
 
 enum Sheet: String, Identifiable {
-    case bookmarks, history, downloads, bookmarkTools, compare, timeMachine, toolkit, digest, pdfEditor, summary, settings, layout, research, sitePrivacy, workbench, findAll, sessions, timeline, dashboard, readingList, note, qr, style, pageTools, selection, shareTabs, shopping, repair, devices, pageSearch, resources
+    case saveToResearch, screenshot, picturesToPDF, tools, webApps, bookmarks, history, downloads, bookmarkTools, compare, timeMachine, toolkit, digest, pdfEditor, summary, settings, layout, research, sitePrivacy, workbench, findAll, sessions, timeline, dashboard, readingList, note, qr, style, pageTools, selection, shareTabs, shopping, repair, devices, pageSearch, resources
     var id: String { rawValue }
 }
 
@@ -47,7 +47,13 @@ struct RecoveryState: Equatable {
 /// Application coordinator: owns the core, tab controllers and shell state.
 @MainActor
 final class BrowserModel: ObservableObject {
-    @Published var tabs: [TabController] = []
+    @Published var tabs: [TabController] = [] {
+        didSet {
+            // A private collection belongs to its private session: when the last private tab is gone, so is the collection.
+            if linkStoreCache != nil, !tabs.contains(where: { $0.leavesNoTrace }) { linkStoreCache?.privateStore.clear() }
+            if mediaStoreCache != nil, !tabs.contains(where: { $0.leavesNoTrace }) { mediaStoreCache?.privateStore.clear() }
+        }
+    }
     @Published var activeID: UInt64?
     @Published private(set) var profileName: String
     @Published private(set) var profiles: [String] = []
@@ -67,6 +73,10 @@ final class BrowserModel: ObservableObject {
                 let mode = panelMode
                 #endif
                 switch mode {
+                #if os(macOS)
+                // The Mac's Downloads is a table and needs width, so it opens as the card even when the other panels are docked.
+                case .dock where opened == .downloads: floatingPanel = (floatingPanel == opened) ? nil : opened
+                #endif
                 case .dock: dockedPanel = (dockedPanel == opened) ? nil : opened
                 case .tab: showPanelTab(opened)
                 case .float: floatingPanel = (floatingPanel == opened) ? nil : opened
@@ -113,7 +123,9 @@ final class BrowserModel: ObservableObject {
     /// Bumped whenever indexing is switched off, a site is excluded or the copy is erased; a page being read when it changes is not saved.
     var indexGeneration = 0
     var pageIndexStore: PageIndex?
-    @Published var spotlightBookmarks = false { didSet { saveSetting("spotlight_bookmarks", spotlightBookmarks ? "1" : "0"); syncSpotlight() } }
+    // Reading the saved choice while a model starts must not touch the system's index when the choice is "off": a second window, a test, or a profile that never
+    // used it would otherwise delete the Spotlight entries that another profile or window put there. Turning it off by hand still removes them.
+    @Published var spotlightBookmarks = false { didSet { saveSetting("spotlight_bookmarks", spotlightBookmarks ? "1" : "0"); if !applyingSettings || spotlightBookmarks { syncSpotlight() } } }
     /// Pages opened from a saved session, and how far down each one was.
     var sessionScroll: [UInt64: Double] = [:]
     /// A passage to find on a page as soon as it has loaded (from "Go to passage").
@@ -140,7 +152,15 @@ final class BrowserModel: ObservableObject {
     @Published var pauseInfiniteScroll = false { didSet { saveSetting("pause_infinite", pauseInfiniteScroll ? "1" : "0"); engine.setUserScripts(effectiveUserScripts) } }
     @Published var watchedPages: [String: PageWatch] = [:] { didSet { saveSetting("watched_pages", encodedMap(watchedPages)) } }
     @Published var extractingPage = false
-    @Published var notice: String?
+    @Published var notice: String? {
+        // A different message (or none) ends the offer that went with the earlier one.
+        didSet { if notice != oldValue { noticeUndo = nil } }
+    }
+    /// An action offered beside the message in front (an Undo). Set right after `notice`; gone when the message changes or leaves.
+    @Published var noticeUndo: NoticeAction?
+    /// Clear Tabs: whether tabs that are asleep are closed too, and whether a large clear asks first.
+    @Published var clearIncludesSleeping = true { didSet { saveSetting("clear_includes_sleeping", clearIncludesSleeping ? "1" : "0") } }
+    @Published var clearTabsAsks = true { didSet { saveSetting("clear_tabs_asks", clearTabsAsks ? "1" : "0") } }
     @Published private(set) var activeBookmarked = false
     /// Set while running from a temporary in-memory profile because the real one could not be opened.
     @Published private(set) var recovery: RecoveryState?
@@ -153,7 +173,9 @@ final class BrowserModel: ObservableObject {
     #endif
 
     // Interface state
-    @Published var sidebarVisible = false
+    @Published var sidebarVisible = false {
+        didSet { if layoutPreset == .custom && !applyingSettings { saveSetting("custom_sidebar", sidebarVisible ? "1" : "0") } }
+    }
     /// When the sidebar is not pinned open, touching the window edge reveals it (it floats over the page).
     /// The user's explicit choice for the sidebar: true keeps it open and docked, false lets it auto-hide to the window edge, nil means
     /// they have not chosen and the layout decides. Saved, so reopening the app restores it.
@@ -187,7 +209,20 @@ final class BrowserModel: ObservableObject {
     @Published var collapsedGroups: Set<String> = []
     @Published var protectPinned = true { didSet { saveSetting("protect_pinned", protectPinned ? "1" : "0") } }
     var watchTask: Task<Void, Never>?
-    @Published private(set) var groupNames: [String] = []
+    /// The tab groups of each workspace, keyed by the workspace's name (Personal is ""). A group is a path such as "Work/Project A", and belongs to one workspace:
+    /// the same name in two workspaces is two groups.
+    @Published var groupLists: [String: [String]] = [:]
+    /// Groups saved before groups belonged to workspaces: placed in the workspaces whose tabs use them once the tabs are known (see `mergeGroupNamesFromTabs`).
+    private var legacyGroupNames: [String] = []
+    /// The groups of the workspace in front: what the sidebars, menus and overview list, and what new groups are added to.
+    var groupNames: [String] {
+        get { groupLists[activeWorkspace] ?? [] }
+        set {
+            var all = groupLists
+            all[activeWorkspace] = newValue.isEmpty ? nil : newValue
+            groupLists = all
+        }
+    }
     let addressBar = AddressBarController()
 
     // Persisted interface settings (per profile)
@@ -205,6 +240,10 @@ final class BrowserModel: ObservableObject {
     @Published var startTile: StartTile = .regular { didSet { saveSetting("start_tile", startTile.rawValue) } }
     /// The side panel on the start page is open.
     @Published var startDrawerOpen = false
+    /// The Settings section a search result asked to see; the open pane scrolls to it and clears this.
+    @Published var settingsReveal: SettingsReveal?
+    /// The width the standard top bar gives its address field, so the suggestions drop down at exactly that width in every layout (0 until the bar has been drawn).
+    @Published var topBarFieldWidth: CGFloat = 0
     /// The card shown for a download that has just finished.
     @Published var downloadBanner: DownloadBanner?
     var bannerTask: Task<Void, Never>?
@@ -212,6 +251,78 @@ final class BrowserModel: ObservableObject {
     @Published var customTheme = CustomTheme()
     @Published var appearance: AppearanceMode = .system { didSet { saveSetting("appearance", appearance.rawValue); applySystemAppearance() } }
     @Published var tabLayout: TabLayout = .separate { didSet { saveSetting("tab_layout", tabLayout.rawValue); applyLayoutIfNeeded() } }
+    /// iPhone: which of the layouts is in use (see `PhonePreset`). Ignored on the iPad and the Mac.
+    @Published var phonePreset: PhonePreset = .bottomBar {
+        didSet { saveSetting("phone_preset", phonePreset.rawValue); phoneLayoutChanged() }
+    }
+    /// The layout whose first-time steps are on screen.
+    @Published var layoutTip: PhonePreset?
+    /// iPhone: what the tabs button opens: the grid of pages (Safari's) or the vertical list that slides in from the left. Immersive always uses the list.
+    @Published var phoneTabsView: PhoneTabsView = .grid { didSet { saveSetting("phone_tabs_view", phoneTabsView.rawValue) } }
+    /// The Enhanced Player panel (see `EnhancedPlayer.swift`): shown only when asked for, over a page that keeps its own player and its own controls.
+    @Published var playerPanelVisible = false
+    /// The floating player (see `FloatingPlayer.swift`) is on the page: it opens when a video starts playing, can be moved anywhere in the window and is closed with its cross.
+    @Published var floatingPlayerOpen = false
+    /// Open the floating player by itself when a video starts playing.
+    @Published var autoShowPlayer = true { didSet { saveSetting("player_auto_show", autoShowPlayer ? "1" : "0") } }
+    /// Where the person left it (kept, so it is there again next time).
+    @Published var floatingPlayerLayout = FloatingPlayerLayout.standard { didSet { if floatingPlayerLayout != oldValue { saveSetting("player_position", floatingPlayerLayout.stored) } } }
+    let player = PlayerState()
+    var playerPollTask: Task<Void, Never>?
+    /// Optional: offer to carry on where a long video was left (normal tabs only; nothing is kept for a private, scratch, Glance or guest tab).
+    @Published var resumeMedia = false { didSet { saveSetting("player_resume", resumeMedia ? "1" : "0") } }
+    @Published var mediaResumeList: [MediaResumeEntry] = []
+    @Published var playerSiteSteps: [String: Double] = [:]
+    var lastResumeSave = Date.distantPast
+    /// The subtitle chosen for a site, chosen again the next time.
+    @Published var playerSiteSubtitles: [String: String] = [:]
+    /// When another tab starts playing sound, pause the rest (a call is never paused).
+    @Published var audioFocus = false { didSet { saveSetting("audio_focus", audioFocus ? "1" : "0") } }
+    /// Pause sound that has played in a background tab for this many minutes (0: never).
+    @Published var mediaBackgroundMinutes = 0 { didSet { saveSetting("media_background_minutes", String(mediaBackgroundMinutes)) } }
+    var elsewhereSince: [UInt64: Date] = [:]
+    /// How far the panel's skip buttons move, in seconds.
+    @Published var playerSeekStep: Double = 10 { didSet { saveSetting("player_seek_step", String(Int(playerSeekStep))) } }
+    /// A small pill offering the way back to the top of a long page (see `BackToTopRules`).
+    /// The extra choices in the page's right-click menu (see `PageMenuChoices`).
+    @Published var pageMenuExtras = true { didSet { saveSetting("page_menu_extras", pageMenuExtras ? "1" : "0") } }
+    /// How fast Auto Scroll moves the page, in points a second.
+    @Published var autoScrollSpeed = 90.0 { didSet { saveSetting("auto_scroll_speed", String(autoScrollSpeed)) } }
+    @Published var backToTopPill = true { didSet { saveSetting("back_to_top_pill", backToTopPill ? "1" : "0"); if !backToTopPill { resetBackToTop() } } }
+    @Published var backToTopVisible = false
+    var backToTopRules = BackToTopRules()
+    var backToTopExpiry: Task<Void, Never>?
+    /// Counted up each time something asks for the vertical list; the phone's screen opens it.
+    @Published var phoneTabsListRequest = 0
+    var phoneUsesVerticalTabs: Bool { phoneSpec.fanOut || phoneTabsView == .vertical }
+    /// Real vertical tabs: a column of tab tiles beside the page (not with Immersive, which has its own list).
+    var phoneUsesTabRail: Bool { !phoneSpec.fanOut && phoneTabsView == .sidebar }
+    /// Whether that column is folded out into a list with titles.
+    @Published var tabRailExpanded = false
+    /// What the tabs buttons of the phone layouts do.
+    func openTabsView() {
+        #if os(iOS)
+        if UIDevice.current.userInterfaceIdiom == .phone, phoneUsesTabRail { withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) { tabRailExpanded.toggle() }; return }
+        if UIDevice.current.userInterfaceIdiom == .phone, phoneUsesVerticalTabs { phoneTabsListRequest += 1; return }
+        #endif
+        showOverview()
+    }
+    /// The layout the person built for Custom.
+    @Published var phoneCustomSpec: PhoneLayoutSpec = .bottomBar {
+        didSet {
+            if let data = try? JSONEncoder().encode(phoneCustomSpec), let text = String(data: data, encoding: .utf8) { saveSetting("phone_custom_layout", text) }
+            if phonePreset == .custom { phoneLayoutChanged() }
+        }
+    }
+    /// The layout in force: the preset's own, or the one built for Custom.
+    var phoneSpec: PhoneLayoutSpec { phonePreset.spec ?? phoneCustomSpec }
+
+    /// A new layout: the controls open or fold to match it. (The Mac and the iPad have their own layouts and ignore this.)
+    private func phoneLayoutChanged() {
+        #if os(iOS)
+        if phoneSpec.staysFolded { foldChrome() } else { expandChrome(userRequested: true) }
+        #endif
+    }
     @Published var layoutPreset: LayoutPreset = .classic { didSet { saveSetting("layout_preset", layoutPreset.rawValue); applyLayoutIfNeeded() } }
     @Published var sidebarPosition: SidebarPosition = .left { didSet { saveSetting("sidebar_position", sidebarPosition.rawValue) } }
     @Published var sidebarWidth: Double = 260 { didSet { saveSetting("sidebar_width", String(Int(sidebarWidth))) } }
@@ -223,6 +334,24 @@ final class BrowserModel: ObservableObject {
     @Published var accentChosen = false { didSet { applyWorkspaceTheme(); saveSetting("accent_chosen", accentChosen ? "1" : "0") } }
     /// The picture chosen for the start page background, already shrunk. Kept in this profile's folder; never sent anywhere.
     @Published var startImageData: Data?
+    /// How that picture sits and is treated (position, fit, saturation, brightness, the effects over it), kept as one setting.
+    @Published var startLook = StartLook() { didSet { if startLook != startLook.clamped() { startLook = startLook.clamped() } else { saveSetting("start_look", startLook.encoded) } } }
+    /// What the picture looks like, worked out once when it is loaded (see `WallpaperAnalyzer`).
+    @Published var startAnalysis: WallpaperAnalysis?
+    /// The collection of pictures, their light/dark tags and how they rotate (see `WallpaperLibrary.swift`).
+    @Published var wallpaperLibrary = WallpaperLibraryState() { didSet { saveSetting("wallpaper_library", wallpaperLibrary.encoded) } }
+    /// Whether the saved collection was read at start (so leftovers in its folder may be cleaned up).
+    var wallpaperLibraryWasRead = false
+    /// The collection picture on the page now.
+    @Published var currentWallpaperID: UUID?
+    /// The gradient preset, and whether it drifts.
+    @Published var startPreset = StartPreset.defaultID { didSet { saveSetting("start_preset", startPreset) } }
+    @Published var startAnimatedGradient = false { didSet { saveSetting("start_animated_gradient", startAnimatedGradient ? "1" : "0") } }
+    /// An animated wallpaper (a short loop from this device) is kept, and is switched on.
+    @Published var startHasVideo = false
+    /// Changes whenever the loop is replaced or removed, so a player that is running is rebuilt for the new file.
+    @Published var startVideoVersion = 0
+    @Published var startVideoOn = false { didSet { saveSetting("start_video_on", startVideoOn ? "1" : "0") } }
     /// Checkpoints of the open pages, newest first (the Session Time Machine).
     @Published var checkpoints: [SessionCheckpoint] = []
     var unresponsiveStreak = 0
@@ -250,7 +379,38 @@ final class BrowserModel: ObservableObject {
     /// "restore" reopens last session's tabs; "blank" starts with one empty tab.
     @Published var startup = "restore" { didSet { saveSetting("startup", startup) } }
     @Published private(set) var workspaces: [Workspace] = []
-    @Published var activeWorkspace = ""
+    @Published var activeWorkspace = "" {
+        // Pinned tabs set to start over when their workspace is left are marked here and sent back to their pinned address when they are next shown.
+        // Not while the first tab is being restored: landing in the workspace used last is not leaving another one.
+        didSet { if oldValue != activeWorkspace, !applyingSettings, !openingFirstTab { workspaceLeft(oldValue) } }
+    }
+    /// Glance: a link opens in a floating preview over the page. On by default; the trigger and the kind of session are choices in Settings.
+    @Published var glanceEnabled = true { didSet { saveSetting("glance_enabled", glanceEnabled ? "1" : "0"); pushWebPolicy() } }
+    @Published var glanceTrigger: GlanceTrigger = .option { didSet { saveSetting("glance_trigger", glanceTrigger.rawValue); pushWebPolicy() } }
+    /// The preview gets storage of its own that is gone when it closes (no sign-ins), instead of the page's own session.
+    @Published var glanceTemporarySession = false { didSet { saveSetting("glance_temporary", glanceTemporarySession ? "1" : "0") } }
+    lazy var glance: GlanceCoordinator = GlanceCoordinator(model: self)
+    /// The address bar learns from what you open and choose (on this device only). Never in private tabs or guest windows.
+    @Published var learnSuggestions = true { didSet { saveSetting("learn_suggestions", learnSuggestions ? "1" : "0") } }
+    /// Sites the address bar must never learn from (a name such as example.com covers its subdomains).
+    @Published var suggestionExcludedHosts: [String] = [] { didSet { saveSetting("suggestion_excluded", encodedMap(["list": suggestionExcludedHosts])) } }
+    private var learningStore: (profile: String, store: SuggestionLearning)?
+    /// This profile's memory of what the address bar learned; made when first needed, and again if the profile changes.
+    var suggestionLearning: SuggestionLearning {
+        if let learningStore, learningStore.profile == profileName { return learningStore.store }
+        let folder = URL(fileURLWithPath: root).appendingPathComponent("profiles/\(profileName)", isDirectory: true)
+        let store = SuggestionLearning.shared(folder: folder)
+        learningStore = (profileName, store)
+        return store
+    }
+    /// A workspace asked for from outside (`--space`, a `browsersetu://space` link, Shortcuts) opens in a new window rather than in this one (Mac).
+    @Published var spaceRequestsOpenNewWindow = false { didSet { saveSetting("space_request_new_window", spaceRequestsOpenNewWindow ? "1" : "0") } }
+    /// The sites kept in every workspace (see Essentials.swift), in order.
+    @Published var essentials: [EssentialTab] = []
+    /// The address each pinned page returns to, by the address it was pinned at (see PinnedAddresses.swift). Synced with the site rules.
+    @Published var pinnedAddresses: [String: PinnedTabMetadata] = [:]
+    /// Pinned tabs waiting to go back to their pinned address the next time they are shown.
+    var pendingPinnedResets = Set<UInt64>()
     // Find in page
     @Published var findVisible = false
     @Published var findText = ""
@@ -285,7 +445,36 @@ final class BrowserModel: ObservableObject {
     /// Developer capture of the console and WebSocket activity. Off by default; the page can see it, so it is a choice. Takes effect on the next page load.
     @Published var devCapture = false { didSet { saveSetting("dev_capture", devCapture ? "1" : "0"); pushWebPolicy() } }
     @Published var referrerMode: ReferrerMode = .standard { didSet { saveSetting("referrer_mode", referrerMode.rawValue); pushWebPolicy() } }
+    /// True while a group of privacy switches is being changed together (see `changingPrivacySwitches`).
+    var policyPushSuspended = false
+    /// Sends the Global Privacy Control signal. On unless the person turned it off.
+    @Published var globalPrivacyControl = true { didSet { saveSetting("gpc", globalPrivacyControl ? "1" : "0"); pushWebPolicy() } }
+    /// Links lose their click-reporting `ping` attribute. On unless the person turned it off.
+    @Published var blockLinkPings = true { didSet { saveSetting("block_link_pings", blockLinkPings ? "1" : "0"); pushWebPolicy() } }
+    /// Sites that always load in Lockdown Mode.
+    @Published var lockdownHosts = Set<String>() { didSet { if lockdownHosts != oldValue { pushWebPolicy() } } }
+    /// Links through a tracker's redirect page go straight to their destination. On unless the person turned it off.
+    @Published var debounceLinks = true { didSet { saveSetting("debounce_links", debounceLinks ? "1" : "0") } }
+    /// A website cannot reach this device or the home network (localhost, 192.168.x.x and the like); sites the person named are left alone. Off until chosen.
+    @Published var blockLocalNetwork = false { didSet { saveSetting("block_local_network", blockLocalNetwork ? "1" : "0"); pushWebPolicy() } }
+    @Published var localNetworkAllowed = Set<String>() { didSet { if localNetworkAllowed != oldValue { pushWebPolicy() } } }
+    /// Google's analytics, ad and font servers are refused on every site. Off until chosen, because pages then show their fallback fonts.
+    @Published var blockGoogleServices = false { didSet { saveSetting("block_google_services", blockGoogleServices ? "1" : "0"); pushWebPolicy() } }
+    /// Embedded social buttons, share counters and feeds are refused on other sites. Off until chosen.
+    @Published var blockSocialWidgets = false { didSet { saveSetting("block_social_widgets", blockSocialWidgets ? "1" : "0"); pushWebPolicy() } }
     @Published var hideCookieBanners = true { didSet { saveSetting("cookie_banners", hideCookieBanners ? "1" : "0"); pushWebPolicy() } }
+    /// Whether a banner that cannot be refused is hidden. It is reported as hidden, never as refused.
+    @Published var hideUnrefusableBanners = true { didSet { saveSetting("cookie_banners_hide", hideUnrefusableBanners ? "1" : "0"); pushWebPolicy() } }
+    /// Sites where banners are left alone, and the local record of what happened to banners (host, tool, outcome; no page content).
+    @Published var consentOffSites = Set<String>()
+    /// SponsorBlock: off until the person turns it on and agrees to what it sends (the date they agreed). The segments are kept in memory only.
+    @Published var sponsorBlockEnabled = false { didSet { saveSetting("sponsor_on", sponsorBlockEnabled ? "1" : "0"); pushWebPolicy() } }
+    @Published var sponsorConsentDate: Date? { didSet { saveSetting("sponsor_consent", sponsorConsentDate.map { String($0.timeIntervalSince1970) } ?? "") } }
+    @Published var sponsorActions: [String: String] = [:]
+    @Published var sponsorOffSites = Set<String>()
+    @Published var sponsorServer = SponsorBlockService.defaultServer { didSet { saveSetting("sponsor_server", sponsorServer); sponsorCache.clear() } }
+    let sponsorCache = SponsorCache()
+    @Published var consentLog: [ConsentRecord] = []
     @Published var blockAutoplay = true { didSet { saveSetting("block_autoplay", blockAutoplay ? "1" : "0"); pushWebPolicy() } }
     @Published var autoplayExceptions = Set<String>()
     @Published var youtubeRules = YouTubeAdRules.builtIn { didSet { saveJSON("youtube_rules", youtubeRules); pushWebPolicy() } }
@@ -295,6 +484,10 @@ final class BrowserModel: ObservableObject {
     // Break mode, address bar sources, hover previews, theme schedule, chains, panels, menus (BrowserExtras.swift)
     @Published var addressSources: [AddressSource] = AddressSource.defaults { didSet { saveSetting("address_sources", addressSources.map(\.rawValue).joined(separator: ",")) } }
     @Published var breakActive = false
+    /// Hide the tab strip while only one tab is open (the Mac's separate strip only; it comes back with the second tab).
+    @Published var hideSingleTabStrip = false { didSet { saveSetting("hide_single_tab_strip", hideSingleTabStrip ? "1" : "0") } }
+    /// Resizing the sidebar settles on its standard width when it comes close to it.
+    @Published var snapSidebarWidth = true { didSet { saveSetting("snap_sidebar_width", snapSidebarWidth ? "1" : "0") } }
     @Published var hoverPreviews = true { didSet { saveSetting("hover_previews", hoverPreviews ? "1" : "0") } }
     @Published var hoverDelay = 0.6 { didSet { saveSetting("hover_delay", String(hoverDelay)) } }
     @Published var themeSchedule = ThemeSchedule() { didSet { saveJSON("theme_schedule", themeSchedule); startThemeSchedule() } }
@@ -312,6 +505,9 @@ final class BrowserModel: ObservableObject {
     @Published var lastRestoredPasswords = 0
     /// The first-run questions (SetupAssistant.swift) are on screen.
     @Published var showSetup = false
+    /// The first-launch film (Shared/Intro) is on screen, covering the whole window; setup follows it. Only a brand-new install sees it.
+    @Published var showIntro = false
+    func finishIntro() { saveSetting("intro_done", "1"); showIntro = false }
     /// Pop-ups: whether pages are stopped from opening windows without a click, and the sites that may.
     @Published var blockPopups = true { didSet { saveSetting("block_popups", blockPopups ? "1" : "0") } }
     @Published var popupAllowedHosts: Set<String> = [] { didSet { saveSetting("popup_allowed_hosts", popupAllowedHosts.sorted().joined(separator: ",")) } }
@@ -356,6 +552,19 @@ final class BrowserModel: ObservableObject {
     let engine: BrowserEngine
     let privacy: PrivacyController
     var downloads: DownloadCoordinator { engine.downloads }
+    /// The one list model the Downloads window and the toolbar popover share, so they show the same rows. Rebuilt only if the coordinator itself is replaced.
+    var downloadList: DownloadsViewModel {
+        if let existing = sharedDownloadList, existing.serves(downloads) { return existing }
+        // The older history lives in the core; it is read through the same call the older list uses, and never written.
+        let core = self.core
+        let made = DownloadsViewModel(coordinator: downloads, legacy: { limit in try core.listDownloads(limit: limit).map { (url: $0.url, filename: $0.filename, created: $0.created) } })
+        made.diagnostics = downloadDiagnostics
+        // In a private window the list shows that window's own private downloads, and in an ordinary window none of any private window's.
+        made.viewerPrivateSession = { [weak self] in self?.isPrivateWindow == true ? self?.privateSessionID : nil }
+        sharedDownloadList = made
+        return made
+    }
+    private var sharedDownloadList: DownloadsViewModel?
     private(set) var core: BrowserCore
     let root: String
     /// This profile's folder on disk (the reading list keeps its articles here).
@@ -380,6 +589,8 @@ final class BrowserModel: ObservableObject {
     #endif
 
     /// `root` and `profile` are overridable so tests can run against isolated storage.
+    private var iconBlocklistObserver: AnyCancellable?
+
     init(engine: BrowserEngine, root rootOverride: String? = nil, profile profileOverride: String? = nil,
          listFetcher: ListFetching = URLSessionListFetcher()) {
         self.engine = engine
@@ -397,6 +608,7 @@ final class BrowserModel: ObservableObject {
         root = base
         let wanted = profileOverride ?? UserDefaults.standard.string(forKey: "profile") ?? "default"
         profileName = wanted
+        FaviconStore.shared.activate(directory: Self.faviconDirectory(root: base, profile: wanted), importLegacy: wanted == "default")
         if let opened = try? BrowserCore.open(root: base, profile: wanted) {
             core = opened
         } else {
@@ -417,25 +629,32 @@ final class BrowserModel: ObservableObject {
         privacy = PrivacyController(engine: engine, cacheDirectory: URL(fileURLWithPath: base).appendingPathComponent("privacy/lists", isDirectory: true),
                                    fetcher: listFetcher)
         privacy.onSecurityEvent = { [weak self] kind, site, detail in self?.recordSecurity(kind: kind, site: site, detail: detail) }
+        // The browser's own protection applies to the icons it fetches too: what its lists block outright (by domain) is read back from the compiled rules whenever they are rebuilt.
+        iconBlocklistObserver = privacy.$snapshot.removeDuplicates().sink { snapshot in
+            let lists = [snapshot?.rulesJSON].compactMap { $0 } + (snapshot?.additionalRulesJSON ?? [])
+            Task.detached(priority: .utility) { await FaviconStore.shared.setBlocklist(IconBlocklist.build(from: lists)) }
+        }
         privacy.load(from: core)
         profiles = listProfiles(root: base)
         loadUISettings()
         engine.downloads.onLowDisk = { [weak self] name, needed, free in
             self?.notice = "Not enough disk space for \(name): it needs \(DownloadStats.bytes(needed)) and \(DownloadStats.bytes(free)) is free."
         }
-        engine.downloads.onFinished = { [weak self] source, filename in
-            if self?.notifyDownloads == true { DownloadNotifier.finished(filename) }
-            try? self?.core.recordDownload(url: source?.absoluteString ?? "", filename: filename)
+        engine.downloads.onFinished = { [weak self] source, filename, isPrivate in
+            // From a private tab nothing is written down: not the downloads list, not the security log, and the notification does not name the file.
+            // A .torrent file the person just downloaded is offered in the torrent preview (looking at it contacts no one; starting it still needs their approval).
+            if !isPrivate, filename.lowercased().hasSuffix(".torrent"), let self, let file = self.engine.downloads.completed.first, file.lastPathComponent == filename,
+               self.pendingTorrentFile == nil, self.sheet == nil || self.sheet == .downloads {      // never replaces something the person is in the middle of
+                self.pendingTorrentFile = file; self.sheet = .downloads
+            }
+            if !isPrivate { try? self?.core.recordDownload(url: source?.absoluteString ?? "", filename: filename) }
             self?.openFinishedPDFIfWanted(source: source, filename: filename)
             // A card at the foot of the window says it is done; a kind of file that can run code carries its warning in the same card instead of a box to dismiss.
-            if let warning = DownloadSafety.warning(forFilename: filename, from: source) {
+            if !isPrivate, let warning = DownloadSafety.warning(forFilename: filename, from: source) {
                 self?.recordSecurity(kind: "download", site: source?.host ?? "", detail: "\(filename): \(warning)")
             }
             self?.showDownloadBanner(filename: filename, fileURL: self?.engine.downloads.completed.first, warning: DownloadSafety.warning(forFilename: filename, from: source))
-            #if os(iOS)
-            // Wallet passes, contact cards and calendar events open in the system sheet that adds them.
-            if let file = DownloadCoordinator.locate(filename: filename) { Task { @MainActor in DownloadedFiles.open(file) } }
-            #endif
+            // A downloaded file is never opened for you: a pass, a contact card or a calendar event waits in the list, with a button that adds it.
         }
         extensionObserver = extensionCenter.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
         attachExtensions()
@@ -500,15 +719,16 @@ final class BrowserModel: ObservableObject {
     }
     var topBarHidden: Bool {
         #if os(iOS)
-        // The iPhone has no bars at all: a pill at the bottom and a search button at the top right. The iPad keeps its sidebar.
-        return UIDevice.current.userInterfaceIdiom == .phone
+        // The iPhone's floating dock (the default, and Reading) replaces the bars: a pill at the bottom. Bottom Bar and Top Bar bring the bars back. The iPad keeps its sidebar.
+        return UIDevice.current.userInterfaceIdiom == .phone && phoneSpec.usesDock
         #else
         return layoutPreset == .floating
         #endif
     }
     /// Full screen hides the toolbar until the pointer reaches the top edge (the sidebar layout has none to hide).
     var autoHidesToolbar: Bool {
-        (layoutPreset == .custom && toolbarAutoHide) || (windowFullScreen && !singleToolbar)
+        // A single toolbar has no top bar to hide, so a stored auto-hide choice must not bring a second one back (it left two address bars on screen).
+        LayoutRules.autoHidesToolbar(preset: layoutPreset, singleToolbar: singleToolbar, toolbarAutoHide: toolbarAutoHide, fullScreen: windowFullScreen)
     }
     /// What a double-click on an empty part of the top bar does.
     @Published var doubleClickAction: DoubleClickAction = .cycleLayout { didSet { saveSetting("double_click", doubleClickAction.rawValue) } }
@@ -525,9 +745,23 @@ final class BrowserModel: ObservableObject {
 
     /// Called for a double-click on the window's top area. Returns whether the layout handled it (otherwise the window zooms).
     func handleTopBarDoubleClick() -> Bool {
-        guard doubleClickAction == .cycleLayout else { return false }
+        guard doubleClickAction == .cycleLayout, !focusMode else { return false }      // in focus mode the change would be invisible
         cycleLayout()
         return true
+    }
+
+    /// Mac: a double-click on a tab closes it.
+    @Published var doubleClickClosesTab = false { didSet { saveSetting("double_click_closes_tab", doubleClickClosesTab ? "1" : "0") } }
+    /// Mac: tabs show no close cross; middle-click, the tab menu and ⌘W still close them.
+    @Published var hideTabCloseButtons = false { didSet { saveSetting("hide_tab_close", hideTabCloseButtons ? "1" : "0") } }
+    private var bulkClosingDepth = 0
+    /// Mac: closing the last tab closes the window (a blank tab is kept for the next time).
+    @Published var closeWindowWithLastTab = false { didSet { saveSetting("close_window_last_tab", closeWindowWithLastTab ? "1" : "0") } }
+
+    private func closeFrontWindow() {
+        #if os(macOS)
+        NSApp.keyWindow?.performClose(nil)
+        #endif
     }
 
     @Published var tintToolbar = true { didSet { saveSetting("tint_toolbar", tintToolbar ? "1" : "0") } }
@@ -536,16 +770,36 @@ final class BrowserModel: ObservableObject {
         didSet { saveSetting("collapse_on_scroll", collapseOnScroll ? "1" : "0"); if !collapseOnScroll { expandChrome() } }
     }
     @Published private(set) var chromeCollapsed = false
+    /// True while a page is being scrolled, and for a moment after: the extra pills (new tab, reload) beside the folded ones appear only once the screen has been still.
+    @Published private(set) var pageIsScrolling = false
+    private var scrollIdleTask: Task<Void, Never>?
+    static let scrollIdleDelay: Duration = .milliseconds(600)
+    private func noteScrolling() {
+        if !pageIsScrolling { pageIsScrolling = true }
+        scrollIdleTask?.cancel()
+        scrollIdleTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: Self.scrollIdleDelay)
+            if !Task.isCancelled { self?.pageIsScrolling = false }
+        }
+    }
     private var scrollChrome = ScrollChrome()
     /// Folding or unfolding resizes the page, and the page shifting under the user's finger must not count as scrolling.
     private var lastChromeChange = Date.distantPast
     static let chromeSettleTime: TimeInterval = 0.6
 
+    /// Whether scrolling folds the controls. On the iPhone the layout says so (always shown never folds; the others do); on the iPad the "collapse while reading" switch.
+    var phoneFoldsOnScroll: Bool {
+        #if os(iOS)
+        if UIDevice.current.userInterfaceIdiom == .phone { return phoneSpec.folds }   // the layout alone decides on the phone; the old switch no longer has a say
+        #endif
+        return collapseOnScroll
+    }
+
     /// Only a top toolbar can fold away: the sidebar layout keeps everything in the sidebar.
     var canCollapseChrome: Bool {
         #if os(iOS)
-        // The iPad's sidebar holds only the tabs, so the address bar and toolbar can still fold away over the page.
-        collapseOnScroll && !focusMode && !singleToolbar && !topBarHidden && !autoHidesToolbar
+        // The iPad's sidebar holds only the tabs, so the address bar and toolbar can still fold away over the page. On the phone the layout decides.
+        phoneFoldsOnScroll && !focusMode && !singleToolbar && !topBarHidden && !autoHidesToolbar
         #else
         collapseOnScroll && !focusMode && !singleToolbar && !topBarHidden && effectiveTabLayout != .sidebar && !autoHidesToolbar
         #endif
@@ -554,7 +808,7 @@ final class BrowserModel: ObservableObject {
     /// On the iPhone the bottom dock shrinks into a small pill while a page is read, and opens again when scrolling back.
     var canCollapseDock: Bool {
         #if os(iOS)
-        collapseOnScroll && topBarHidden && !focusMode
+        phoneFoldsOnScroll && topBarHidden && !focusMode
         #else
         false
         #endif
@@ -571,7 +825,12 @@ final class BrowserModel: ObservableObject {
     }
 
     func pageScrolled(deltaY: Double) {
+        if abs(deltaY) >= 1 { noteScrolling() }
         guard canCollapseChrome || canCollapseDock || canFoldPill, !addressBar.isEditing, !findVisible, !overviewVisible, !paletteVisible else { return }
+        #if os(iOS)
+        // On the iPhone the folded dock stays folded however the page is scrolled afterwards, down or back up: only a tap on its pill (or a new page or tab) opens it again.
+        if ChromeFoldPolicy.ignoresScroll(isPhone: UIDevice.current.userInterfaceIdiom == .phone, collapsed: chromeCollapsed, sticky: phoneSpec.sticky) { return }
+        #endif
         // Only a clear "I am at the top" signal may cut through the settling time.
         guard deltaY >= 100 || Date().timeIntervalSince(lastChromeChange) > Self.chromeSettleTime else { return }
         if scrollChrome.scrolled(by: deltaY) {
@@ -580,14 +839,28 @@ final class BrowserModel: ObservableObject {
         }
     }
 
-    func expandChrome() {
+    /// Opens the toolbar. On the iPhone, once the dock has folded into its pills only a person's own request opens it again (a tap on a pill, Show Toolbar, a
+    /// layout change): a page finishing, a tab being chosen from the list or the address bar taking focus must not unfold it behind their back.
+    func expandChrome(userRequested: Bool = false) {
+        #if os(iOS)
+        if !userRequested && ChromeFoldPolicy.ignoresAutomaticExpand(isPhone: UIDevice.current.userInterfaceIdiom == .phone, sticky: phoneSpec.sticky) { return }
+        #endif
         scrollChrome.expand()
         if chromeCollapsed { lastChromeChange = Date(); chromeCollapsed = false }
     }
 
+    /// Folds the toolbar into its pills at once.
+    func foldChrome() {
+        #if os(iOS)
+        guard UIDevice.current.userInterfaceIdiom == .phone else { return }
+        #endif
+        scrollChrome.collapse()
+        if !chromeCollapsed { lastChromeChange = Date(); chromeCollapsed = true }
+    }
+
     // Privacy and memory (per profile)
     @Published var stripTrackingParameters = true { didSet { saveSetting("strip_tracking", stripTrackingParameters ? "1" : "0") } }
-    @Published private(set) var strippedLinkCount = 0
+    @Published var strippedLinkCount = 0
     /// How many requests the content rules refused, an hour at a time (an estimate: WebKit does not say). Kept per profile, on this device.
     @Published var blockedStats = BlockedStats()
     var completionCache: (date: Date, sites: [String])?
@@ -620,7 +893,12 @@ final class BrowserModel: ObservableObject {
     /// Set when the last launches ended before they finished starting: tabs come back, but none is loaded for you.
     var safeStart = false
     private var sessionAllowedHosts = Set<String>()
-    private var recentStrips: [Date] = []
+    var recentStrips: [Date] = []
+    /// Sites where a tracker's redirect page is never skipped, what has been skipped or left alone this session, and the unfamiliar links already described.
+    @Published var redirectSkipOff = Set<String>()
+    var redirectsSkipped = 0
+    var redirectsKept = 0
+    var describedRedirects = Set<String>()
     var lifecycle: TabLifecycle?
     /// Installed web extensions and their toolbar buttons. Its changes republish through the model.
     let extensionCenter: ExtensionCenter
@@ -633,6 +911,30 @@ final class BrowserModel: ObservableObject {
     var isUnrequestedWindow = false
     /// A guest window: every tab is private, nothing is remembered, and the person's bookmarks and passwords are not offered. Mac only.
     @Published var isGuest = false
+    /// The sheet on screen holds something typed or drawn that is not saved yet (an editor registered through `guardsUnsavedChanges`): Done and Escape then ask before closing it.
+    @Published var sheetGuardActive = false
+    /// Counts the times Done or Escape was pressed on such a sheet; the editor answers each one (see `SheetChrome`).
+    @Published var sheetDismissRequest = 0
+    /// A private window: every tab is private and uses storage that belongs to this window alone, bookmarks and saved passwords stay available, nothing is restored. Mac only.
+    @Published var isPrivateWindow = false
+    /// Names this window's temporary storage in the engine (made fresh with the window, never saved).
+    let privateSessionID = UUID()
+    /// ⇧⌘N: what it does. A private window unless the person chose otherwise.
+    @Published var privateOpenMode: PrivateOpenMode = .window { didSet { saveSetting("private_open_mode", privateOpenMode.rawValue) } }
+    /// The "private window or private tab?" question is showing.
+    @Published var privateChoicePending = false
+    /// What the Save to Research sheet is showing: the page, the selection and a note, until it is saved or closed.
+    @Published var researchDraft: ResearchDraft?
+    /// A screenshot being looked at or marked up. Kept in memory only, and gone when the editor closes.
+    @Published var screenshotDraft: ScreenshotDocument?
+    /// The tool the Tools panel opens on (set by the command palette). Never holds anything typed into a tool.
+    var toolSelection: String?
+    /// Whether a file sent from another device waits for a yes, and a file chosen elsewhere (a finished download) waiting to be sent.
+    @Published var linkAskBeforeReceiving = true { didSet { saveSetting("link_ask", linkAskBeforeReceiving ? "1" : "0") } }
+    @Published var transferFile: URL?
+    /// The web apps the person installed, and (in the window of one) the app this window is.
+    @Published var webApps: [WebAppRecord] = []
+    var webApp: WebAppRecord?
     /// A secondary window asks its screen to close when its last tab leaves or closes.
     var onWindowShouldClose: (() -> Void)?
     /// An extension fetched from the Chrome Web Store, waiting for the user to approve what it asks for.
@@ -684,6 +986,20 @@ final class BrowserModel: ObservableObject {
     }
 
     func openSearchPanel(prefill: String? = nil) {
+        FrameMonitor.mark("Opening address bar")
+        #if os(iOS)
+        // The bar layouts have no separate search panel: the bar's own field is the one to type in, so the bars come back if folded and that field takes the focus.
+        if UIDevice.current.userInterfaceIdiom == .phone, !topBarHidden {
+            if let prefill { pendingAddressPrefill = prefill }
+            let wasFolded = chromeCollapsed
+            expandChrome(userRequested: true)
+            // Folded bars are not on screen yet: the field has to exist before it can take the focus, so the request is made again once they have slid in.
+            DispatchQueue.main.async { [self] in omniboxFocusTick += 1 }
+            if wasFolded { DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [self] in omniboxFocusTick += 1 } }
+            return
+        }
+        #endif
+        if topBarHidden && pillCollapsed { pillCollapsed = false }      // a folded pill would otherwise leave the bar "open" with nothing on screen to show it
         floatingAddressVisible = true
         if let prefill { pendingAddressPrefill = prefill }
         DispatchQueue.main.async { [self] in floatingFocusTick += 1 }
@@ -710,10 +1026,16 @@ final class BrowserModel: ObservableObject {
         guard !applyingSettings else { return }
         let resolved = resolvedLayout
         if layoutPreset != .custom {
-            switch sidebarPinChoice {
-            case true?: sidebarVisible = true
-            case false?: sidebarVisible = false
-            case nil: sidebarVisible = resolved.sidebarVisible
+            // The pin choice belongs to the Sidebar layout. Applied to the others it put a docked sidebar into Minimal and Classic ("no sidebar") and into
+            // Floating (a sidebar that slides in), whatever the person had pinned somewhere else.
+            if layoutPreset == .sidebar {
+                switch sidebarPinChoice {
+                case true?: sidebarVisible = true
+                case false?: sidebarVisible = false
+                case nil: sidebarVisible = resolved.sidebarVisible
+                }
+            } else {
+                sidebarVisible = resolved.sidebarVisible
             }
         }
         else if tabLayout == .sidebar { sidebarVisible = true; sidebarSection = .tabs }
@@ -731,14 +1053,23 @@ final class BrowserModel: ObservableObject {
 
     /// Tabs shown in the strip, sidebar and overview: current group (and privacy set on iOS), pinned first.
     var visibleTabs: [TabController] {
-        let filtered = tabs.filter { $0.id != panelTabID && $0.workspace == activeWorkspace && inActiveGroup($0.group) && (!separatesPrivate || $0.isPrivate == privateMode) }
+        let filtered = listedTabs(inWorkspace: activeWorkspace).filter { inActiveGroup($0.group) && (!separatesPrivate || $0.isPrivate == privateMode) }
         return filtered.filter(\.pinned) + filtered.filter { !$0.pinned }
     }
 
-    /// The profile's search engine: the one the user chose, or Brave Search until they do.
+    /// The profile's search engine: the one the user chose, or Google until they do.
     var searchTemplate: String {
         if let stored = (try? core.getSetting(key: "search_template")) ?? nil, !stored.isEmpty { return stored }
         return SearchEngines.defaultEngine.template
+    }
+
+    /// A different search engine for private tabs, by preset id; empty means the same as everywhere else.
+    @Published var privateSearchID = "" { didSet { saveSetting("private_search", privateSearchID) } }
+
+    /// The search address a typed search uses now: the private-tab engine inside a private tab when one is chosen, otherwise the profile's engine.
+    var activeSearchTemplate: String {
+        if activeIsPrivate, let preset = SearchEngines.presets.first(where: { $0.id == privateSearchID }) { return preset.template }
+        return searchTemplate
     }
 
     /// Ask the search engine for suggestions while typing (never in private tabs). Off by choice in Settings → Search.
@@ -760,6 +1091,16 @@ final class BrowserModel: ObservableObject {
     @Published var showAddressIcon = true { didSet { saveSetting("address_icon", showAddressIcon ? "1" : "0") } }
     /// One-handed use: the search panel opens at the bottom, within thumb reach, instead of the top.
     /// iPhone search opens above the keyboard by default, where the thumb is.
+    /// Where the search panel opens now: where the person asked for it in the dock layouts; on the bar's own side in the bar layouts (a panel at the bottom under a bar at
+    /// the top was a second address field on the screen).
+    var searchPanelAtBottomNow: Bool { topBarHidden ? searchPanelAtBottom : phoneBarAtBottom }
+    /// Whether the bar layouts' bar is at the bottom: the layout says so on the phone; on the iPad the old setting does.
+    var phoneBarAtBottom: Bool {
+        #if os(iOS)
+        if UIDevice.current.userInterfaceIdiom == .phone { return phoneSpec.barAddress == .bottom }
+        #endif
+        return addressBarPosition == .bottom
+    }
     @Published var searchPanelAtBottom = true { didSet { saveSetting("search_panel_bottom2", searchPanelAtBottom ? "1" : "0") } }
     /// Swiping the address pill sideways switches tabs; swiping it up opens the tab overview.
     @Published var swipeAddressPill = true { didSet { saveSetting("swipe_address", swipeAddressPill ? "1" : "0") } }
@@ -782,6 +1123,13 @@ final class BrowserModel: ObservableObject {
     @Published var syncGroupName = ""
     /// Devices seen in this group, and what the user decided about each: only approved devices' snapshots are taken in.
     @Published var syncDevices: [SyncDevice] = []
+    /// The keys that tie a Wi-Fi sync to the device the person approved: in the Keychain, one set per profile. Tests run with memory-only keys so they never touch the real Keychain.
+    var wifiKeysOverride: WiFiKeyStore?
+    private lazy var memoryWiFiKeys = MemoryWiFiKeys()
+    var wifiKeys: WiFiKeyStore {
+        get { wifiKeysOverride ?? (ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil ? memoryWiFiKeys : KeychainWiFiKeys(profile: profileName)) }
+        set { wifiKeysOverride = newValue }
+    }
     /// What happened, newest last: kept so a surprise can be explained.
     @Published var syncHistory: [String] = []
     /// When a setting differs between devices: take the newer one (off), or ask which to keep (on).
@@ -851,13 +1199,657 @@ final class BrowserModel: ObservableObject {
     @Published var overviewStyle: OverviewStyle = .grid { didSet { saveSetting("overview_style", overviewStyle.rawValue) } }
     @Published var overviewGrouped = false { didSet { saveSetting("overview_grouped", overviewGrouped ? "1" : "0") } }
     @Published var overviewSort: OverviewSort = .manual { didSet { saveSetting("overview_sort", overviewSort.rawValue) } }
-    @Published var darkPages: DarkPages = .off { didSet { saveSetting("dark_pages", darkPages.rawValue) } }
+    @Published var darkPages: DarkPages = .off {
+        didSet {
+            saveSetting("dark_pages", darkPages.rawValue)
+            pushWebPolicy()
+            for tab in tabs { tab.applyDarkPages(live: true) }
+        }
+    }
     @Published private(set) var darkSites: Set<String> = []
+    /// Sites that are never darkened, whatever the setting says.
+    @Published private(set) var darkSitesOff: Set<String> = []
     /// In Low Power Mode, tabs that are not in use are released sooner.
     @Published var lowPowerSavesMemory = true { didSet { saveSetting("low_power_memory", lowPowerSavesMemory ? "1" : "0") } }
     /// Tabs that cannot be closed by accident, and named sets of tabs saved to open again later.
     /// Downloads are sorted into folders by kind (Images, Documents…) inside the downloads folder.
     @Published var maxDownloads = DownloadQueueRules.defaultConcurrent { didSet { saveSetting("download_concurrent", String(maxDownloads)); engine.downloads.maxConcurrent = maxDownloads } }
+    /// Speed, connections, proxy and network-condition choices for the app's own downloader, saved per profile (the proxy password is in the Keychain, not here).
+    @Published var downloadNetwork = DownloadNetworkSettings() { didSet { saveSetting("download_network", downloadNetwork.encoded() ?? ""); engine.downloads.networkSettings = downloadNetwork } }
+    /// Peer-to-peer choices, saved per profile. Off until the person turns it on.
+    @Published var torrentSettings = TorrentSettings() { didSet { saveSetting("download_torrent", torrentSettings.encoded() ?? ""); engine.downloads.torrentSettings = torrentSettings } }
+    /// The download extensions of the current profile (made when first asked for, and again if the profile changes). A temporary profile keeps nothing on disk.
+    private var downloadExtensionsCache: DownloadExtensionManager?
+    var downloadExtensions: DownloadExtensionManager {
+        if let existing = downloadExtensionsCache, existing.profile == profileName { return existing }
+        let folder = URL(fileURLWithPath: root).appendingPathComponent("download-extensions", isDirectory: true).appendingPathComponent(profileName, isDirectory: true)
+        let made = DownloadExtensionManager(root: folder, profile: profileName, persistent: !isTemporaryProfile(profileName))
+        downloadExtensionsCache = made
+        return made
+    }
+    /// Local automation of downloads. Off until the person turns it on; never in a temporary profile.
+    @Published var automationEnabled = false { didSet { saveSetting("download_automation", automationEnabled ? "1" : "0"); automation.setEnabled(automationEnabled) } }
+    private var automationCache: AutomationController?
+    var automation: AutomationController {
+        if let existing = automationCache, existing.profile == profileName { return existing }
+        automationCache?.setEnabled(false)
+        let made = AutomationController(root: URL(fileURLWithPath: root), profile: profileName, persistent: !isTemporaryProfile(profileName),
+                                        coordinators: { [weak self] in self.map { [$0.engine.downloads] } ?? [] }, feed: downloadFeed)
+        automationCache = made
+        return made
+    }
+    /// Website accounts for downloads, one list per profile. Created on first use; secrets are in the Keychain (in memory under test and in temporary profiles).
+    private var accountStoreCache: AccountStore?
+    var accountStore: AccountStore {
+        if let existing = accountStoreCache, existing.profile == profileName { return existing }
+        let persistent = !isTemporaryProfile(profileName)
+        let folder = URL(fileURLWithPath: root).appendingPathComponent("accounts", isDirectory: true).appendingPathComponent(profileName, isDirectory: true)
+        let secrets: AccountSecretStore = (persistent && ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil) ? KeychainAccountSecretStore(profile: profileName) : MemoryAccountSecretStore()
+        let made = AccountStore(profile: profileName, file: persistent ? folder.appendingPathComponent("accounts.json") : nil, secrets: secrets)
+        accountStoreCache = made
+        engine.downloads.accountStore = made
+        return made
+    }
+    // MARK: LinkGrabber and link detection
+
+    /// A click on a magnet or eD2k link opens the matching preview here instead of failing or going to another application. On by default; nothing is contacted by the click.
+    @Published var interceptP2PLinks = true { didSet { saveSetting("link_p2p_intercept", interceptP2PLinks ? "1" : "0") } }
+    /// Off until the person turns it on: the pasteboard is not read at all while it is off.
+    @Published var watchClipboardForLinks = false { didSet { saveSetting("link_clipboard_watch", watchClipboardForLinks ? "1" : "0"); clipboardWatcher.setEnabled(watchClipboardForLinks) } }
+    /// Text for the Add Download form to open with (a magnet or eD2k link that was clicked or chosen), and a downloaded .torrent file to preview.
+    @Published var addDownloadPrefill: String?
+    /// Where the prefilled address came from. An address the person typed is theirs; one a page or a collection supplied keeps the page-derived limits unless they change it.
+    @Published var addDownloadPrefillOrigin: DownloadRequestOrigin = .user
+    @Published var pendingTorrentFile: URL?
+    @Published var linkGrabberRequested = false
+    @Published private(set) var linkNotice: String?
+    private var navigationGate = LinkNavigationGate()
+    private var linkStoreCache: (profile: String, normal: LinkGrabberStore, privateStore: LinkGrabberStore)?
+    private var linkStores: (normal: LinkGrabberStore, privateStore: LinkGrabberStore) {
+        if let c = linkStoreCache, c.profile == profileName { return (c.normal, c.privateStore) }
+        let made = (LinkGrabberStore(profile: profileName, isPrivate: false), LinkGrabberStore(profile: profileName, isPrivate: true))
+        linkStoreCache = (profileName, made.0, made.1)
+        return made
+    }
+    /// The collection for what is on screen: a private tab has a collection of its own, in memory only.
+    var linkGrabber: LinkGrabberStore { active?.leavesNoTrace == true ? linkStores.privateStore : linkStores.normal }
+    private(set) lazy var linkChecker = LinkMetadataChecker { [weak self] url in
+        guard let self else { throw CancellationError() }
+        let source = try await self.engine.downloads.http.engine.resolve(DownloadSourceRequest(url: url, profile: self.profileName, isPrivate: false, origin: .page))
+        return LinkMetadata(filename: source.suggestedFilename, size: source.totalBytes, acceptsRanges: source.acceptsRanges)
+    }
+    private(set) lazy var clipboardWatcher = ClipboardLinkWatcher(
+        pasteboard: SystemPasteboardSource(), isPrivateContext: { [weak self] in self?.active?.leavesNoTrace == true },
+        onLinks: { [weak self] links in
+            guard let self else { return }
+            let r = self.linkStores.normal.add(candidates: links, provenance: .clipboard)
+            if r.added > 0 { self.linkNotice = "\(r.added) link\(r.added == 1 ? "" : "s") from the clipboard added to the LinkGrabber." }
+        })
+
+    /// A magnet or eD2k link was clicked. Opens the existing preview, once per click; a link a page navigates to by itself does nothing. Returns whether the browser took it.
+    func handleCustomLink(_ url: URL, linkActivated: Bool, fromPrivate: Bool = false) -> Bool {
+        // A link to an FTP, FTPS, SFTP or WebDAV address: a click opens Remote Files with the address filled in (and not connected: a page never makes the browser contact a server by itself).
+        // A page that navigates there on its own does nothing.
+        if RemoteScheme(urlScheme: url.scheme) != nil {
+            if linkActivated { openRemote(address: url.absoluteString, origin: .page, fromPrivate: fromPrivate) }
+            return true
+        }
+        // A link to a Metalink file opens its description here instead of saving the file.
+        if MetalinkLink.isMetalink(url) {
+            if linkActivated { openMetalink(url: url, origin: .page) }
+            return true
+        }
+        guard interceptP2PLinks else { return false }
+        // Peer-to-peer downloads are not available from a private tab: they would be kept in the ordinary profile's list, and a private tab's content never goes there.
+        if fromPrivate {
+            if linkActivated { linkNotice = "Peer-to-peer links cannot be opened from a private tab. Open the link in an ordinary tab to preview it." }
+            return true
+        }
+        switch navigationGate.decide(url: url, linkActivated: linkActivated, now: ProcessInfo.processInfo.systemUptime) {
+        case .notOurs: return false
+        case .ignore: return true
+        case .open(let text):
+            let kind = LinkClassifier.classify(text).kind
+            guard kind == .magnet || kind == .ed2kFile else { linkNotice = "That link cannot be opened here: \(LinkClassifier.classify(text).display)"; return true }
+            openLinkPreview(.preview(text: text))
+            return true
+        }
+    }
+
+    func openLinkPreview(_ route: LinkRoute) {
+        switch route {
+        // Downloads is brought up only if it is not already showing: setting the sheet toggles it, so a request made from inside Downloads (the media picker lives there) used to close it.
+        case .preview(let text): addDownloadPrefill = text; addDownloadPrefillOrigin = .page; ensureDownloadsShown()
+        case .previewLocalTorrent(let url): pendingTorrentFile = url; ensureDownloadsShown()
+        case .mediaPreview(let url): addDownloadPrefill = url.absoluteString; addDownloadPrefillOrigin = .page; ensureDownloadsShown()
+        case .download, .refused: break
+        }
+    }
+
+    /// Brings Downloads up for a request that opens one of its sheets. Setting `sheet` to Downloads is a toggle (a second time it closes the panel), so it is only set when the panel is not
+    /// already showing: a request made while Downloads is open must not close it.
+    func ensureDownloadsShown() {
+        if floatingPanel != .downloads && dockedPanel != .downloads { sheet = .downloads }
+    }
+
+    func openLinkGrabber() { ensureDownloadsShown(); linkGrabberRequested = true }
+
+    // MARK: Feeds and podcasts
+
+    @Published var remoteRequested = false
+    private var remoteBrowserCache: (profile: String, model: RemoteBrowserModel)?
+    /// This window's Remote Files browser (a server, a folder, a selection; in memory — saved servers are in the profile's folder, their secrets in the Keychain).
+    var remoteBrowser: RemoteBrowserModel {
+        if let c = remoteBrowserCache, c.profile == profileName { return c.model }
+        let made = RemoteBrowserModel(coordinator: engine.downloads)
+        remoteBrowserCache = (profileName, made)
+        return made
+    }
+    /// Opens Remote Files, optionally at an address. A typed address connects; an address a page supplied only fills the form.
+    func openRemote(address: String? = nil, origin: DownloadRequestOrigin = .user, fromPrivate: Bool = false) {
+        remoteBrowser.isPrivate = fromPrivate || (active?.leavesNoTrace ?? false)
+        if let address { remoteBrowser.open(address: address, origin: origin) }
+        ensureDownloadsShown(); remoteRequested = true
+    }
+    @Published var providersRequested = false
+    private var providerSheetCache: (profile: String, model: ProviderSheetModel)?
+    /// This window's Repositories & Models sheet (in memory; nothing about it is saved).
+    var providerSheet: ProviderSheetModel {
+        if let c = providerSheetCache, c.profile == profileName { return c.model }
+        let made = ProviderSheetModel(coordinator: engine.downloads)
+        providerSheetCache = (profileName, made)
+        return made
+    }
+    /// Opens Repositories & Models, at the current page's address when that is a repository, model or bucket (the person still chooses Look Up to send anything).
+    func openProviders(address: String? = nil, fromPrivate: Bool = false) {
+        providerSheet.isPrivate = fromPrivate || (active?.leavesNoTrace ?? false)
+        if let address { providerSheet.address = address; providerSheet.load() }
+        ensureDownloadsShown(); providersRequested = true
+    }
+    @Published var feedsRequested = false
+    private var feedModelCache: (profile: String, model: FeedSheetModel)?
+    /// This profile's feed list and open feed (in memory; subscriptions themselves are in the profile's download folder).
+    var feedSheetModel: FeedSheetModel {
+        if let c = feedModelCache, c.profile == profileName { return c.model }
+        let made = FeedSheetModel(coordinator: engine.downloads)
+        feedModelCache = (profileName, made)
+        return made
+    }
+    func openFeeds(address: String? = nil, origin: DownloadRequestOrigin = .user) {
+        if let address { feedSheetModel.prefill(address, origin: origin) }
+        ensureDownloadsShown(); feedsRequested = true
+    }
+
+    // MARK: Remote ZIP
+
+    @Published var remoteZipRequested = false
+    #if os(macOS)
+    private var remoteZipCache: (profile: String, model: RemoteZipModel)?
+    /// This profile's archive reader. In memory only. (The Mac's Downloads window; the iPhone has no such reader.)
+    var remoteZipModel: RemoteZipModel {
+        if let c = remoteZipCache, c.profile == profileName { return c.model }
+        let made = RemoteZipModel(coordinator: engine.downloads)
+        remoteZipCache = (profileName, made)
+        return made
+    }
+    #endif
+    func openRemoteZip(address: String? = nil, origin: DownloadRequestOrigin = .user) {
+        #if os(macOS)
+        if let address { remoteZipModel.prefill(address, origin: origin) }
+        #endif
+        ensureDownloadsShown(); remoteZipRequested = true
+    }
+
+    // MARK: Website Explorer
+
+    @Published var explorerRequested = false
+    @Published var packagesRequested = false
+    /// Set to open the TikTok account-export window from Downloads.
+    @Published var tiktokExportRequested = false
+    @Published var explorerAddress: String?
+    private var explorerCache: (profile: String, store: ExplorerStore)?
+    /// This profile's proposals. Never saved: they are in memory for as long as the window is, and the pages they came from are not kept.
+    var websiteExplorer: ExplorerStore {
+        if let c = explorerCache, c.profile == profileName { return c.store }
+        explorerCache?.store.clear()
+        let made = ExplorerStore(profile: profileName)
+        explorerCache = (profileName, made)
+        return made
+    }
+    func openExplorer(address: String? = nil) { explorerAddress = address; ensureDownloadsShown(); explorerRequested = true }
+    func openPackages() { ensureDownloadsShown(); packagesRequested = true }
+
+    /// "Explore This Website…": starts from the page that is open. A private tab is refused: what it finds could not be downloaded from here anyway, and nothing of it may be kept.
+    func exploreCurrentSite(in chosen: TabController? = nil) {
+        guard let tab = chosen ?? active, !tab.isBlank, let url = tab.url else { linkNotice = "There is no page open."; return }
+        if tab.leavesNoTrace { linkNotice = "A private tab cannot be explored: downloads would be kept in the ordinary list."; return }
+        openExplorer(address: url.absoluteString)
+    }
+
+    /// Starts reading. An address the person typed in the explorer's own field is theirs; one that came from a page is page-derived and is held to those limits. Returns a message when it cannot start.
+    @discardableResult
+    func startExplorer(_ url: URL, depth: Int, pages: Int, sameSite: Bool, stayInFolder: Bool, typedByPerson: Bool) -> String? {
+        guard DownloadSchedule.canSchedule(url) else { return "That is not a web address." }
+        var scope = ExplorerScope(start: url, origin: typedByPerson ? .user : .page)
+        scope.maxDepth = depth; scope.maxPages = pages; scope.sameOriginOnly = sameSite; scope.stayInDirectory = stayInFolder
+        do {
+            let fetch = try WebsiteExplorer.networkFetch(scope: scope.clamped(), network: engine.downloads.http.engine.currentNetwork)
+            websiteExplorer.start(scope, explorer: WebsiteExplorer(fetch: fetch))
+            return nil
+        } catch { return (error as? LocalizedError)?.errorDescription ?? "The network settings do not allow this." }
+    }
+
+    /// The shown, selected proposals go to the LinkGrabber as page-derived links. Nothing is downloaded.
+    @discardableResult
+    func addExplorerSelectionToLinkGrabber() -> LinkGrabberStore.Report { websiteExplorer.addSelected(to: linkStores.normal) }
+
+    // MARK: Packages
+
+    /// This profile's packages, with their events going to the same feed as the tasks'.
+    var packages: PackageStore {
+        let store = engine.downloads.packages
+        if store.onEvent == nil {
+            store.onEvent = { [weak self] type, package, fraction in self?.downloadFeed.publishPackage(type: type, packageID: package.id, profile: package.profile, fraction: fraction) }
+        }
+        return store
+    }
+
+    // MARK: Media discovery
+
+    /// Language choices for defaults (never a quality). Saved for the ordinary profile; a private tab's choices are not looked at or saved.
+    @Published var mediaPreferences = MediaPreferences() { didSet { saveSetting("media_pref_audio", mediaPreferences.audioLanguage); saveSetting("media_pref_subs", mediaPreferences.subtitleLanguage) } }
+    @Published var mediaDiscoveryRequested = false
+    #if os(macOS)
+    /// The video the Download button was pressed on (see VideoDownloadSheet). Taken once by the Downloads window.
+    @Published var videoSheetRequest: VideoSubject?
+    #endif
+    private var mediaStoreCache: (profile: String, normal: MediaDiscoveryStore, privateStore: MediaDiscoveryStore)?
+    private var mediaStores: (normal: MediaDiscoveryStore, privateStore: MediaDiscoveryStore) {
+        if let c = mediaStoreCache, c.profile == profileName { return (c.normal, c.privateStore) }
+        mediaStoreCache?.normal.clear(); mediaStoreCache?.privateStore.clear()
+        let made = (MediaDiscoveryStore(profile: profileName, isPrivate: false), MediaDiscoveryStore(profile: profileName, isPrivate: true))
+        mediaStoreCache = (profileName, made.0, made.1)
+        return made
+    }
+    /// The candidates for what is on screen: a private tab has a list of its own, in memory only.
+    /// DX-09: one provider operation per page and profile (what a site permits, authorization, resolved sources, renewal).
+    private(set) lazy var providerFlow = ProviderFlow(coordinator: { [unowned self] in self.engine.downloads }, profile: { [unowned self] in self.profileName },
+                                                     activePage: { [unowned self] in (self.active?.url, self.active?.leavesNoTrace == true) })
+    var mediaDiscovery: MediaDiscoveryStore { active?.leavesNoTrace == true ? mediaStores.privateStore : mediaStores.normal }
+    private var mediaSearch: Task<Void, Never>?
+    private var mediaSearchToken = UUID()
+
+    /// Names a page for the purpose of telling when it has changed: the tab and the address without its fragment.
+    func pageKey(of tab: TabController) -> String {
+        var c = tab.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }
+        c?.fragment = nil
+        return "\(tab.id)|\(c?.string ?? "")"
+    }
+    #if os(macOS)
+    /// The Download button on a video entry: opens the sheet that says what can be saved. Nothing starts here.
+    func openVideoSheet(for r: DetectedResource) {
+        guard let subject = VideoSubject(r, isPrivate: active?.leavesNoTrace ?? false) else { linkNotice = "That address cannot be opened here."; return }
+        ensureDownloadsShown(); videoSheetRequest = subject
+    }
+
+    /// Download for a whole page whose player builds its video in memory (nothing to fetch by itself): the sheet asks the router what can resolve it. Only on the person's click.
+    func openVideoSheet(forPage url: URL, isPrivate: Bool) {
+        // The page and the privacy state are the ones the found media belongs to (not whatever tab is in front by now).
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https", url.host != nil else { linkNotice = "That page cannot be looked up."; return }
+        ensureDownloadsShown(); videoSheetRequest = VideoSubject(page: url, title: url.host ?? "Video", isPrivate: isPrivate)
+    }
+    #endif
+
+    func openMediaDiscovery() { ensureDownloadsShown(); mediaDiscoveryRequested = true }
+
+    /// "Find Downloadable Media": reads the media elements and media links of the page that is open, once, and lists them. Nothing is downloaded and nothing is contacted.
+    func discoverMediaOnCurrentPage(in chosen: TabController? = nil) {
+        guard let tab = chosen ?? active, !tab.isBlank else { linkNotice = "There is no page open."; return }
+        let store = tab.leavesNoTrace ? mediaStores.privateStore : mediaStores.normal
+        mediaSearch?.cancel()
+        mediaSearchToken = UUID(); let token = mediaSearchToken
+        store.beginSearch()
+        let key = pageKey(of: tab), host = tab.url?.host
+        mediaSearch = Task { [weak self] in
+            let read = await tab.engine.discoverMedia()
+            guard !Task.isCancelled, let self else { store.endSearch(); return }
+            // What the page's observer has seen (frames, players, loaded playlists) joins what the page read found: one list, one set of rules.
+            let snapshot = MediaPageSnapshot(hits: MediaObservationBuffer.merge(scan: read.hits, observed: tab.mediaBuffer.hits()), truncated: read.truncated, failed: read.failed && tab.mediaBuffer.isEmpty)
+            // The person may have gone somewhere else while the page was read: those results belong to the page they left.
+            // A tab the person chose from its own right-click menu keeps its results even when it is not the one in front (the list is keyed by that tab).
+            if self.active?.id == tab.id || chosen != nil, self.pageKey(of: tab) == key { store.ingest(snapshot, pageKey: key, pageHost: host); store.unobservedFrames = tab.mediaBuffer.unobservedFrames; store.observedNavigation = tab.mediaBuffer.navigation }
+            if self.mediaSearchToken == token { store.endSearch() }
+        }
+        openMediaDiscovery()
+    }
+    // MARK: Live media observation (DX-07)
+
+    private var mediaLive: Task<Void, Never>?
+
+    /// A page in this tab reported a player. A tab that is not on screen only keeps it in its own buffer; the open list follows only the page it shows.
+    func mediaObservationChanged(in tab: TabController, observation: MediaObservation) {
+        guard active?.id == tab.id else { return }
+        scheduleMediaSummary(for: tab)
+        if resourceSummary.isEmpty, resourceTask == nil || resourceKey != pageKey(of: tab) { scheduleResourceScan(for: tab) }
+        let store = tab.leavesNoTrace ? mediaStores.privateStore : mediaStores.normal
+        // The list follows the same document: a single-page route change keeps the tab and the document, a new document does not.
+        guard let listed = store.pageKey, listed.hasPrefix("\(tab.id)|"), store.observedNavigation == tab.mediaBuffer.navigation else { return }
+        if observation.kind == .gone { if let p = observation.player { store.removePlayers(inFrame: observation.frame.token, player: p) }; return }
+        if observation.kind == .bye { store.removePlayers(inFrame: observation.frame.token); return }
+        mediaLive?.cancel()
+        let key = listed, host = tab.url?.host
+        mediaLive = Task { [weak self, weak tab] in
+            try? await Task.sleep(nanoseconds: 300_000_000)          // a burst of events is one update
+            guard !Task.isCancelled, let self, let tab, self.active?.id == tab.id, store.pageKey == key, store.observedNavigation == tab.mediaBuffer.navigation else { return }
+            store.ingest(MediaPageSnapshot(hits: tab.mediaBuffer.hits(), truncated: false), pageKey: key, pageHost: host, removeMissing: false)
+            store.unobservedFrames = tab.mediaBuffer.unobservedFrames
+        }
+    }
+
+    /// The tab's page was replaced: whatever was listed from the old page is out of date (and any live update still waiting is dropped).
+    func mediaPageNavigated(_ tab: TabController) {
+        if active?.id == tab.id { scheduleMediaSummary(for: tab); scheduleResourceScan(for: tab) }
+        if active?.id == tab.id { mediaLive?.cancel() }          // another tab's navigation does not cancel this tab's pending update
+        let store = tab.leavesNoTrace ? mediaStores.privateStore : mediaStores.normal
+        if active?.id == tab.id, store.pageKey != nil { store.markStale(currentPageKey: pageKey(of: tab)) }
+    }
+
+    // MARK: Media indicator (toolbar)
+
+    /// What the page in front has shown of its media (see MediaPageSummary). Recomputed, briefly delayed, when the page reports something, navigates, or another tab comes to the front.
+    @Published private(set) var mediaSummary = MediaPageSummary.empty
+    private var summaryTask: Task<Void, Never>?
+    private var summaryTab: UInt64?
+
+    func scheduleMediaSummary(for tab: TabController? = nil) {
+        summaryTask?.cancel()
+        guard let tab = tab ?? active, active?.id == tab.id, MediaPageObserver.isEnabled else { summaryTab = nil; if !mediaSummary.isEmpty { mediaSummary = .empty; refreshResourceMedia() }; return }
+        let id = tab.id
+        summaryTab = id
+        summaryTask = Task { [weak self, weak tab] in
+            try? await Task.sleep(nanoseconds: 300_000_000)          // a burst of reports is one update
+            guard !Task.isCancelled, let self, let tab, self.active?.id == id, self.summaryTab == id else { return }
+            let next = MediaPageSummary.make(hits: tab.mediaBuffer.hits(), pageHost: tab.url?.host, isPrivate: tab.leavesNoTrace)
+            if next != self.mediaSummary { self.mediaSummary = next; self.refreshResourceMedia() }
+        }
+    }
+
+    // MARK: Download categories (toolbar)
+
+    /// What the page in front links to, by category. Read passively (link addresses only), briefly after the page settles, and again a little later for pages that build themselves.
+    @Published private(set) var resourceSummary = PageResourceSummary.empty
+    private var resourceTask: Task<Void, Never>?
+    /// Which category list is open (nil: none). Kept here so a rescan that changes the chips does not close it.
+    @Published var resourcePopoverKey: String?
+
+    private var resourceKey: String?
+    /// When to read the page's links after it loads: soon, again as it builds itself, and once more later. A UI-test run (Debug only, `-UITestFastScan YES`) uses much shorter gaps.
+    static var resourceScanDelays: [UInt64] {
+        #if DEBUG
+        if UserDefaults.standard.bool(forKey: "UITestFastScan") { return [150_000_000, 700_000_000, 1_500_000_000] }
+        #endif
+        return [900_000_000, 2_100_000_000, 5_000_000_000]
+    }
+
+    func scheduleResourceScan(for tab: TabController? = nil, now: Bool = false) {
+        resourceTask?.cancel()
+        guard let tab = tab ?? active, active?.id == tab.id, ResourceDetectionSettings.isEnabled, !tab.isBlank else {
+            resourceKey = nil; resourcePopoverKey = nil; if !resourceSummary.isEmpty { resourceSummary = .empty }; return
+        }
+        // A different page (or tab) than the one the chips describe: they go at once, so a stale Download button cannot be pressed while the new page is read.
+        let key = pageKey(of: tab)
+        noteResourcePage(key)
+        let id = tab.id
+        resourceTask = Task { [weak self, weak tab] in
+            for delay in (now ? [50_000_000 as UInt64] : Self.resourceScanDelays) {
+                try? await Task.sleep(nanoseconds: delay)
+                guard !Task.isCancelled, let self, let tab, self.active?.id == id, self.resourceKey == key, self.pageKey(of: tab) == key else { return }
+                let scan = await tab.engine.scanPageLinks()
+                guard !Task.isCancelled, self.active?.id == id, self.resourceKey == key, self.pageKey(of: tab) == key else { return }
+                // A read that came back empty on a page that had items is a failed read, not a page that lost them.
+                if scan.links.isEmpty, !self.resourceSummary.isEmpty, !scan.truncated { continue }
+                self.applyResourceSummary(PageResourceSummary.build(scan: scan, media: self.mediaSummary, pageHost: tab.url?.host))
+            }
+        }
+    }
+
+    /// The page the chips describe. A different page clears the chips and any open list at once; the same page keeps both.
+    func noteResourcePage(_ key: String) {
+        guard resourceKey != key else { return }
+        resourceKey = key; resourcePopoverKey = nil
+        if !resourceSummary.isEmpty { resourceSummary = .empty }
+    }
+
+    /// New results for the same page. They replace the chips' contents but never close a list that is open: the list's open state is not part of the summary.
+    func applyResourceSummary(_ next: PageResourceSummary) { if next != resourceSummary { resourceSummary = next } }
+
+    /// Rebuilds only the media counts (the page's players changed) without reading the page again.
+    private func refreshResourceMedia() {
+        var s = resourceSummary
+        let m = mediaSummary
+        s.mediaDetected = m.detected > 0 ? [.audio: m.audioDetected, .video: m.detected - m.audioDetected] : [:]
+        s.mediaOpenable = m.detected > 0 ? [.audio: m.audioOpenable, .video: m.openable - m.audioOpenable] : [:]
+        if s != resourceSummary { resourceSummary = s }
+    }
+
+    /// One resource, through the engine that already handles its kind: a web file is a download (the person clicked it); a torrent or magnet goes to the link collection, whose preview asks before anything is contacted.
+    /// A download started from a list in the browser window (the category chips, the media picker) ends with a visible card: finished (with the file), or failed (with the reason). Without this the
+    /// only sign was the Downloads window, which may not be open. Private downloads get the same card with no file name kept anywhere else.
+    func announceWhenDone(_ id: UUID) {
+        Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                guard let self, let record = self.engine.downloads.ledger.record(id) else { return }
+                switch record.state {
+                case .completed:
+                    let url = record.file.destinationPath.map { URL(fileURLWithPath: $0) }
+                    self.showDownloadBanner(filename: record.isPrivate ? "A private download" : record.file.filename, fileURL: record.isPrivate ? nil : url, warning: nil); return
+                case .failed, .recoveryRequired:
+                    self.showDownloadBanner(filename: record.isPrivate ? "A private download" : record.file.filename, fileURL: nil, warning: "The download did not finish: \(record.failure?.reason ?? "it failed")."); return
+                case .cancelled: return
+                default: continue
+                }
+            }
+        }
+    }
+
+    func downloadDetected(_ r: DetectedResource) {
+        if r.category == .torrent || r.isManifest {
+            let store = (active?.leavesNoTrace ?? false) ? linkStores.privateStore : linkStores.normal
+            _ = store.add(candidates: [r.url], provenance: .page, group: active?.url?.host)
+            openLinkGrabber()
+        } else if let url = URL(string: r.url), let id = engine.downloads.scheduleDownload(url: url, at: Date(), origin: .page, isPrivate: active?.leavesNoTrace ?? false) {
+            linkNotice = "Added to Downloads."
+            announceWhenDone(id)
+        } else { linkNotice = "That file could not be added." }
+    }
+
+    /// The listed resources go to the link collection, where each can be checked and added one by one.
+    /// What "Download all" may start: what is listed, a file (not a card or playlist) the page or server gave real reason to think is one, and no more than a handful at a time.
+    static let bulkLimit = 25
+    func downloadableAll(_ items: [DetectedResource], among ids: Set<String>) -> [DetectedResource] {
+        let eligible = items.prefix(200).filter { !$0.needsResolution && $0.confidence != .low && { if case .notAFile = $0.availability { return false }; return true }($0) }
+        return Array((ids.isEmpty ? Array(eligible) : eligible.filter { ids.contains($0.id) }).prefix(Self.bulkLimit))
+    }
+
+    func collectResources(_ items: [DetectedResource]) -> LinkGrabberStore.Report {
+        let store = (active?.leavesNoTrace ?? false) ? linkStores.privateStore : linkStores.normal
+        let report = store.add(candidates: items.map(\.url), provenance: .page, group: active?.url?.host)
+        openLinkGrabber()
+        return report
+    }
+
+    func cancelMediaDiscovery() { mediaSearch?.cancel(); mediaSearch = nil; mediaDiscovery.endSearch(); mediaDiscovery.cancelInspections() }
+
+    /// A candidate's playlist is read so its choices can be shown. Only the playlist is fetched.
+    func inspectDiscoveredMedia(_ id: String) {
+        let store = mediaDiscovery
+        if let tab = active, store.pageKey != nil { store.markStale(currentPageKey: pageKey(of: tab)) }
+        // The address came from a web page, so the local network is refused here even though the person asked for the look.
+        store.inspect(id) { [weak self] url in
+            guard let self else { throw CancellationError() }
+            return try await self.engine.downloads.media.inspect(url, origin: .page, refuseInternal: true)
+        }
+    }
+
+    /// Starts what the person chose: a file as an ordinary download, a stream at its choices. Refused (with the reason) for anything else.
+    @discardableResult
+    func openDiscoveredMedia(_ id: String) -> LinkRoute {
+        let store = mediaDiscovery
+        if let tab = active, store.pageKey != nil { store.markStale(currentPageKey: pageKey(of: tab)) }
+        let route = store.route(id)
+        switch route {
+        case .download(let url):
+            // Once: a second click on the same item must not make a second download.
+            if let started = engine.downloads.scheduleDownload(url: url, at: Date(), origin: .page, isPrivate: active?.leavesNoTrace ?? false) { store.remove([id]); linkNotice = "Added to Downloads."; announceWhenDone(started) } else { linkNotice = "That media could not be added." }
+        case .mediaPreview: openLinkPreview(route)
+        case .refused(let why): linkNotice = why
+        default: break
+        }
+        return route
+    }
+
+    /// Puts chosen candidates in the LinkGrabber (the same collection, the same duplicate rules). A private tab's go to the private collection.
+    @discardableResult
+    func addDiscoveredMediaToLinkGrabber(_ ids: Set<String>) -> LinkGrabberStore.Report {
+        let source = mediaDiscovery
+        if let tab = active, source.pageKey != nil { source.markStale(currentPageKey: pageKey(of: tab)) }
+        let target = source.isPrivate ? linkStores.privateStore : linkStores.normal
+        // Only what could be opened: not protected media, not in-page streams, not what the page's own network refused, not what is out of date.
+        let urls = source.candidates.filter { ids.contains($0.id) && $0.canOpen }.compactMap(\.url)
+        return target.add(candidates: urls, provenance: .page, group: active?.url?.host)
+    }
+
+    /// "Collect Download Links from This Page": reads the links of the page that is open, once, and puts the likely downloads in the collection. Nothing is downloaded or contacted.
+    func collectLinksFromCurrentPage() async {
+        guard let tab = active else { linkNotice = "There is no page open."; return }
+        let store = tab.leavesNoTrace ? linkStores.privateStore : linkStores.normal
+        let snapshot = await tab.engine.collectLinks()
+        let report = store.add(candidates: snapshot.candidates, provenance: .page, group: tab.url?.host)
+        linkNotice = snapshot.candidates.isEmpty ? "No download links were found on this page."
+            : "\(report.added) link\(report.added == 1 ? "" : "s") collected\(report.duplicates > 0 ? ", \(report.duplicates) already there" : "")\(snapshot.truncated ? " (the page has more than the limit)" : "")."
+        openLinkGrabber()
+    }
+
+    /// "Collect Images from This Page": the pictures of a gallery page (full-size files where the page links them) go to the LinkGrabber, grouped by the site, with the same duplicate rules. Nothing is downloaded yet.
+    func collectImagesFromCurrentPage(in chosen: TabController? = nil) async {
+        guard let tab = chosen ?? active, !tab.isBlank else { linkNotice = "There is no page open."; return }
+        let store = tab.leavesNoTrace ? linkStores.privateStore : linkStores.normal
+        let snapshot = await tab.engine.collectImages()
+        let report = store.add(candidates: snapshot.candidates, provenance: .page, group: (tab.url?.host).map { $0 + " images" })
+        linkNotice = snapshot.candidates.isEmpty ? "No pictures were found on this page."
+            : "\(report.added) picture\(report.added == 1 ? "" : "s") collected\(report.duplicates > 0 ? ", \(report.duplicates) already there" : "")\(snapshot.truncated ? " (the page has more than the limit)" : "")."
+        openLinkGrabber()
+    }
+
+    // MARK: Metalink (a description of one or more files and the places they can be had)
+
+    /// Opens a Metalink document: what it lists is shown and asked about first, then it becomes ordinary downloads (several files: one collection). `data` is the document, `title` names the collection.
+    func openMetalink(data: Data, title: String, privateTab: Bool? = nil) {
+        let privateTab = privateTab ?? (active?.leavesNoTrace ?? false)
+        Task { @MainActor in
+            do {
+                let files = try MetalinkParser.parse(data)
+                let choice = await Dialogs.choose(title: files.count == 1 ? "Download “\(files[0].name)”?" : "Download \(files.count) files from this Metalink?",
+                                                  message: MetalinkImport.summary(files), buttons: ["Download", "Cancel"])
+                guard choice == 0 else { return }
+                let out = await MetalinkImport.add(files, title: title, documentKey: MetalinkImport.documentKey(data), coordinator: engine.downloads, isPrivate: privateTab)
+                linkNotice = out.started == 0 ? (out.alreadyThere > 0 ? "Those files are already in your Downloads." : "Nothing could be added from that Metalink file.")
+                    : "Added \(out.started) download\(out.started == 1 ? "" : "s") from the Metalink file\(out.combined > 0 ? ", using several sources together where it is safe" : "")."
+                ensureDownloadsShown()
+            } catch { linkNotice = (error as? LocalizedError)?.errorDescription ?? "That Metalink file could not be read." }
+        }
+    }
+
+    /// A link or typed address to a Metalink file: it is read here (never saved as a file the person has to find), under the rules of a page's address unless the person typed it.
+    func openMetalink(url: URL, origin: DownloadRequestOrigin) {
+        linkNotice = "Reading the Metalink file…"
+        let privateTab = active?.leavesNoTrace ?? false          // (the tab it was asked from, not whichever is in front when the answer arrives)
+        Task { @MainActor in
+            do {
+                let (data, final) = try await engine.downloads.media.fetchDocument(url, limit: MetalinkParser.maxBytes, origin: origin, refuseInternal: origin != .user)
+                openMetalink(data: data, title: (final.deletingPathExtension().lastPathComponent).isEmpty ? "Metalink" : final.deletingPathExtension().lastPathComponent, privateTab: privateTab)
+            } catch { linkNotice = (error as? LocalizedError)?.errorDescription ?? "That Metalink file could not be read." }
+        }
+    }
+
+    // MARK: Download events (one feed: notifications, diagnostics and the automation stream all read it)
+
+    /// Notification choices, saved per profile. Notifications are off until the person turns them on; the system's permission is asked for at that moment, not at launch.
+    @Published var downloadNotifications = DownloadNotificationPreferences() { didSet { saveSetting("download_notifications", downloadNotifications.encoded() ?? ""); notificationsCache?.preferences = downloadNotifications } }
+    private var feedCache: (profile: String, feed: DownloadEventFeed)?
+    var downloadFeed: DownloadEventFeed {
+        if let existing = feedCache, existing.profile == profileName { return existing.feed }
+        feedCache?.feed.stop()
+        let persistent = !isTemporaryProfile(profileName)
+        let folder = URL(fileURLWithPath: root).appendingPathComponent("automation", isDirectory: true).appendingPathComponent(profileName, isDirectory: true)
+        let hub = AutomationEventHub(sequence: AutomationEventSequence(file: persistent ? folder.appendingPathComponent("event-sequence.json") : nil))
+        let made = DownloadEventFeed(coordinators: { [weak self] in self.map { [$0.engine.downloads] } ?? [] }, hub: hub)
+        feedCache = (profileName, made)
+        diagnosticsCache = nil; notificationsCache?.detach()
+        return made
+    }
+    private var diagnosticsCache: DownloadDiagnostics?
+    var downloadDiagnostics: DownloadDiagnostics {
+        // The feed first: building a new one (a different profile) drops the old diagnostics, so this can never return another profile's or attach a second observer.
+        let feed = downloadFeed
+        if let existing = diagnosticsCache { return existing }
+        let folder = URL(fileURLWithPath: root).appendingPathComponent("diagnostics", isDirectory: true).appendingPathComponent(profileName, isDirectory: true)
+        let made = DownloadDiagnostics(file: isTemporaryProfile(profileName) ? nil : folder.appendingPathComponent("timelines.json"))
+        diagnosticsCache = made
+        feed.observe { [weak made] event, coordinator in made?.record(event, coordinator: coordinator) }
+        made.prune(keeping: engine.downloads)
+        return made
+    }
+    private var notificationsCache: DownloadNotificationService?
+    var notifications: DownloadNotificationService {
+        if let existing = notificationsCache { return existing }
+        let center = SystemNotificationCenter()
+        let service = DownloadNotificationService(
+            center: center, coordinators: { [weak self] in self.map { [$0.engine.downloads] } ?? [] },
+            downloadsVisible: { [weak self] in self?.sheet == .downloads },
+            appActive: {
+                #if os(macOS)
+                NSApplication.shared.isActive
+                #else
+                UIApplication.shared.applicationState == .active
+                #endif
+            },
+            openDownloads: { [weak self] _ in
+                self?.sheet = .downloads
+                #if os(macOS)
+                NSApplication.shared.activate(ignoringOtherApps: true)
+                #endif
+            },
+            reveal: {
+                #if os(macOS)
+                NSWorkspace.shared.activateFileViewerSelecting([$0])
+                #endif
+            },
+            inApp: { [weak self] title, body in self?.engine.downloads.note("\(title): \(body)") })
+        center.onAction = { [weak service] action, info in service?.perform(action: action, userInfo: info) }
+        service.preferences = downloadNotifications
+        notificationsCache = service
+        return service
+    }
+    /// Starts the single feed and connects its readers. Safe to call again.
+    func startDownloadEvents() {
+        let feed = downloadFeed
+        _ = downloadDiagnostics
+        let service = notifications
+        if !service.isAttached { service.attach(to: feed) }
+        if downloadNotifications.enabled { service.prepare() }
+        feed.start()
+    }
+    /// eD2k choices, saved per profile. Off until the person turns it on.
+    @Published var ed2kSettings = ED2KSettings() { didSet { saveSetting("download_ed2k", ed2kSettings.encoded() ?? ""); engine.downloads.ed2kSettings = ed2kSettings } }
+    /// Keeps the proxy password for this profile (an empty one removes it) and applies the settings again so the downloader picks it up.
+    func setProxyPassword(_ password: String) {
+        engine.downloads.proxyCredentials.setPassword(password, profile: profileName)
+        engine.downloads.forgetProxyPasswordCache()
+        engine.downloads.networkSettings = downloadNetwork
+    }
+    var hasProxyPassword: Bool { engine.downloads.cachedProxyPassword() != nil }
     /// A colour chosen for each website (hex by site), shown in place of the page's own colour.
     @Published var siteLooks: [String: String] = [:]
     @Published var feeds: [Feed] = []
@@ -868,6 +1860,9 @@ final class BrowserModel: ObservableObject {
     @Published var refreshingFeeds = false
     var feedsLoaded = false
     @Published var siteTimeLog = SiteTimeLog()
+    /// How many days of site time are kept (0: until cleared), and when the person last did something in the browser.
+    @Published var siteTimeRetentionDays = 90
+    var lastInteraction = Date()
     @Published var trackTime = false { didSet { saveSetting("track_time", trackTime ? "1" : "0") } }
     @Published var breakMinutes = 0 { didSet { saveSetting("break_minutes", String(breakMinutes)) } }
     var lastTimeTick = Date()
@@ -893,8 +1888,17 @@ final class BrowserModel: ObservableObject {
     @Published var fasterDownloads = true { didSet { saveSetting("download_segments", fasterDownloads ? "1" : "0"); engine.downloads.segmentedEnabled = fasterDownloads } }
     @Published var organizeByDomain = false { didSet { saveSetting("organize_downloads_domain", organizeByDomain ? "1" : "0"); engine.downloads.organizeByDomain = organizeByDomain } }
     @Published var notifyDownloads = true { didSet { saveSetting("download_notify", notifyDownloads ? "1" : "0") } }
+    @Published var duplicatePolicy = DuplicatePolicy.keepBoth { didSet { saveSetting("download_duplicate", duplicatePolicy.rawValue); engine.downloads.duplicatePolicy = duplicatePolicy } }
+    /// A template that is not valid is kept as typed (so it can be fixed) but not used: downloads keep the name the site gave.
+    @Published var downloadNameTemplate = "{name}" { didSet {
+        saveSetting("download_template", downloadNameTemplate)
+        engine.downloads.nameTemplate = DownloadCoordinator.templateProblem(downloadNameTemplate) == nil ? downloadNameTemplate : "{name}"
+    } }
     @Published var organizeDownloads = false { didSet { saveSetting("organize_downloads", organizeDownloads ? "1" : "0"); engine.downloads.organize = organizeDownloads } }
     @Published var userScripts: [UserScript] = []
+    /// The values scripts that were given storage keep for themselves, by script: kept in the profile, never shown to pages.
+    var userScriptValues: [String: [String: String]] = [:]
+    let userScriptStorage = UserScriptStorage()
     /// Ask for Touch ID, Face ID or the device passcode before sensitive changes (backup, clearing data, scripts, extensions, protection off).
     @Published var lockSensitiveSettings = false { didSet { if !applyingSettings { saveSetting("lock_sensitive", lockSensitiveSettings ? "1" : "0") } } }
     var lastAuthentication = Date.distantPast
@@ -927,7 +1931,8 @@ final class BrowserModel: ObservableObject {
     /// Saves the proxy the user typed (the password goes to the Keychain, not the settings) and turns it on.
     func saveProxy(_ config: ProxyConfig, password: String) {
         proxy = config
-        ProxyConfig.setPassword(password)
+        // A blank field means "unchanged" while a user name is set; the password is removed only when the user name is cleared.
+        if !password.isEmpty || config.username.isEmpty { ProxyConfig.setPassword(password) }
         saveSetting("proxy_kind", config.kind.rawValue); saveSetting("proxy_host", config.host)
         saveSetting("proxy_port", String(config.port)); saveSetting("proxy_user", config.username)
         setProxyEnabled(true)
@@ -950,6 +1955,9 @@ final class BrowserModel: ObservableObject {
     }
 
     @Published var showSpeedPill = false { didSet { saveSetting("speed_pill", showSpeedPill ? "1" : "0") } }
+    /// The SearXNG instance this profile uses, and whether it is asked for suggestions (off until asked for).
+    @Published var searxngInstance = "" { didSet { saveSetting("searxng_instance", searxngInstance) } }
+    @Published var searxngSuggestions = false { didSet { saveSetting("searxng_suggest", searxngSuggestions ? "1" : "0"); refreshSearXNGSuggestions() } }
     @Published var searchSuggestionsEnabled = false { didSet { saveSetting("search_suggestions", searchSuggestionsEnabled ? "1" : "0") } }
 
     // MARK: Lifecycle
@@ -962,6 +1970,7 @@ final class BrowserModel: ObservableObject {
     /// A link handed to the browser by another app (when it is the default browser) or by the system. Opens in a new tab; one that
     /// arrives before the browser has finished starting waits for it.
     func openIncoming(_ url: URL) {
+        if url.isFileURL { if url.pathExtension.lowercased() == "torrent" { openDocument(url) }; return }          // a .torrent opened from Finder; no other file is taken this way
         guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https", url.host != nil else { return }
         guard hasStarted else { pendingIncoming.append(url); return }
         _ = openTab(url: url, isPrivate: false)
@@ -969,15 +1978,185 @@ final class BrowserModel: ObservableObject {
 
     func start() async {
         await engine.prepare()
+        ensureWorkspaceIDs()
         // The small built-in rules are compiled and attached before any tab exists, so the first request is already filtered. The big
         // downloaded lists take far longer to compile, so they are added in the background and never hold up the window.
         await privacy.apply(includeDownloaded: false)
+        #if DEBUG && os(iOS)
+        if let page = ProcessInfo.processInfo.environment["BS_OPEN_URL"], let url = URL(string: page) { Task { @MainActor [weak self] in try? await Task.sleep(for: .seconds(1)); self?.openTab(url: url, isPrivate: false) } }
+        if ProcessInfo.processInfo.environment["BS_SKIP_SETUP"] == "1" { Task { @MainActor [weak self] in for _ in 0..<6 { try? await Task.sleep(for: .milliseconds(400)); self?.showSetup = false } } }
+        // Development only: open the player on the page and run every control in turn against it, logging what the player reports after each.
+        if ProcessInfo.processInfo.environment["BS_PLAYER_TEST"] == "1" {
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                try? await Task.sleep(for: .seconds(12))
+                self.showPlayer()
+                try? await Task.sleep(for: .seconds(2))
+                @MainActor func describe(_ v: DetectedVideo?) -> String {
+                    guard let v else { return "no player" }
+                    return "t=\(String(format: "%.2f", v.time)) paused=\(v.paused) rate=\(v.rate) loop=\(v.loops) seek=\(v.seekStart ?? -1)...\(v.seekEnd ?? -1) buffered=\(v.bufferedEnd ?? -1) tracks=\(v.tracks.map(\.showing)) chapters=\(v.chapters.map(\.title)) theater=\(v.theater) focus=\(v.focus) fit=\(v.fit) picture=\(String(describing: v.picture)) ab=\(String(describing: v.repeatA))-\(String(describing: v.repeatB)) size=\(v.width)x\(v.height) visible=\(v.visible) canSeek=\(v.canSeek)"
+                }
+                await self.refreshPlayers()
+                debugLog("PLAYER start: \(describe(self.player.current))")
+                @MainActor func step(_ name: String, _ action: String, _ value: Double = 0, wait: Double = 1.2) async {
+                    guard let id = self.player.current?.id else { debugLog("PLAYER \(name): no player"); return }
+                    let problem = await self.active?.engine.controlVideo(id: id, action: action, value: value)
+                    try? await Task.sleep(for: .seconds(wait))
+                    await self.refreshPlayers()
+                    debugLog("PLAYER \(name): problem=\(problem ?? "none") -> \(describe(self.player.current))")
+                }
+                await step("play", "play", wait: 3)
+                await step("pause", "pause")
+                await step("seekBy +10", "seekBy", 10)
+                let before = self.player.current?.time ?? 0
+                await step("frame +1", "frame", 1)
+                debugLog("PLAYER frame delta = \((self.player.current?.time ?? 0) - before) s")
+                await step("speedBy +0.25", "speedBy", 0.25)
+                await step("subtitle 0", "subtitle", 0)
+                await step("subtitleShift +0.5", "subtitleShift", 0.5)
+                await step("audioTrack 1", "audioTrack", 1)
+                await step("markA", "markA")
+                await step("seekBy +3", "seekBy", 3)
+                await step("markB", "markB")
+                await step("play (repeat A-B)", "play", wait: 6)
+                await step("after repeat", "pause", wait: 0.5)
+                await step("clearAB", "clearAB")
+                await step("loop on", "loop", 1)
+                await step("fit cover", "fit", 1)
+                await step("picture contrast", "adjust:contrast", 0.2)
+                await step("focus on", "focus", 1, wait: 6)
+                await step("focus off", "focus", 0)
+                await step("theater on", "theater", 1, wait: 6)
+                await step("theater off", "theater", 0)
+                if let v = self.player.current {
+                    let lines = await self.loadTranscript(v)
+                    debugLog("PLAYER transcript: \(lines?.lines.count ?? -1) lines, first=\(lines?.lines.first?.text ?? "-")")
+                    self.captureFrame(v)
+                    try? await Task.sleep(for: .seconds(1.5))
+                    debugLog("PLAYER capture notice: \(self.notice ?? "none")")
+                }
+                debugLog("PLAYER done")
+            }
+        }
+        if ProcessInfo.processInfo.environment["BS_SPEED"] == "1" { showSpeedPill = true }
+        if let theme = ProcessInfo.processInfo.environment["BS_THEME"] { themeID = theme }
+        if let page = ProcessInfo.processInfo.environment["BS_GLANCE"], let url = URL(string: page) { Task { @MainActor [weak self] in try? await Task.sleep(for: .seconds(6)); if let self, let tab = self.active { self.glance.present(url, from: tab) } } }
+        if ProcessInfo.processInfo.environment["BS_TREE"] == "1" {
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(2))
+                guard let self else { return }
+                self.tabTree = true
+                let a = self.openTab(url: URL(string: "https://example.com/"), isPrivate: false)
+                let b = self.openTab(url: URL(string: "https://example.org/"), isPrivate: false, select: false, opener: a)
+                _ = self.openTab(url: URL(string: "https://example.net/"), isPrivate: false, select: false, opener: b)
+                _ = self.openTab(url: URL(string: "https://www.iana.org/"), isPrivate: false, select: false, opener: a)
+            }
+        }
+        if ProcessInfo.processInfo.environment["BS_SCROLL_END"] == "1" { Task { @MainActor [weak self] in try? await Task.sleep(for: .seconds(9)); _ = await self?.active?.engine.runScratch("window.scrollTo(0, document.documentElement.scrollHeight)") } }
+        if let dark = ProcessInfo.processInfo.environment["BS_DARK"], let mode = DarkPages(rawValue: dark) { darkPages = mode }
+        if ProcessInfo.processInfo.environment["BS_FOLD"] == "1" { Task { @MainActor [weak self] in try? await Task.sleep(for: .seconds(6)); self?.chromeCollapsed = true } }
+        // Development only: look at the Customize card and the vertical tabs panel without touching the screen.
+        if ProcessInfo.processInfo.environment["BS_START_DRAWER"] == "1" { Task { @MainActor [weak self] in try? await Task.sleep(for: .seconds(3)); self?.startDrawerOpen = true } }
+        if ProcessInfo.processInfo.environment["BS_TABS_PANEL"] == "1" { Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(3))
+            _ = self?.openTab(url: URL(string: "https://example.com/"), isPrivate: false); _ = self?.openTab(url: URL(string: "https://www.iana.org/"), isPrivate: false)
+            self?.phoneTabsView = ProcessInfo.processInfo.environment["BS_TABS_MODE"] == "sidebar" ? .sidebar : .vertical
+            try? await Task.sleep(for: .seconds(2)); if ProcessInfo.processInfo.environment["BS_TABS_OPEN"] != "0" { self?.openTabsView() } } }
+        #endif
+        #if DEBUG && os(macOS)
+        // Development only, for looking at the start page: a picture, its look and its darkening, given on the command line (run with a throwaway -UITestRoot).
+        let environment = ProcessInfo.processInfo.environment
+        if environment["BS_SKIP_SETUP"] == "1" {
+            saveSetting("setup_done", "1")
+            Task { @MainActor [weak self] in for _ in 0..<8 { self?.showSetup = false; try? await Task.sleep(for: .milliseconds(400)) } }
+        }
+        if let photo = environment["BS_START_PHOTO"] { setStartImage(from: URL(fileURLWithPath: photo)) }
+        if let look = environment["BS_START_LOOK"] { startLook = StartLook.decode(look) }
+        if let name = environment["BS_APPEARANCE"] { NSApp.appearance = NSAppearance(named: name == "light" ? .aqua : .darkAqua) }
+        if let id = environment["BS_START_PRESET"] {
+            startPreset = StartPreset.named(id).id
+            startBackground = .preset
+            startAnimatedGradient = environment["BS_START_DRIFT"] == "1"
+        }
+        // "path:dark,path:light,path" (tags optional): the pictures go into the collection in that order; BS_START_ROTATION picks off, everyTab, hourly or daily.
+        if let list = environment["BS_START_COLLECTION"] {
+            for part in list.split(separator: ",") {
+                let pieces = part.split(separator: ":", maxSplits: 1).map(String.init)
+                addWallpaper(from: URL(fileURLWithPath: pieces[0]), appearance: pieces.count > 1 ? (WallpaperAppearance(rawValue: pieces[1]) ?? .any) : .any)
+            }
+            if let rotation = environment["BS_START_ROTATION"].flatMap(WallpaperRotation.init(rawValue:)) { wallpaperLibrary.rotation = rotation }
+            wallpaperLibrary.shuffle = environment["BS_START_SHUFFLE"] == "1"
+        }
+        if let video = environment["BS_START_VIDEO"] { Task { @MainActor [weak self] in await self?.setStartVideo(from: URL(fileURLWithPath: video)) } }
+        // Development only, for checking lifecycles on the real app (read the result in the app's temporary folder, wallpaper-debug.log):
+        // hide = leave the start page at 8 s and come back at 16 s; tabs = open three more start pages; appearance = switch light and dark; resize = change the window's size.
+        // Development only, for looking at the first-run screens: light chosen, and the window's size (BS_WINDOW_SIZE=900x700).
+        if environment["BS_SETUP_LIGHT"] == "1" { appearance = .light }
+        if let name = environment["BS_LAYOUT"], let preset = LayoutPreset(rawValue: name) { layoutPreset = preset }          // to look at one layout's picture in the assistant
+        if let size = environment["BS_WINDOW_SIZE"]?.split(separator: "x").compactMap({ Double($0) }), size.count == 2 {
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(1500))
+                if let window = NSApp.windows.first(where: { $0.isVisible }) { window.setFrame(NSRect(x: window.frame.minX, y: window.frame.minY, width: size[0], height: size[1]), display: true, animate: false) }
+            }
+        }
+        if let scenario = environment["BS_SCENARIO"] {
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                WallpaperDebug.log("scenario \(scenario) begins")
+                switch scenario {
+                case "hide":
+                    try? await Task.sleep(for: .seconds(8)); WallpaperDebug.log("scenario: leaving the start page"); self.open(urlString: "http://127.0.0.1:9/")
+                    try? await Task.sleep(for: .seconds(8)); WallpaperDebug.log("scenario: new tab"); _ = self.newTab()
+                case "windows":
+                    for n in 1...2 { try? await Task.sleep(for: .seconds(4)); WallpaperDebug.log("scenario: new window \(n)"); self.windows.onNeedWindow?() }
+                    try? await Task.sleep(for: .seconds(4))
+                case "tabs":
+                    for n in 1...3 { try? await Task.sleep(for: .seconds(3)); WallpaperDebug.log("scenario: new tab \(n)"); _ = self.newTab() }
+                case "appearance":
+                    for name in ["light", "dark", "light", "dark"] { try? await Task.sleep(for: .seconds(3)); WallpaperDebug.log("scenario: \(name)"); NSApp.appearance = NSAppearance(named: name == "light" ? .aqua : .darkAqua) }
+                case "resize":
+                    for (w, h) in [(1200.0, 800.0), (1710.0, 1074.0), (900.0, 700.0), (1500.0, 950.0), (1710.0, 1074.0)] {
+                        try? await Task.sleep(for: .seconds(2)); WallpaperDebug.log("scenario: resize \(Int(w))x\(Int(h))")
+                        if let window = NSApp.windows.first(where: { $0.isVisible }) { window.setFrame(NSRect(x: window.frame.minX, y: window.frame.minY, width: w, height: h), display: true, animate: false) }
+                    }
+                default: break
+                }
+                WallpaperDebug.log("scenario \(scenario) ends")
+            }
+        }
+        if let raw = environment["BS_SHOW_ERROR"], let kind = BrowserErrorKind(rawValue: raw) {
+            Task { @MainActor [weak self] in try? await Task.sleep(for: .seconds(3)); self?.active?.debugShowError(kind) }
+        }
+        if environment["BS_OPEN_TOOLS"] == "1" {
+            Task { @MainActor [weak self] in try? await Task.sleep(for: .seconds(9)); self?.sheet = .pageTools }
+        }
+        // Development only: open Settings the way a search result does (BS_SETTINGS_FIND="memory saver"): the pane, scrolled to the section.
+        if let find = environment["BS_SETTINGS_FIND"], let entry = SettingsIndex.search(find).first {
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(3))
+                self?.settingsReveal = SettingsIndex.macSection(for: entry).map { SettingsReveal(section: $0) }
+                SettingsRouter.open(SettingsPanel(rawValue: entry.mac))
+            }
+        }
+        if let raw = environment["BS_SETTINGS"] {
+            Task { @MainActor in try? await Task.sleep(for: .seconds(3)); SettingsRouter.open(SettingsPanel(rawValue: raw)) }
+        }
+        if let page = environment["BS_OPEN"] {
+            Task { @MainActor [weak self] in try? await Task.sleep(for: .seconds(3)); self?.open(urlString: page) }
+        }
+        if environment["BS_START_DRAWER"] == "1" { Task { @MainActor [weak self] in try? await Task.sleep(for: .seconds(3)); self?.startDrawerOpen = true } }
+        if let dim = environment["BS_START_DIM"].flatMap(Double.init) { startImageDim = dim }
+        #endif
+        // Pieces left behind by a multi-part download that was cut off, a day or more ago, are cleared away.
+        Task { @MainActor [weak self] in try? await Task.sleep(for: .seconds(20)); self?.engine.downloads.removeStalePieceFolders() }
         await privacy.settle()            // an earlier scheduled change must not leave the state half-applied
         expirePermissions()
         expireTemporaryPermissions(atStart: true)
         IntentInbox.attach { [weak self] in self?.workbench.handle($0) }
+        downloads.profileName = profileName
         downloads.store = profileFolder.appendingPathComponent("downloads", isDirectory: true)
         pushWebPolicy()
+        await engine.policyRulesReady()      // the first page already meets the extra blocking rules (home network, Google, social)
         if persistsProfileChoice {
             let unfinished = LaunchGuard.begin(root: root)
             safeStart = LaunchGuard.isLoop(unfinishedLaunches: unfinished)
@@ -993,6 +2172,8 @@ final class BrowserModel: ObservableObject {
         openingFirstTab = true
         restoreOrOpenFirstTab()
         openingFirstTab = false
+        glance.closeLeftovers()          // a preview that was open when the app quit is not brought back
+        mergeGroupNamesFromTabs()        // groups saved before groups belonged to workspaces are placed, whichever way the browser started
         if !isSecondary, let id = workbench.startupWorkflow, let flow = workbench.workflows.first(where: { $0.id == id }) { workbench.run(flow, source: "at start") }
         if !isSecondary { windows.loadPendingRestores(from: self) }
         #if DEBUG
@@ -1031,10 +2212,55 @@ final class BrowserModel: ObservableObject {
             do { _ = try await extensionCenter.inspect(URL(fileURLWithPath: path)); try await extensionCenter.installPending() } catch { notice = "Debug install failed: \(error)" }
         }
         if let theme = UserDefaults.standard.string(forKey: "UITheme") { themeID = theme }
+        // Debug only: `-UIPhonePreset dock|bottomBar|topBar|reading` puts the iPhone into that layout at start, for looking at each one on a device.
+        if let name = UserDefaults.standard.string(forKey: "UIPhonePreset"), let preset = PhonePreset(stored: name) { phonePreset = preset }
+        if UserDefaults.standard.bool(forKey: "UIFolded") { foldChrome() }
+        // Debug only: `-UIDownloadsScratch YES` sends this run's downloads to a scratch folder, never the person's own Downloads folder (for looking at real websites).
+        if let name = UserDefaults.standard.string(forKey: "UIDownloadsScratch"), !name.isEmpty, !name.contains("/") {
+            let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("bs-ui-scratch-downloads", isDirectory: true).appendingPathComponent(name, isDirectory: true)
+            try? FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+            DownloadCoordinator.directoryOverride = scratch
+        }
         guard let state = UserDefaults.standard.string(forKey: "UIState") else { return }
         let base = "http://127.0.0.1:18765"
         switch state {
         case "none": break
+        // Debug only, for looking at the newer panels with a screenshot of the window: each opens one thing after the window is up.
+        case "guest-window":
+            try? await Task.sleep(for: .seconds(1.5)); openGuestWindow()
+        case let name where name.hasPrefix("sheet-"):
+            // "sheet-<name>" opens any sheet by its name (the ones that need data of their own, a screenshot or a PDF, are not reachable this way).
+            try? await Task.sleep(for: .seconds(1.5))
+            if let wanted = Sheet(rawValue: String(name.dropFirst("sheet-".count))) { sheet = wanted }
+        case "pagetools":
+            try? await Task.sleep(for: .seconds(1.5)); sheet = .pageTools
+        case "private-window":
+            try? await Task.sleep(for: .seconds(1.5)); openPrivateWindow()
+        case "private-choice":
+            try? await Task.sleep(for: .seconds(1.5)); privateOpenMode = .ask; newPrivate()
+        case "floating-player":
+            try? await Task.sleep(for: .seconds(1.5)); openFloatingPlayer()
+        case "private-window-busy":
+            // A private window that has a download "running" (a record, not a transfer), beside one of another private session and an ordinary one, to see the close question and what it cancels.
+            try? await Task.sleep(for: .seconds(1.5)); openPrivateWindow()
+            try? await Task.sleep(for: .seconds(2.5))
+            if let privateModel = windows.all.first(where: { $0.isPrivateWindow }) {
+                func running(_ name: String, session: UUID?, priv: Bool) {
+                    let id = downloads.ledger.create(protocolID: .webKit, source: URL(string: "https://example.test/\(name)"), filename: name, isPrivate: priv).id
+                    downloads.ledger.update(id) { $0.privateSession = session }
+                    for e in [DownloadEvent.queued, .started, .running] { _ = downloads.ledger.apply(e, to: id) }
+                }
+                running("mine.bin", session: privateModel.privateSessionID, priv: true)
+                running("other-private.bin", session: UUID(), priv: true)
+                running("ordinary.bin", session: nil, priv: false)
+                // What each one is doing, once a second, for the check to read afterwards.
+                let path = NSTemporaryDirectory() + "bs-close-check.txt"
+                while true {
+                    let lines = downloads.ledger.records.values.map { "\($0.file.filename)=\($0.state)" }.sorted().joined(separator: "\n")
+                    try? lines.write(toFile: path, atomically: true, encoding: .utf8)
+                    try? await Task.sleep(for: .seconds(1))
+                }
+            }
         case "minimal": layoutPreset = .minimal
         case "many-tabs":
             active?.load(URL(string: base + "/p/Documentation")!)
@@ -1079,6 +2305,24 @@ final class BrowserModel: ObservableObject {
             active?.load(URL(string: base + "/page")!)
             toggleFocusMode()
         case "palette": paletteVisible = true
+        case "downloads":
+            // Debug only, with a throwaway -UITestRoot: the Downloads window open, filled by real downloads from the local download fixture server (port 18766).
+            let fixture = "http://127.0.0.1:18766"
+            // Never into the person's own Downloads folder.
+            let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("bs-ui-downloads", isDirectory: true)
+            try? FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+            DownloadCoordinator.directoryOverride = scratch
+            for path in ["/file/2000000", "/file/350000", "/status/404"] { if let url = URL(string: fixture + path) { downloads.scheduleDownload(url: url, at: Date()) } }
+            for i in 0..<6 { if let url = URL(string: fixture + "/throttle/\(8 << 20)?bps=150000&n=\(i)") { downloads.scheduleDownload(url: url, at: Date()) } }
+            try? await Task.sleep(for: .seconds(4))
+            sheet = .downloads
+        case "provider-page":
+            // Debug only, with -ProviderFixture: the fixture's Vimeo-shaped page open in the first tab, and downloads going to a scratch folder (never the person's own Downloads folder).
+            let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("bs-ui-provider-downloads", isDirectory: true)
+            try? FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+            DownloadCoordinator.directoryOverride = scratch
+            try? await Task.sleep(for: .seconds(1.5))                        // the first tab's web view is up
+            if let base = ProviderFixtureMode.base, let url = URL(string: base.absoluteString + "/media/vimeo/page.html?v=123456") { active?.load(url) }
         case "workbench": sheet = .workbench
         case "extension-popup":
             if let first = extensionCenter.actions.first { try? await Task.sleep(for: .seconds(2)); extensionCenter.perform(actionFor: first.id) }
@@ -1118,7 +2362,42 @@ final class BrowserModel: ObservableObject {
     private func favoritesDemo() {}
     #endif
 
+    #if DEBUG && os(macOS)
+    /// Development only (BS_SEED_TABS=N, with BS_BENCH=1 to log): writes a session of N tabs into the profile before it is restored, so restoring many tabs can be measured.
+    private func benchSeedSession() {
+        guard let count = ProcessInfo.processInfo.environment["BS_SEED_TABS"].flatMap(Int.init), count > 0 else { return }
+        var first: UInt64?
+        for i in 0..<count {
+            let info = core.createTab(url: "http://127.0.0.1:18900/ok?i=\(i)", private: false)
+            if first == nil { first = info.id }
+        }
+        try? core.saveSession(activeTabId: first ?? 0)
+        WallpaperDebug.log("BENCH seeded \(count) tabs")
+    }
+    private func benchReport(_ label: String, since start: CFAbsoluteTime) {
+        guard ProcessInfo.processInfo.environment["BS_BENCH"] == "1" else { return }
+        let live = (engine as? WebKitEngine)?.liveTabCount ?? -1
+        WallpaperDebug.log(String(format: "BENCH %@ tabs=%d webviews=%d elapsed=%.0f ms footprint=%.1f MB", label, tabs.count, live, (CFAbsoluteTimeGetCurrent() - start) * 1000, Double(currentMemoryFootprint()) / 1_048_576))
+    }
+    #endif
+
     private func restoreOrOpenFirstTab() {
+        #if DEBUG && os(macOS)
+        benchSeedSession()
+        let benchStart = CFAbsoluteTimeGetCurrent()
+        benchReport("restore-begin", since: benchStart)
+        defer {
+            benchReport("restore-end", since: benchStart)
+            if ProcessInfo.processInfo.environment["BS_BENCH"] == "1" {
+                Task { @MainActor [weak self] in
+                    for seconds in [3.0, 8.0] {
+                        try? await Task.sleep(for: .seconds(seconds == 3 ? 3 : 5))
+                        self?.benchReport("after-\(Int(seconds))s loading=\(self?.active?.isLoading ?? false)", since: benchStart)
+                    }
+                }
+            }
+        }
+        #endif
         if startup == "homepage", let page = homepageURL {
             openTab(url: page, isPrivate: false)
             return
@@ -1132,8 +2411,11 @@ final class BrowserModel: ObservableObject {
             mergeGroupNamesFromTabs()
             let index = Int(session.activeIndex)
             let target = tabs[min(index, tabs.count - 1)]
-            activeGroup = target.group
-            activeWorkspace = target.workspace
+            // An Essential's page was in front: the workspace in front is the one the browser last used, not one the Essential belongs to.
+            if !isEssentialTab(target) {
+                activeGroup = target.group
+                activeWorkspace = target.workspace
+            }
             if safeStart {
                 // The last starts ended abruptly, so nothing is loaded until the user chooses a tab.
                 openTab(url: nil, isPrivate: false)
@@ -1150,6 +2432,7 @@ final class BrowserModel: ObservableObject {
         saveTask?.cancel()
         if windows.count > 1 || isSecondary { windows.saveWindowLayout(in: self) }
         try? core.saveSession(activeTabId: activeID ?? 0)
+        Task { await FaviconStore.shared.flush() }
     }
 
     func saveSoon() {
@@ -1177,19 +2460,21 @@ final class BrowserModel: ObservableObject {
         openTab(url: TabController.settingsURL, isPrivate: false)
     }
 
-    func openTab(url: URL?, isPrivate requestedPrivate: Bool, select makeActive: Bool = true, opener: TabController? = nil, container: String? = nil, scratch: Bool = false) -> TabController {
-        let isPrivate = requestedPrivate || isGuest
+    func openTab(url: URL?, isPrivate requestedPrivate: Bool, select makeActive: Bool = true, opener: TabController? = nil, container: String? = nil, scratch: Bool = false, essential: String? = nil) -> TabController {
+        FrameMonitor.mark("Opening new tab", for: 2)
+        let isPrivate = requestedPrivate || isGuest || isPrivateWindow
         let info = core.createTab(url: "about:blank", private: isPrivate)
         // Written down before the tab exists: its engine reads the container to choose where the page keeps its data.
         var meta = TabMeta()
-        if !isPrivate { meta.container = container; meta.scratch = scratch ? true : nil; meta.parent = opener?.id }
+        if !isPrivate { meta.container = container; meta.scratch = scratch ? true : nil; meta.parent = opener?.id; meta.essential = essential }
         if !meta.isEmpty { tabMeta[info.id] = meta; saveTabMeta() }
         let tab = TabController(info: info, model: self)
-        if !activeWorkspace.isEmpty {
+        // An Essential's page belongs to no workspace and no group: it is shown with the Essentials wherever the person is.
+        if !activeWorkspace.isEmpty, essential == nil {
             try? core.setTabWorkspace(tabId: tab.id, workspace: activeWorkspace)
             tab.workspace = activeWorkspace
         }
-        if !activeGroup.isEmpty, !isPrivate {
+        if !activeGroup.isEmpty, !isPrivate, essential == nil {
             try? core.setTabGroup(tabId: tab.id, group: activeGroup)
             tab.group = activeGroup
         }
@@ -1206,7 +2491,9 @@ final class BrowserModel: ObservableObject {
             #if os(macOS)
             startFocusTick += 1      // the blank tab shows its own search field; the toolbar's keeps its focus for ⌘L
             #else
-            focusAddressBar()
+            // The keyboard comes up only for a blank page, where typing is the next thing to do. The Home page, a custom page and a private tab show
+            // their own content, and a swipe past the last tab makes one of these: the keyboard covering it was not asked for.
+            if newTabMode == .blank, !isPrivate { focusAddressBar() }
             #endif
         }
         saveSoon()
@@ -1220,8 +2507,12 @@ final class BrowserModel: ObservableObject {
         let tab = openTab(url: nil, isPrivate: separatesPrivate ? privateMode : false)
         // Private tabs keep their own page whatever the choice. Otherwise: an address of your choice, or an empty page with the address bar ready.
         if !tab.isPrivate {
-            if newTabMode == .custom, let page = NewTabMode.customURL(from: newTabURL) { tab.load(page); focusAddressBar() }
-            else if newTabMode == .blank { focusAddressBar() }
+            let custom = newTabMode == .custom ? NewTabMode.customURL(from: newTabURL) : nil
+            if let custom { tab.load(custom) }
+            // The phone's keyboard is decided in openTab; the Mac focuses the toolbar's address field here.
+            #if os(macOS)
+            if custom != nil || newTabMode == .blank { focusAddressBar() }
+            #endif
         }
         return tab
     }
@@ -1230,7 +2521,33 @@ final class BrowserModel: ObservableObject {
         Perf.measure("Select tab") { selectTab(id: id) }
     }
 
+    /// Tabs by when they were last in front (Control-Tab walks back through them).
+    private var recency = TabRecency()
+    private var recencyWalkEnd: Task<Void, Never>?
+
+    /// The next more recently used tab (Control-Tab, `direction` 1: one further back; Control-Shift-Tab, -1: forward again). Only tabs this window shows are chosen, so a private
+    /// tab is never reached from a normal window or the other way round. Presses close together make one walk; the tab it stops on becomes the most recent.
+    func cycleRecentTab(_ direction: Int) {
+        guard let target = recency.step(direction, current: activeID, available: visibleTabs.map(\.id)) else { return }
+        recencyFrozen = true
+        select(target)
+        recencyFrozen = false
+        recencyWalkEnd?.cancel()
+        recencyWalkEnd = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(Int(TabRecency.walkWindow * 1000) + 100))
+            guard !Task.isCancelled, let self else { return }
+            self.recency.endWalk(on: self.activeID)
+        }
+    }
+    private var recencyFrozen = false
+
+    /// Hide the separate tab strip while there is only one tab and the person asked for that.
+    var stripHiddenForSingleTab: Bool { hideSingleTabStrip && effectiveTabLayout == .separate && !singleRow && visibleTabs.count <= 1 }
+
     private func selectTab(id: UInt64) {
+        FrameMonitor.mark("Switching tab")
+        // Choosing any other tab ends a Glance preview (one that is promoted selects its own tab after it has stopped being a preview).
+        if let preview = glance.session, preview.tabID != id { glance.dismiss(animated: false) }
         if let previous = active, previous.id != id {
             closeReturn[previous.id] = nil
             previous.lastActive = Date()
@@ -1242,12 +2559,18 @@ final class BrowserModel: ObservableObject {
         if previousTab?.id != id { Haptics.selection() }
         expandChrome()
         activeID = id
+        if !recencyFrozen { recency.noteSelected(id) }
         if let tab = active { activeFixedTop = tab.fixedTop; activeFixedBottom = tab.fixedBottom }
+        // A pinned tab set to start over when its workspace was left goes back to its pinned address now, before its page is brought back, so it loads once.
+        if pendingPinnedResets.remove(id) != nil, let tab = active { resetPinnedTab(tab, becauseOfWorkspaceSwitch: true) }
         active?.ensureLoaded()
         if let shown = active, shown.id != previousTab?.id, shown.hasLoadedPage, !shown.isDiscarded { shown.engine.restoreScrollState() }
         if let current = active, !current.isPrivate { extensionCenter.tabActivated(current, previous: previousTab.flatMap { $0.isPrivate ? nil : $0 }) }
-        if let tab = active, tab.workspace != activeWorkspace { activeWorkspace = tab.workspace }
-        if let tab = active, tab.group != activeGroup { activeGroup = tab.group }
+        // An Essential is shown in whichever workspace is in front; opening one never moves the person to another workspace.
+        if let tab = active, !isEssentialTab(tab) {
+            if tab.workspace != activeWorkspace { activeWorkspace = tab.workspace }
+            if tab.group != activeGroup { activeGroup = tab.group }
+        }
         if separatesPrivate, let tab = active { privateMode = tab.isPrivate }
         refreshBookmarkState()
         // A navigation/tab update must not replace the user's in-progress address edit.
@@ -1257,6 +2580,8 @@ final class BrowserModel: ObservableObject {
 
     /// Closes every tab in this view (this workspace and group), pinned ones too, and leaves one fresh tab.
     func closeAllTabs() {
+        bulkClosing = true
+        defer { bulkClosing = false }
         for id in visibleTabs.map(\.id) { closeTab(id: id) }
         if visibleTabs.isEmpty { newTab() }
     }
@@ -1282,6 +2607,10 @@ final class BrowserModel: ObservableObject {
         guard force || !lockedTabIDs.contains(id) else { notice = "That tab is locked. Unlock it to close it."; return }
         if !force, needsPinnedConfirmation(id) { confirmClosePinned(id); return }
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+        // A preview does not outlive the page it was opened from.
+        if glance.session?.sourceID == id { glance.dismiss(animated: false) }
+        // Closing an Essential's page lets go of it but keeps the Essential (a forced close, such as quitting or deleting its container, really closes it).
+        if !force, closeEssentialTabSoftly(tabs[index]) { return }
         let wasActive = id == activeID
         // Which tab comes forward is decided from the strip as it is now (what the person sees), before the tab leaves it.
         let comeForward = tabToShowAfterClosing(id)
@@ -1290,7 +2619,7 @@ final class BrowserModel: ObservableObject {
         let closing = tabs.remove(at: index)
         if !closing.isPrivate { extensionCenter.tabClosed(closing) }
         // Private and scratch tabs are never remembered; blank tabs have nothing to reopen.
-        if !closing.isPrivate, tabMeta[id]?.scratch != true, !closing.isBlank, let url = closing.url {
+        if !closing.isPrivate, tabMeta[id]?.scratch != true, tabMeta[id]?.essential == nil, closing.workspace != GlanceCoordinator.hiddenWorkspace, !closing.isBlank, let url = closing.url {
             closedTabs.append(ClosedTab(url: url, title: closing.title, group: closing.group, workspace: closing.workspace))
             if closedTabs.count > 20 { closedTabs.removeFirst() }
         }
@@ -1300,7 +2629,8 @@ final class BrowserModel: ObservableObject {
         closing.shutdown()
         try? core.closeTab(tabId: id)
         if !closing.isPrivate { siteTabClosed(host: closedHost) }
-        if !tabs.contains(where: \.isPrivate), !windows.anotherWindowHasPrivateTabs(besides: self) { engine.privateSessionEnded() }
+        // (A private window's storage is its own and goes with the window; it never ends, or keeps alive, the one ordinary windows' private tabs share.)
+        if !isPrivateWindow, !tabs.contains(where: \.isPrivate), !windows.anotherWindowHasPrivateTabs(besides: self) { engine.privateSessionEnded() }
         if wasActive || active == nil {
             if let target = comeForward, tabs.contains(where: { $0.id == target }) {
                 select(target)
@@ -1310,7 +2640,8 @@ final class BrowserModel: ObservableObject {
                 activeID = nil
                 onWindowShouldClose?()       // a window with no tab left closes; the first window always keeps one
             } else {
-                newTab()
+                newTab()    // the window keeps a blank tab, so opening the app again finds something to show
+                if closeWindowWithLastTab, !bulkClosing { closeFrontWindow() }
             }
         }
         saveSoon()
@@ -1330,8 +2661,35 @@ final class BrowserModel: ObservableObject {
     }
 
     func closeOtherTabs(except id: UInt64) {
-        if visibleTabs.count > 5 { takeCheckpoint(reason: "Before closing other tabs", force: true) }
-        for tab in visibleTabs where tab.id != id && !tab.pinned { closeTab(id: tab.id) }
+        closeInBulk(visibleTabs.filter { $0.id != id && !$0.pinned }, reason: "Before closing other tabs")
+    }
+
+    /// The one place that closes several tabs for the person: a restore point first when there are many, then each tab through the ordinary close (so locked
+    /// tabs, Essentials and the next-tab choice behave as they do for a single tab).
+    func closeInBulk(_ doomed: [TabController], reason: String) {
+        if doomed.count > 5 { takeCheckpoint(reason: reason, force: true) }
+        // Closing many at once is not "closing the last tab": the window stays, with a fresh tab if none is left.
+        bulkClosing = true
+        defer { bulkClosing = false }
+        for tab in doomed { closeTab(id: tab.id) }
+    }
+
+    /// True while several tabs are being closed together on the person's behalf.
+    private var bulkClosing: Bool {
+        get { bulkClosingDepth > 0 }
+        set { bulkClosingDepth = max(0, bulkClosingDepth + (newValue ? 1 : -1)) }
+    }
+
+    /// The tabs a "Close Tabs Above/Below" would close, as they are listed now. Pinned and locked tabs stay.
+    func tabsToClose(above id: UInt64, wantAbove: Bool) -> [TabController] {
+        let list = visibleTabs
+        guard let index = list.firstIndex(where: { $0.id == id }) else { return [] }
+        let side = wantAbove ? list[..<index] : list[(index + 1)...]
+        return side.filter { !$0.pinned && !lockedTabIDs.contains($0.id) }
+    }
+
+    func closeTabs(above id: UInt64, wantAbove: Bool) {
+        closeInBulk(tabsToClose(above: id, wantAbove: wantAbove), reason: "Before closing tabs")
     }
 
     func duplicateTab(_ tab: TabController) {
@@ -1341,7 +2699,12 @@ final class BrowserModel: ObservableObject {
 
     func selectAdjacent(_ offset: Int) {
         let list = visibleTabs
-        guard let current = list.firstIndex(where: { $0.id == activeID }), !list.isEmpty else { return }
+        guard !list.isEmpty else { return }
+        // An Essential's page is in no list: from it, next goes to the first tab and previous to the last, so the keys never get stuck there.
+        guard let current = list.firstIndex(where: { $0.id == activeID }) else {
+            select((offset >= 0 ? list[0] : list[list.count - 1]).id)
+            return
+        }
         select(list[(current + offset + list.count) % list.count].id)
     }
 
@@ -1349,7 +2712,11 @@ final class BrowserModel: ObservableObject {
     /// a new one, as in Safari; backward from the first does nothing.
     func swipeToTab(_ offset: Int) {
         let list = visibleTabs
-        guard let current = list.firstIndex(where: { $0.id == activeID }) else { return }
+        // From an Essential (in no list) a swipe forward goes to the first tab; backward has nowhere to go.
+        guard let current = list.firstIndex(where: { $0.id == activeID }) else {
+            if offset > 0, let first = list.first { tabSlide = offset; select(first.id); DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.tabSlide = 0 } }
+            return
+        }
         let target = current + offset
         if target >= list.count { tabSlide = 1; _ = newTab() }
         else if target >= 0 { tabSlide = offset; select(list[target].id) }
@@ -1369,6 +2736,7 @@ final class BrowserModel: ObservableObject {
         Haptics.tap()
         tab.pinned.toggle()
         try? core.setTabPinned(tabId: tab.id, pinned: tab.pinned)
+        if tab.pinned { registerPinnedAddress(for: tab) } else { forgetPinnedAddress(for: tab) }
         objectWillChange.send()
         saveSoon()
     }
@@ -1391,8 +2759,18 @@ final class BrowserModel: ObservableObject {
     func createWorkspace(_ name: String, icon: String = "person") {
         let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty, clean.count <= 30, !workspaces.contains(where: { $0.name == clean }) else { return }
-        workspaces.append(Workspace(name: clean, icon: icon, preset: nil))
+        workspaces.append(Workspace(name: clean, icon: icon, preset: nil, uid: UUID().uuidString))
         saveWorkspaces()
+    }
+
+    /// Gives every workspace that has none its hidden identity, and saves them. Runs once the browser has started (settings are not written while they load).
+    func ensureWorkspaceIDs() {
+        var changed = false
+        for index in workspaces.indices where workspaces[index].uid == nil {
+            workspaces[index].uid = UUID().uuidString
+            changed = true
+        }
+        if changed { saveWorkspaces() }
     }
 
     /// A workspace changed on another device: its name, icon, colour and preset are taken, and this device's own layout for it is kept.
@@ -1406,11 +2784,10 @@ final class BrowserModel: ObservableObject {
         guard !clean.isEmpty, clean.count <= 30, !workspaces.contains(where: { $0.name == clean }),
               let i = workspaces.firstIndex(where: { $0.name == old }) else { return }
         workspaces[i].name = clean
-        for tab in tabs where tab.workspace == old {
-            tab.workspace = clean
-            try? core.setTabWorkspace(tabId: tab.id, workspace: clean)
-        }
-        if activeWorkspace == old { activeWorkspace = clean }
+        // Everything that remembers the workspace by name follows it, in every window of the profile.
+        for window in windows.all { window.followWorkspaceRename(from: old, to: clean) }
+        if !windows.all.contains(where: { $0 === self }) { followWorkspaceRename(from: old, to: clean) }
+        saveGroupNames()
         saveWorkspaces()
         saveSoon()
     }
@@ -1443,8 +2820,11 @@ final class BrowserModel: ObservableObject {
             try? core.setTabWorkspace(tabId: tab.id, workspace: "")
         }
         workspaces.removeAll { $0.name == name }
+        groupLists[name] = nil
         if activeWorkspace == name { switchWorkspace("") }
+        mergeGroupNamesFromTabs()          // its tabs are in Personal now, and their groups are listed there
         saveWorkspaces()
+        saveGroupNames()
         saveSoon()
     }
 
@@ -1466,17 +2846,53 @@ final class BrowserModel: ObservableObject {
     }
 
     func workspaceTabCount(_ name: String) -> Int {
-        tabs.filter { $0.workspace == name && !$0.isPrivate }.count
+        listedTabs(inWorkspace: name, includePrivate: false).count
     }
 
     // MARK: Dark pages and low power
 
     func shouldDarken(host: String?) -> Bool {
+        guard let key = FaviconStore.key(forHost: host) else { return darkPages == .always }
+        if darkSitesOff.contains(key) { return false }
         switch darkPages {
-        case .off: false
-        case .always: true
-        case .chosen: FaviconStore.key(forHost: host).map { darkSites.contains($0) } ?? false
+        case .off: return false
+        case .always: return true
+        case .chosen: return darkSites.contains(key)
         }
+    }
+
+    /// What one site is told: follow the setting, be dark, or never be touched.
+    func darkChoice(forHost host: String?) -> DarkSiteChoice {
+        guard let key = FaviconStore.key(forHost: host) else { return .automatic }
+        if darkSitesOff.contains(key) { return .never }
+        if darkSites.contains(key) { return .dark }
+        return .automatic
+    }
+
+    func setDarkChoice(host: String?, _ choice: DarkSiteChoice) {
+        guard let key = FaviconStore.key(forHost: host) else { return }
+        policyPushSuspended = true
+        darkSites.remove(key)
+        darkSitesOff.remove(key)
+        switch choice {
+        case .dark: darkSites.insert(key); if darkPages == .off { darkPages = .chosen }
+        case .never: darkSitesOff.insert(key)
+        case .automatic: break
+        }
+        saveDarkSites()
+        policyPushSuspended = false
+        pushWebPolicy()
+        for tab in tabs where FaviconStore.key(forHost: tab.url?.host) == key { tab.applyDarkPages(live: true) }
+    }
+
+    /// The page-menu button: darkens this site if it is light now, or stops darkening it.
+    func toggleDark(host: String?) {
+        setDarkChoice(host: host, shouldDarken(host: host) ? .never : .dark)
+    }
+
+    private func saveDarkSites() {
+        saveSetting("dark_sites", encodedMap(Dictionary(uniqueKeysWithValues: darkSites.map { ($0, true) })))
+        saveSetting("dark_sites_off", encodedMap(Dictionary(uniqueKeysWithValues: darkSitesOff.map { ($0, true) })))
     }
 
     // MARK: Website appearance
@@ -1499,8 +2915,8 @@ final class BrowserModel: ObservableObject {
     /// Puts a site back to how it normally looks: no look of its own, and Darken off for it.
     func resetSiteAppearance(_ host: String?) {
         setSiteAppearance(host, nil)
-        if isDarkSite(host) { setDarkSite(host, false) }
-        for tab in tabs where FaviconStore.key(forHost: tab.url?.host) == FaviconStore.key(forHost: host) { tab.applyDarkPages(); tab.applyWebsiteAppearance() }
+        setDarkChoice(host: host, .automatic)
+        for tab in tabs where FaviconStore.key(forHost: tab.url?.host) == FaviconStore.key(forHost: host) { tab.applyDarkPages(live: true); tab.applyWebsiteAppearance() }
         notice = "This site’s appearance was reset."
     }
 
@@ -1508,11 +2924,7 @@ final class BrowserModel: ObservableObject {
 
     /// Turns dark pages on or off for one site. Choosing a site while the setting is Off switches it to "only sites I choose".
     func setDarkSite(_ host: String?, _ on: Bool) {
-        guard let key = FaviconStore.key(forHost: host) else { return }
-        if on && darkPages == .off { darkPages = .chosen }
-        if on { darkSites.insert(key) } else { darkSites.remove(key) }
-        let map = Dictionary(uniqueKeysWithValues: darkSites.map { ($0, true) })
-        saveSetting("dark_sites", encodedMap(map))
+        setDarkChoice(host: host, on ? .dark : .automatic)
     }
 
     /// The memory mode in force: Memory Saver while Low Power Mode is on, when the user allows it.
@@ -1547,6 +2959,11 @@ final class BrowserModel: ObservableObject {
 
     func workspaceAccentMutate(_ index: Int, _ value: String?) {
         workspaces[index].accent = value
+        saveWorkspaces()
+    }
+
+    func workspaceGradientMutate(_ index: Int, _ value: WorkspaceGradient?) {
+        workspaces[index].gradient = value
         saveWorkspaces()
     }
 
@@ -1691,6 +3108,7 @@ final class BrowserModel: ObservableObject {
     func createGroup(_ name: String, moving tab: TabController? = nil) {
         let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty, clean.count <= 40, !groupNames.contains(clean) else { return }
+        if let problem = GroupPath.problem(clean) { notice = problem; return }
         groupNames.append(clean)
         saveGroupNames()
         if let tab { moveTab(tab, to: clean) }
@@ -1702,8 +3120,11 @@ final class BrowserModel: ObservableObject {
               groupNames.contains(old) else { return }
         // A group's name is the front of every subgroup's name, so they follow it.
         func renamed(_ name: String) -> String { name == old ? clean : clean + name.dropFirst(old.count) }
+        // A group cannot be moved inside itself, and the move may not make it, or anything inside it, deeper than the limit.
+        if clean != old, GroupPath.isInside(clean, of: old) { notice = "A group cannot be moved inside itself."; return }
+        if let problem = groupNames.filter({ GroupPath.isInside($0, of: old) }).compactMap({ GroupPath.problem(renamed($0)) }).first { notice = problem; return }
         groupNames = groupNames.map { GroupPath.isInside($0, of: old) ? renamed($0) : $0 }
-        for tab in tabs where GroupPath.isInside(tab.group, of: old) {
+        for tab in tabs where tab.workspace == activeWorkspace && GroupPath.isInside(tab.group, of: old) {
             tab.group = renamed(tab.group)
             try? core.setTabGroup(tabId: tab.id, group: tab.group)
         }
@@ -1714,7 +3135,7 @@ final class BrowserModel: ObservableObject {
 
     /// Deleting a group keeps its tabs; they return to the ungrouped set.
     func deleteGroup(_ name: String) {
-        for tab in tabs where GroupPath.isInside(tab.group, of: name) {
+        for tab in tabs where tab.workspace == activeWorkspace && GroupPath.isInside(tab.group, of: name) {
             tab.group = ""
             try? core.setTabGroup(tabId: tab.id, group: "")
         }
@@ -1741,7 +3162,7 @@ final class BrowserModel: ObservableObject {
         try? core.setTabWorkspace(tabId: tab.id, workspace: name)
         try? core.setTabGroup(tabId: tab.id, group: "")
         if tab.id == activeID {
-            if let next = visibleTabs.first(where: { $0.id != tab.id }) ?? tabs.first(where: { $0.workspace == activeWorkspace && $0.id != tab.id }) {
+            if let next = visibleTabs.first(where: { $0.id != tab.id }) ?? listedTabs(inWorkspace: activeWorkspace).first(where: { $0.id != tab.id }) {
                 select(next.id)
             } else {
                 newTab()
@@ -1768,25 +3189,34 @@ final class BrowserModel: ObservableObject {
     }
 
     func tabCount(inGroup name: String) -> Int {
-        tabs.filter { $0.workspace == activeWorkspace && (name.isEmpty ? $0.group.isEmpty : GroupPath.isInside($0.group, of: name)) && (!separatesPrivate || !$0.isPrivate) }.count
+        listedTabs(inWorkspace: activeWorkspace).filter { (name.isEmpty ? $0.group.isEmpty : GroupPath.isInside($0.group, of: name)) && (!separatesPrivate || !$0.isPrivate) }.count
     }
 
-    private func mergeGroupNamesFromTabs() {
-        for name in Set(tabs.map(\.group)).subtracting([""]).sorted() where !groupNames.contains(name) {
-            groupNames.append(name)
+    /// Makes sure every group a tab is in is listed in that tab's workspace, and places groups saved before groups belonged to workspaces: a group goes to the
+    /// workspaces whose tabs use it, and one no tab uses goes to Personal.
+    func mergeGroupNamesFromTabs() {
+        var all = groupLists
+        for tab in tabs where !tab.group.isEmpty && !isHiddenTab(tab) {
+            var list = all[tab.workspace] ?? []
+            if !list.contains(tab.group) { list.append(tab.group); all[tab.workspace] = list }
         }
+        if !legacyGroupNames.isEmpty {
+            for name in legacyGroupNames where !all.values.contains(where: { $0.contains(name) }) {
+                all["", default: []].append(name)
+            }
+            legacyGroupNames = []
+        }
+        if all != groupLists { groupLists = all; saveGroupNames() }
     }
 
-    private func saveGroupNames() {
-        if let data = try? JSONSerialization.data(withJSONObject: groupNames),
-           let json = String(data: data, encoding: .utf8) {
-            saveSetting("tab_groups", json)
-        }
+    func saveGroupNames() {
+        saveSetting("tab_groups_v2", encodedMap(groupLists))
     }
 
     // MARK: Overview
 
     func showOverview() {
+        FrameMonitor.mark("Opening tab overview")
         Task {
             await active?.captureSnapshot()
             overviewVisible = true
@@ -1802,7 +3232,20 @@ final class BrowserModel: ObservableObject {
             (active ?? openTab(url: nil, isPrivate: false)).load(url)
             return
         }
-        guard let result = resolveInput(input: input, searchTemplate: searchTemplate) else { return }
+        // An ftp://, ftps://, sftp:// or dav(s):// address is not a web page: it opens the Remote Files browser instead of a navigation WebKit cannot do.
+        if RemoteScheme(urlScheme: URL(string: input.trimmingCharacters(in: .whitespacesAndNewlines))?.scheme) != nil, RemoteConnection.from(address: input) != nil {
+            openRemote(address: input.trimmingCharacters(in: .whitespacesAndNewlines), origin: .user, fromPrivate: active?.leavesNoTrace ?? false)
+            return
+        }
+        // A magnet link typed or pasted into the address bar goes where a clicked one goes: a preview that asks before anything is fetched.
+        let typedText = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        if typedText.lowercased().hasPrefix("magnet:?"), typedText.count <= 8192 {
+            // Not from a private tab: the download would be kept in the ordinary list (the same rule a clicked magnet link follows).
+            if active?.leavesNoTrace == true { linkNotice = "Peer-to-peer links cannot be opened from a private tab. Open the link in an ordinary tab to preview it."; return }
+            openLinkPreview(.preview(text: typedText)); return
+        }
+        if let typed = URL(string: input.trimmingCharacters(in: .whitespacesAndNewlines)), MetalinkLink.isMetalink(typed) { openMetalink(url: typed, origin: .user); return }
+        guard let result = resolveInput(input: input, searchTemplate: activeSearchTemplate) else { return }
         let target: String
         switch result {
         case .url(let u), .search(let u): target = u
@@ -1814,6 +3257,8 @@ final class BrowserModel: ObservableObject {
 
     func open(urlString: String, newTab: Bool = false) {
         guard let url = URL(string: urlString) else { return }
+        // (A suggestion for an ftp://, sftp:// or dav(s):// address goes to Remote Files like a typed one.)
+        if RemoteScheme(urlScheme: url.scheme) != nil, RemoteConnection.from(address: urlString) != nil { openRemote(address: urlString, origin: .user, fromPrivate: active?.leavesNoTrace ?? false); sheet = nil; return }
         if newTab || active == nil {
             openTab(url: url, isPrivate: active?.isPrivate ?? false)
         } else {
@@ -1829,6 +3274,14 @@ final class BrowserModel: ObservableObject {
             addressBar.refresh(model: self)
             return
         }
+        // What was typed is an ftp://, sftp:// or dav(s):// address: it opens Remote Files, whatever suggestion (a search, usually) happens to be selected beside it.
+        let typedText = addressBar.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if suggestion.kind != .command, suggestion.kind != .openTab, RemoteScheme(urlScheme: URL(string: typedText)?.scheme) != nil, RemoteConnection.from(address: typedText) != nil {
+            addressBar.isEditing = false; addressBar.clear()
+            openRemote(address: typedText, origin: .user, fromPrivate: active?.leavesNoTrace ?? false)
+            return
+        }
+        learnChoice(suggestion, typed: addressBar.text)
         addressBar.isEditing = false
         addressBar.clear()
         if suggestion.kind == .command {
@@ -1873,7 +3326,9 @@ final class BrowserModel: ObservableObject {
             recordPerf("startup-first-page", millis: Date().timeIntervalSince(launchedAt) * 1000)
         }
         // A scratch tab leaves no history and no saved address.
-        if tabMeta[tab.id]?.scratch != true { try? core.commitNavigation(tabId: tab.id, url: url.absoluteString, title: tab.title) }
+        // A page in a Glance preview is not a visit until it is promoted.
+        if tabMeta[tab.id]?.scratch != true, !glance.isGlance(tab) { try? core.commitNavigation(tabId: tab.id, url: url.absoluteString, title: tab.title) }
+        learnVisit(tab, url: url)
         if tab.id == activeID { refreshBookmarkState() }
         saveSoon()
         pageMemoryDidLoad(tab)
@@ -2097,6 +3552,9 @@ final class BrowserModel: ObservableObject {
         windows.settingChanged(key, in: self)
     }
 
+    /// One saved setting of this profile, read without writing anything.
+    func settingValue(_ key: String) -> String? { (try? core.getSetting(key: key)) ?? nil }
+
     /// Reads the profile's interface settings without writing them back.
     func loadUISettings() {
         applyingSettings = true
@@ -2104,6 +3562,23 @@ final class BrowserModel: ObservableObject {
         func get(_ key: String) -> String? { (try? core.getSetting(key: key)) ?? nil }
         appearance = AppearanceMode(rawValue: get("appearance") ?? "") ?? .system
         tabLayout = TabLayout(rawValue: get("tab_layout") ?? "") ?? .separate
+        if let data = get("phone_custom_layout")?.data(using: .utf8), let spec = try? JSONDecoder().decode(PhoneLayoutSpec.self, from: data) { phoneCustomSpec = spec }
+        phonePreset = PhonePreset(stored: get("phone_preset") ?? "") ?? .bottomBar
+        phoneTabsView = PhoneTabsView(rawValue: get("phone_tabs_view") ?? "") ?? .grid
+        backToTopPill = get("back_to_top_pill") != "0"
+        pageMenuExtras = get("page_menu_extras") != "0"
+        autoScrollSpeed = min(max(Double(get("auto_scroll_speed") ?? "") ?? 90, 20), 400)
+        resumeMedia = get("player_resume") == "1"
+        loadMediaEntries(get("media_resume"))
+        loadPlayerSiteSteps(get("player_site_steps"))
+        loadPlayerSiteSubtitles(get("player_site_subtitles"))
+        audioFocus = get("audio_focus") == "1"
+        mediaBackgroundMinutes = [0, 10, 30, 60].contains(Int(get("media_background_minutes") ?? "") ?? 0) ? Int(get("media_background_minutes") ?? "") ?? 0 : 0
+        playerSeekStep = [5.0, 10, 15, 30].contains(Double(get("player_seek_step") ?? "") ?? 0) ? Double(get("player_seek_step") ?? "10") ?? 10 : 10
+        #if DEBUG && os(iOS)
+        // Development only (not in a release build): open a chosen layout and a chosen page, so a screenshot shows exactly that.
+        if let forced = ProcessInfo.processInfo.environment["BS_PHONE_PRESET"], let preset = PhonePreset(rawValue: forced) { phonePreset = preset }
+        #endif
         layoutPreset = LayoutPreset(rawValue: get("layout_preset") ?? "") ?? .classic
         sidebarPosition = SidebarPosition(rawValue: get("sidebar_position") ?? "") ?? .left
         sidebarWidth = clampedSidebarWidth(Double(get("sidebar_width") ?? "") ?? 260)
@@ -2118,6 +3593,10 @@ final class BrowserModel: ObservableObject {
         doubleClickAction = DoubleClickAction(rawValue: get("double_click") ?? "") ?? .cycleLayout
         // Off until the person turns it on: what is typed is not sent to a search engine as it is typed unless they choose that.
         searchSuggestionsEnabled = get("search_suggestions") == "1"
+        searxngInstance = get("searxng_instance") ?? ""
+        linkAskBeforeReceiving = get("link_ask") != "0"
+        loadWebApps(get)
+        searxngSuggestions = get("searxng_suggest") == "1"
         showSpeedPill = get("speed_pill") == "1"
         if let host = get("proxy_host"), !host.isEmpty, let port = Int(get("proxy_port") ?? "") {
             proxy = ProxyConfig(kind: ProxyConfig.Kind(rawValue: get("proxy_kind") ?? "") ?? .http, host: host, port: port, username: get("proxy_user") ?? "")
@@ -2128,6 +3607,9 @@ final class BrowserModel: ObservableObject {
         shortcuts = ShortcutMap(json: get("shortcuts"))
         homepage = get("homepage") ?? ""
         userScripts = ((get("user_scripts")?.data(using: .utf8)).flatMap { try? JSONDecoder().decode([UserScript].self, from: $0) }) ?? []
+        userScriptValues = Self.decodeMap(get("user_script_values"), as: [String: String].self)
+        configureUserScriptStorage()
+        engine.setUserScriptStorage(userScriptStorage)
         engine.setUserScripts(effectiveUserScripts)
         lockSensitiveSettings = get("lock_sensitive") == "1"
         siteNotes = Self.decodeMap(get("site_notes"), as: String.self)
@@ -2136,11 +3618,21 @@ final class BrowserModel: ObservableObject {
         bookmarkTags = Self.decodeMap(get("bookmark_tags"), as: [String].self)
         readingList = ReadingStore.loadIndex(root: profileFolder)
         organizeDownloads = get("organize_downloads") == "1"
+        duplicatePolicy = DuplicatePolicy(rawValue: get("download_duplicate") ?? "") ?? .keepBoth
+        automationEnabled = get("download_automation") == "1"
+        interceptP2PLinks = get("link_p2p_intercept") != "0"
+        watchClipboardForLinks = get("link_clipboard_watch") == "1"
+        mediaPreferences = MediaPreferences(audioLanguage: get("media_pref_audio") ?? "", subtitleLanguage: get("media_pref_subs") ?? "")
+        downloadNotifications = DownloadNotificationPreferences.decode(get("download_notifications")) ?? DownloadNotificationPreferences()
+        startDownloadEvents()
+        _ = packages                  // so a package finishing is announced whether or not its sheet was ever opened
+        downloadNameTemplate = get("download_template") ?? "{name}"
         organizeByDomain = get("organize_downloads_domain") == "1"
         fasterDownloads = get("download_segments") != "0"
         motionStyle = MotionStyle(rawValue: get("motion_style") ?? "") ?? .standard
         iconWeight = IconWeight(rawValue: get("icon_weight") ?? "") ?? .regular
         trackTime = get("track_time") == "1"
+        siteTimeRetentionDays = get("site_time_days").flatMap { Int($0) }.flatMap { SiteTimeLog.retentionChoices.contains($0) ? $0 : nil } ?? 90
         breakMinutes = [0, 20, 30, 45, 60].contains(Int(get("break_minutes") ?? "") ?? -1) ? Int(get("break_minutes")!)! : 0
         keepClipboardHistory = get("clipboard_history") == "1"
         backdropIntensity = BackdropIntensity(rawValue: get("backdrop_intensity") ?? "") ?? .medium
@@ -2149,6 +3641,11 @@ final class BrowserModel: ObservableObject {
         updateDownloadFolder()
         notifyDownloads = get("download_notify") != "0"
         maxDownloads = DownloadQueueRules.maxConcurrentChoices.contains(Int(get("download_concurrent") ?? "") ?? 0) ? Int(get("download_concurrent") ?? "")! : DownloadQueueRules.defaultConcurrent
+        engine.downloads.profileName = profileName          // the proxy password is looked up under it
+        _ = accountStore          // this profile's accounts (and no other's) are the ones the downloader consults
+        downloadNetwork = DownloadNetworkSettings.decode(get("download_network"))
+        torrentSettings = TorrentSettings.decode(get("download_torrent"))
+        ed2kSettings = ED2KSettings.decode(get("download_ed2k"))
         tabSchedules = ((get("tab_schedules")?.data(using: .utf8)).flatMap { try? JSONDecoder().decode([TabSchedule].self, from: $0) }) ?? []
         protectPinned = get("protect_pinned") != "0"
         keepMediaHistory = get("media_history_on") != "0"
@@ -2172,6 +3669,16 @@ final class BrowserModel: ObservableObject {
         remoteTabs = Self.decodeMap(get("sync_remote_tabs"), as: [RemoteTabs].self)["list"] ?? []
         tabMeta = Dictionary(uniqueKeysWithValues: Self.decodeMap(get("tab_meta"), as: TabMeta.self).compactMap { key, value in UInt64(key).map { ($0, value) } })
         containers = Self.decodeMap(get("containers"), as: [String].self)["list"] ?? []
+        loadPinnedAddresses(get("pinned_addresses"))
+        glanceEnabled = get("glance_enabled") != "0"
+        glanceTrigger = GlanceTrigger(rawValue: get("glance_trigger") ?? "") ?? .option
+        glanceTemporarySession = get("glance_temporary") == "1"
+        learnSuggestions = get("learn_suggestions") != "0"
+        suggestionExcludedHosts = Self.decodeMap(get("suggestion_excluded"), as: [String].self)["list"] ?? []
+        spaceRequestsOpenNewWindow = get("space_request_new_window") == "1"
+        clearIncludesSleeping = get("clear_includes_sleeping") != "0"
+        clearTabsAsks = get("clear_tabs_asks") != "0"
+        reloadEssentials()
         splitTemplates = Self.decodeMap(get("split_templates"), as: [SplitTemplate].self)["list"] ?? []
         lastSplit = Self.decodeMap(get("last_split"), as: [SplitTemplate].self)["list"]?.first
         tabTree = get("tab_tree") == "1"
@@ -2181,6 +3688,7 @@ final class BrowserModel: ObservableObject {
         mouseGestureMap = MouseGesture.decode(get("mouse_gesture_map"))
         syncPasswords = get("sync_passwords") == "1"
         syncLedger = Self.decodeMap(get("sync_ledger"), as: SyncState.self)["state"] ?? SyncState()
+        if !syncLedger.logins.isEmpty { syncLedger = SyncLedgerGuard.rehydrated(syncLedger, current: Dictionary(WebLoginVault.list(profile: profileName).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }), profile: profileName) }
         syncClock = Self.decodeMap(get("sync_clock"), as: SyncClock.self)["clock"] ?? SyncClock()
         syncSeq = Int(get("sync_seq") ?? "") ?? 0
         syncSeen = Self.decodeMap(get("sync_seen"), as: Int.self)
@@ -2216,6 +3724,7 @@ final class BrowserModel: ObservableObject {
         applyTheme()
         siteAppearance = Self.decodeMap(get("site_appearance"), as: String.self)
         darkSites = Set(Self.decodeMap(get("dark_sites"), as: Bool.self).filter(\.value).keys)
+        darkSitesOff = Set(Self.decodeMap(get("dark_sites_off"), as: Bool.self).filter(\.value).keys)
         lowPowerSavesMemory = get("low_power_memory") != "0"
         clearOnQuit = ClearOnQuit(rawValue: get("clear_on_quit") ?? "") ?? .never
         // Off unless you turn it on: the page scrolling by itself a moment after it opens surprised people.
@@ -2243,15 +3752,28 @@ final class BrowserModel: ObservableObject {
                                           idleMinutes: CustomMemoryPolicy.idleChoices.contains(Int(get("custom_idle") ?? "") ?? 0) ? Int(get("custom_idle")!)! : 15)
         batteryAware = get("battery_aware") != "0"
         referrerMode = ReferrerMode(rawValue: get("referrer_mode") ?? "") ?? .standard
+        privateSearchID = get("private_search") ?? ""
+        doubleClickClosesTab = get("double_click_closes_tab") == "1"
+        hideTabCloseButtons = get("hide_tab_close") == "1"
+        closeWindowWithLastTab = get("close_window_last_tab") == "1"
+        globalPrivacyControl = get("gpc") != "0"
+        blockLinkPings = get("block_link_pings") != "0"
+        lockdownHosts = Set(Self.decodeMap(get("lockdown_hosts"), as: [String].self)["list"] ?? [])
+        debounceLinks = get("debounce_links") != "0"
+        redirectSkipOff = Set(Self.decodeMap(get("redirect_skip_off"), as: [String].self)["list"] ?? [])
+        blockLocalNetwork = get("block_local_network") == "1"
+        localNetworkAllowed = Set(Self.decodeMap(get("local_network_allowed"), as: [String].self)["list"] ?? [])
+        blockGoogleServices = get("block_google_services") == "1"
+        blockSocialWidgets = get("block_social_widgets") == "1"
         devCapture = get("dev_capture") == "1"
         perfLog = ((get("perf_log")?.data(using: .utf8)).flatMap { try? JSONDecoder().decode([PerfRecord].self, from: $0) }) ?? []
         keepPinnedTabs = get("keep_pinned") != "0"
         threatList = ThreatListStore.load(root: root)
-        sidebarVisible = !sidebarAutoHide && resolveLayout(preset: layoutPreset, customTabLayout: tabLayout, customSidebarVisible: false, customSingleToolbar: singleToolbarCustom).sidebarVisible
+        sidebarVisible = !sidebarAutoHide && resolveLayout(preset: layoutPreset, customTabLayout: tabLayout, customSidebarVisible: get("custom_sidebar") == "1", customSingleToolbar: singleToolbarCustom).sidebarVisible
         // An explicit pin choice wins over what the layout would do, and over auto-hide.
         switch get("sidebar_pinned") {
-        case "1": sidebarPinChoice = true; sidebarAutoHide = false; sidebarVisible = true
-        case "0": sidebarPinChoice = false; sidebarAutoHide = true; sidebarVisible = false
+        case "1": sidebarPinChoice = true; if layoutPreset == .sidebar { sidebarAutoHide = false; sidebarVisible = true }
+        case "0": sidebarPinChoice = false; if layoutPreset == .sidebar { sidebarAutoHide = true; sidebarVisible = false }
         default: sidebarPinChoice = nil
         }
         addressBarPosition = AddressBarPosition(rawValue: get("address_bar") ?? "") ?? Self.defaultAddressBarPosition
@@ -2264,25 +3786,39 @@ final class BrowserModel: ObservableObject {
             var chosen = raw.split(separator: ",").compactMap { ToolbarItemID(rawValue: String($0)) }
             // The workspace and split-view buttons came later; a toolbar chosen before them gets them once, and can switch them off.
             #if os(macOS)
-            if get("toolbar_items_version") == nil {
+            let toolbarVersion = get("toolbar_items_version")
+            if toolbarVersion == nil {
                 for item in [ToolbarItemID.workspaces, .splitView] where !chosen.contains(item) { chosen.append(item) }
-                try? core.setSetting(key: "toolbar_items_version", value: "2")
+            }
+            // The media indicator came with DX-09: a toolbar chosen before it gets it once, and can switch it off.
+            if toolbarVersion == nil || toolbarVersion == "2" {
+                if !chosen.contains(.media) { chosen.append(.media) }
+                try? core.setSetting(key: "toolbar_items_version", value: "3")
             }
             #endif
             toolbarItems = ToolbarItemID.allCases.filter { chosen.contains($0) }
         } else {
             toolbarItems = ToolbarItemID.defaults
         }
-        if let json = get("tab_groups"), let data = json.data(using: .utf8),
-           let names = try? JSONSerialization.jsonObject(with: data) as? [String] {
-            groupNames = names
+        // Groups belong to workspaces. Settings from before that hold one list for everything: it is kept aside and placed once the tabs are known.
+        if get("tab_groups_v2") != nil {
+            groupLists = Self.decodeMap(get("tab_groups_v2"), as: [String].self)
+            legacyGroupNames = []
+        } else if let json = get("tab_groups"), let data = json.data(using: .utf8),
+                  let names = try? JSONSerialization.jsonObject(with: data) as? [String] {
+            groupLists = [:]
+            legacyGroupNames = names
         } else {
-            groupNames = []
+            groupLists = [:]
+            legacyGroupNames = []
         }
         accent = AccentChoice(rawValue: get("accent") ?? "") ?? .teal
         Theme.accent = accent.color
         startBackground = StartBackground(rawValue: get("start_background") ?? "") ?? .gradient
         newTabMode = NewTabMode(rawValue: get("new_tab_mode") ?? "") ?? .home
+        privateOpenMode = PrivateOpenMode(rawValue: get("private_open_mode") ?? "") ?? .window
+        autoShowPlayer = get("player_auto_show") != "0"
+        floatingPlayerLayout = FloatingPlayerLayout(stored: get("player_position"))
         loadStartImage()
         startTitle = String((get("start_title") ?? "").prefix(40))
         startFont = StartFont(rawValue: get("start_font") ?? "") ?? .rounded
@@ -2294,6 +3830,13 @@ final class BrowserModel: ObservableObject {
         newTabURL = get("new_tab_url") ?? ""
         startColorA = StartColor.components(get("start_color_a") ?? "") != nil ? get("start_color_a")! : StartColor.defaultA
         startColorB = StartColor.components(get("start_color_b") ?? "") != nil ? get("start_color_b")! : StartColor.defaultB
+        startLook = StartLook.decode(get("start_look"))
+        let savedLibrary = WallpaperLibraryState.decode(get("wallpaper_library"))
+        wallpaperLibraryWasRead = savedLibrary != nil
+        wallpaperLibrary = savedLibrary ?? WallpaperLibraryState()
+        startPreset = StartPreset.all.contains { $0.id == get("start_preset") } ? (get("start_preset") ?? StartPreset.defaultID) : StartPreset.defaultID
+        startAnimatedGradient = get("start_animated_gradient") == "1"
+        startVideoOn = get("start_video_on") == "1"
         showGreeting = get("show_greeting") != "0"
         showRecentlyClosed = get("show_recently_closed") != "0"
         tabPreviews = get("tab_previews") != "0"
@@ -2314,6 +3857,24 @@ final class BrowserModel: ObservableObject {
         focusMode = false
     }
 
+    /// The one way to show or hide the sidebar by hand (the toolbar button, ⇧⌘L, the menus). In the Sidebar layout this is the pin choice, so it is remembered
+    /// and the pin button agrees with it; in the other layouts it only opens or closes the sidebar for now.
+    func toggleSidebar() { setSidebarShown(!sidebarVisible) }
+
+    func setSidebarShown(_ shown: Bool) {
+        if layoutPreset == .sidebar {
+            if shown { sidebarRail = false; pinSidebar() } else { hideSidebarToEdge() }
+        } else {
+            sidebarVisible = shown
+        }
+    }
+
+    /// Forgets the pin choice (a layout reset).
+    func clearSidebarPin() {
+        sidebarPinChoice = nil
+        saveSetting("sidebar_pinned", "")
+    }
+
     /// Unpins the sidebar. It stays reachable by touching the window edge.
     func pinSidebar() {
         sidebarPinChoice = true
@@ -2331,13 +3892,24 @@ final class BrowserModel: ObservableObject {
 
     /// The pin button: pinned means open and docked; otherwise the sidebar comes out at the window edge.
     func toggleSidebarPin() {
-        if sidebarVisible && !sidebarAutoHide { hideSidebarToEdge() } else { sidebarRail = false; pinSidebar() }
+        // Judged by what the button shows (pinned = open and docked), so a sidebar opened some other way can still be unpinned.
+        if sidebarIsPinned { hideSidebarToEdge() } else { sidebarRail = false; pinSidebar() }
     }
 
     var sidebarIsPinned: Bool { sidebarVisible && !sidebarRail }
 
     func shows(_ item: ToolbarItemID) -> Bool { toolbarItems.contains(item) }
     /// How many of the added toolbar buttons are switched on, so the bar can leave room for them.
+    /// What the top bar shows, for working out how much room its buttons take.
+    var toolbarVisibility: ToolbarVisibility {
+        #if os(macOS)
+        let extensionButtons = min(4, extensionCenter.pinnedActions.count) + 1
+        #else
+        let extensionButtons = 0
+        #endif
+        return ToolbarVisibility(sidebar: shows(.sidebar), backForward: shows(.backForward), share: shows(.share), newTab: shows(.newTab), overview: shows(.tabOverview),
+                                 bookmark: shows(.bookmark), downloads: shows(.downloads), extensionButtons: extensionButtons)
+    }
     var toolbarExtrasCount: Int { [ToolbarItemID.workspaces, .profile, .splitView, .history, .library, .find, .palette].filter(shows).count }
 
     /// Saves a search address if it is valid (https, with `{}` exactly once). Returns whether it was saved.
@@ -2390,6 +3962,8 @@ final class BrowserModel: ObservableObject {
     }
 
     func switchProfile(_ name: String, thenOpen url: URL? = nil) {
+        providerFlow.invalidateAll()                      // lookups, resolved links and watchers belong to the profile being left
+        ExtractorBroker.shared.forget()                   // an extractor's remembered answers belong to the profile being left
         guard name != profileName, let newCore = try? BrowserCore.open(root: root, profile: name) else { return }
         let leaving = profileName
         pendingProfileURL = url
@@ -2400,6 +3974,8 @@ final class BrowserModel: ObservableObject {
         engine.privateSessionEnded()
         core = newCore
         profileName = name
+        FaviconStore.shared.activate(directory: Self.faviconDirectory(root: root, profile: name), importLegacy: false)
+        loadCheckpoints()   // the saved sessions belong to the profile just left; read the new profile's own, never carry the old ones over
         // A throw-away profile is never the one the app starts with next time.
         if persistsProfileChoice, !isTemporaryProfile(name) { UserDefaults.standard.set(name, forKey: "profile") }
         loadUISettings()
@@ -2415,8 +3991,16 @@ final class BrowserModel: ObservableObject {
 
     func removeProfile(_ name: String) async {
         guard name != profileName, name != "default" else { return }
+        SuggestionLearning.forget(folder: URL(fileURLWithPath: root).appendingPathComponent("profiles/\(name)", isDirectory: true))
         try? deleteProfile(root: root, name: name)
         SignInVault.removeAll(profile: name)
+        for p in [MediaProviderID.vimeo, .tiktok] { ProviderCredentials.revoke(p, profile: name) }          // provider authorizations go with the profile
+        UserDefaults.standard.removeObject(forKey: "bs.tiktok.export." + name)
+        providerFlow.invalidateAll()
+        AccountStore.wipe(profile: name, folder: URL(fileURLWithPath: root).appendingPathComponent("accounts", isDirectory: true).appendingPathComponent(name, isDirectory: true), secrets: KeychainAccountSecretStore(profile: name))
+        AutomationController.wipe(profile: name, root: URL(fileURLWithPath: root))
+        WebLoginVault.removeAll(profile: name)
+        SignatureStore.removeAll(profile: name)
         await engine.removeProfileData(profile: name)
         profiles = listProfiles(root: root)
     }
@@ -2431,7 +4015,7 @@ final class BrowserModel: ObservableObject {
     /// Saves the page and its images and styles as one file in Downloads, to open later without a connection.
     func savePageForLater() async {
         guard let tab = active, !tab.isBlank else { return }
-        guard !tab.isPrivate else { notice = "Pages from private tabs are not saved to disk."; return }
+        guard tab.privacy.canWriteFilesWithoutAsking else { notice = "Pages from tabs that leave no trace are not saved to disk."; return }
         guard let data = await tab.engine.webArchive(), !data.isEmpty else { notice = "This page could not be saved."; return }
         let folder = DownloadCoordinator.directory.appendingPathComponent("Saved Pages", isDirectory: true)
         let cleaned = tab.displayTitle.replacingOccurrences(of: "[/\\:\\n\\r]+", with: "-", options: .regularExpression)
@@ -2449,13 +4033,15 @@ final class BrowserModel: ObservableObject {
 
     /// Settings a backup carries. Anything else in a backup file is ignored on restore.
     static let backupSettingKeys: Set<String> = [
+        // Scripts come back switched off and with nothing allowed (see restore). The consent for SponsorBlock and its server, and a search server's suggestions, are never carried in a file.
+        "user_scripts", "web_apps", "download_duplicate", "download_template", "searxng_instance", "cookie_banners_hide", "debounce_links", "redirect_skip_off", "consent_off", "sponsor_actions", "sponsor_off",
         "accent", "accent_chosen", "lookalike_guard", "focus_rules", "address_bar", "address_bar_items", "appearance", "density", "keep_pinned", "layout_preset", "memory_mode", "show_favorites", "show_continue",
         "show_frequent", "show_greeting", "show_recently_closed", "sidebar_autohide", "sidebar_position", "sidebar_rail",
-        "organize_downloads_domain", "download_notify", "last_split", "track_time", "break_minutes", "clipboard_history", "feeds", "backdrop_intensity", "icon_weight", "site_icon_shape", "site_looks", "motion_style", "download_segments", "start_title", "start_font", "start_search_style", "start_width", "start_image_dim", "start_image_blur", "history_retention_days", "new_tab_mode", "new_tab_url", "start_color_a", "start_color_b", "reader_style", "media_history_on", "referrer_mode", "custom_keep", "custom_idle", "battery_aware", "security_events", "tab_schedules", "protect_pinned", "sidebar_width", "single_toolbar", "split_orientation", "start_background", "startup", "startup_workspace",
+        "organize_downloads_domain", "download_notify", "last_split", "track_time", "break_minutes", "clipboard_history", "feeds", "backdrop_intensity", "icon_weight", "site_icon_shape", "site_looks", "motion_style", "download_segments", "start_title", "start_font", "start_search_style", "start_width", "start_image_dim", "start_image_blur", "history_retention_days", "new_tab_mode", "new_tab_url", "start_color_a", "start_color_b", "reader_style", "media_history_on", "referrer_mode", "gpc", "block_link_pings", "lockdown_hosts", "tab_groups_v2", "essentials", "pinned_addresses", "glance_enabled", "glance_trigger", "glance_temporary", "learn_suggestions", "suggestion_excluded", "space_request_new_window", "clear_includes_sleeping", "clear_tabs_asks", "debounce_links", "block_local_network", "local_network_allowed", "block_google_services", "block_social_widgets", "private_search", "double_click_closes_tab", "hide_tab_close", "close_window_last_tab", "custom_keep", "custom_idle", "battery_aware", "security_events", "tab_schedules", "protect_pinned", "sidebar_width", "single_toolbar", "split_orientation", "start_background", "startup", "startup_workspace",
         "strip_tracking", "tab_groups", "tab_layout", "tab_previews", "tint_toolbar", "toolbar_autohide", "toolbar_items",
         "workspaces", "double_click", "collapse_on_scroll", "search_template", "search_suggestions", "speed_pill", "pill_collapsed", "site_icons", "shortcuts", "homepage", "saved_sessions", "organize_downloads", "site_notes", "search_shortcuts", "bookmark_tags", "site_styles", "phone_toolbar", "address_display", "address_icon", "search_panel_bottom", "search_panel_bottom2", "swipe_address", "app_links", "app_link_sites", "blur_private_switcher", "permission_expiry", "favorites_order", "overview_style", "overview_grouped", "overview_sort", "dark_pages", "dark_sites", "website_appearance", "site_appearance", "theme", "theme_custom", "low_power_memory", "clear_on_quit", "remember_reading", "keep_form_drafts", "site_zoom", "group_colors",
         "save_logins", "mouse_gestures", "mouse_gesture_map", "site_open_rules", "download_concurrent", "spotlight_bookmarks", "vim_on", "vim_keymap", "workflows", "download_rules", "extension_profiles", "site_delete_rules", "site_user_agents", "containers", "split_templates", "tab_tree", "block_webrtc", "webrtc_exceptions",
-        "site_js_off", "never_sleep_sites", "fingerprint_noise", "fingerprint_exceptions", "de_amp", "video_ads", "cookie_banners", "user_themes", "start_tile", "block_autoplay", "autoplay_exceptions",
+        "site_js_off", "never_sleep_sites", "dark_sites_off", "custom_sidebar", "phone_preset", "phone_custom_layout", "fingerprint_noise", "fingerprint_exceptions", "de_amp", "video_ads", "cookie_banners", "user_themes", "start_tile", "block_autoplay", "autoplay_exceptions",
         "block_popups", "popup_allowed_hosts", "youtube_rules_auto", "command_chains", "web_panels", "theme_schedule", "hidden_menu_items", "hover_previews", "hover_delay", "tab_stacks", "address_sources", "sidebar_footer",
     ]
 
@@ -2501,6 +4087,9 @@ final class BrowserModel: ObservableObject {
         }
         var applied = 0
         for (key, value) in payload.settings where Self.backupSettingKeys.contains(key) {
+            var value = value
+            // A script from a file starts switched off and with nothing allowed: the person looks at it and turns it on, as for any script they install.
+            if key == "user_scripts" { value = Self.quarantined(userScripts: value) }
             if (try? core.setSetting(key: key, value: value)) != nil { applied += 1 }
         }
         if let collections = payload.research { research.merge(collections) }
@@ -2510,7 +4099,31 @@ final class BrowserModel: ObservableObject {
         return (added, applied)
     }
 
+    /// The scripts of a backup, off, with no permissions, and no more than the limit. Anything that cannot be read is dropped.
+    static func quarantined(userScripts json: String) -> String {
+        guard let data = json.data(using: .utf8), let list = try? JSONDecoder().decode([UserScript].self, from: data) else { return "[]" }
+        let safe = list.prefix(UserScript.maxScripts).map { script -> UserScript in
+            var s = script
+            s.enabled = false; s.granted = []
+            if s.autoDisabledReason.isEmpty { s.autoDisabledReason = "Restored from a backup, so it is off until you look at it and turn it on." }
+            return s
+        }
+        return (try? String(data: JSONEncoder().encode(Array(safe)), encoding: .utf8)) ?? "[]"
+    }
+
     // MARK: Link cleaning, threat list, website data
+
+    /// Where a tracker's redirect page would send the visitor, or nil. Goes with the link-cleaning loop guard, so a page that sends the visit back through
+    /// a redirect can never loop.
+    func debouncedLink(_ url: URL) -> URL? {
+        guard debounceLinks else { return nil }
+        let now = Date()
+        recentStrips.removeAll { now.timeIntervalSince($0) > 5 }
+        guard recentStrips.count < 3, let direct = LinkDebouncer.destination(for: url) else { return nil }
+        recentStrips.append(now)
+        strippedLinkCount += 1
+        return direct
+    }
 
     /// The link without tracking parameters, or nil. Stops cleaning if a site keeps adding them back, so a
     /// redirect that re-adds a parameter can never loop.
@@ -2538,6 +4151,9 @@ final class BrowserModel: ObservableObject {
             if choice == 1 {
                 sessionAllowedHosts.insert(host)
                 tab.load(url)
+            } else {
+                // Not opened: the tab says so on its own page (what blocked it, and where to go), instead of silently staying where it was.
+                tab.showProtectionBlock(for: url, reason: .threatList)
             }
         }
     }
@@ -2562,7 +4178,15 @@ final class BrowserModel: ObservableObject {
     }
 
     func siteData() async -> [SiteDataInfo] { await engine.siteData(profile: profileName) }
-    func removeSiteData(host: String) async { await engine.removeSiteData(host: host, profile: profileName) }
+    func removeSiteData(host: String) async {
+        FaviconStore.shared.remove(host: host)
+        await engine.removeSiteData(host: host, profile: profileName)
+    }
+
+    /// Where a profile's site icons live: inside the profile's own folder, so deleting the profile deletes them and no other profile can read them.
+    static func faviconDirectory(root: String, profile: String) -> URL {
+        URL(fileURLWithPath: root).appendingPathComponent("profiles/\(profile)/favicons", isDirectory: true)
+    }
 
     func clearBrowsingData() async {
         guard recovery == nil else { return }
@@ -2570,6 +4194,13 @@ final class BrowserModel: ObservableObject {
         eraseSearchableCopy()
         try? core.clearDownloads()
         FaviconStore.shared.clear()
+        // What was learned or noted from browsing goes too: it names the same sites. (Clear Everything Now calls this, so it leaves no copy behind.)
+        resetLearnedSuggestions()
+        clearPageMemory()
+        clearMediaHistory()
+        clearPermissionLog()
+        clearSecurityEvents()
+        resetBlockedStats()
         await engine.clearData(profile: profileName)
         notice = "Browsing data cleared."
     }
@@ -2584,6 +4215,8 @@ struct PaletteItem: Identifiable {
     let subtitle: String
     let symbol: String
     let shortcut: String
+    /// False for a label that only says where a command lives (a menu's name): it is shown, but a search does not match on it, so "tool" does not list every command of the Tools menu.
+    var matchesSubtitle = true
     let run: @MainActor () -> Void
 }
 
@@ -2592,9 +4225,10 @@ extension BrowserModel {
     func allPaletteItems(query: String = "", full: Bool = false) -> [PaletteItem] {
         var all: [PaletteItem] = [
             .init(id: "new-tab", title: "New Tab", subtitle: "", symbol: "plus", shortcut: "⌘T") { [self] in newTab() },
-            .init(id: "new-private", title: "New Private Tab", subtitle: "", symbol: "eye.slash", shortcut: "⇧⌘N") { [self] in openTab(url: nil, isPrivate: true) },
+            .init(id: "new-private-window", title: "New Private Window", subtitle: "", symbol: "eye.slash.fill", shortcut: shortcuts.combo(for: privateOpenMode == .window ? .newPrivate : .newPrivateWindow)?.display ?? "") { [self] in openPrivateWindow() },
+            .init(id: "new-private", title: "New Private Tab", subtitle: "", symbol: "eye.slash", shortcut: shortcuts.combo(for: privateOpenMode == .tab ? .newPrivate : .newPrivateTab)?.display ?? "") { [self] in openTab(url: nil, isPrivate: true) },
             .init(id: "reopen", title: "Reopen Closed Tab", subtitle: closedTabs.last?.title ?? "", symbol: "arrow.uturn.backward", shortcut: "⇧⌘T") { [self] in reopenClosedTab() },
-            .init(id: "sidebar", title: "Toggle Sidebar", subtitle: "", symbol: "sidebar.left", shortcut: "⇧⌘L") { [self] in sidebarVisible.toggle() },
+            .init(id: "sidebar", title: "Toggle Sidebar", subtitle: "", symbol: "sidebar.left", shortcut: "⇧⌘L") { [self] in toggleSidebar() },
             .init(id: "overview", title: "Show Tab Overview", subtitle: "", symbol: "square.on.square", shortcut: "⇧⌘\\") { [self] in showOverview() },
             .init(id: "bookmark", title: "Bookmark This Page", subtitle: "", symbol: "star", shortcut: "⌘D") { [self] in toggleBookmark() },
             .init(id: "bookmarks", title: "Open Bookmarks", subtitle: "", symbol: "book", shortcut: "⇧⌘B") { [self] in sheet = .bookmarks },
@@ -2627,6 +4261,7 @@ extension BrowserModel {
             .init(id: "site-js", title: scriptsAllowed(forHost: active?.url?.host) ? "Turn JavaScript Off for This Site" : "Turn JavaScript On for This Site", subtitle: "The page reloads", symbol: "curlybraces", shortcut: "") { [self] in setScripts(host: active?.url?.host, allowed: !scriptsAllowed(forHost: active?.url?.host)) },
             .init(id: "webrtc", title: blockWebRTC ? "Allow WebRTC" : "Switch WebRTC Off", subtitle: "Pages cannot learn this device's network address", symbol: "network.slash", shortcut: "") { [self] in blockWebRTC.toggle() },
             .init(id: "research", title: "Research Collections", subtitle: "Pages, highlights, notes and citations", symbol: "books.vertical.fill", shortcut: "") { [self] in sheet = .research },
+            .init(id: "research-save", title: "Save to Research…", subtitle: "Page, selection, note and tags together", symbol: "tray.and.arrow.down", shortcut: "") { [self] in Task { @MainActor in researchDraft = await researchDraftForActivePage(); if researchDraft != nil { sheet = .saveToResearch } } },
             .init(id: "research-add-page", title: "Add This Page to Research", subtitle: "", symbol: "plus.rectangle.on.folder", shortcut: "") { [self] in Task { await addPageToResearch() } },
             .init(id: "research-offline", title: "Save an Offline Copy to Research", subtitle: "The page as a PDF that opens without a connection", symbol: "arrow.down.doc", shortcut: "") { [self] in Task { await saveOfflineCopyToResearch() } },
             .init(id: "research-note", title: "Add a Note on the Selected Words", subtitle: "Saved with the passage; takes you back to it", symbol: "text.bubble", shortcut: "") { [self] in
@@ -2650,6 +4285,8 @@ extension BrowserModel {
             .init(id: "group", title: "New Tab Group…", subtitle: "", symbol: "folder.badge.plus", shortcut: "") { [self] in promptNewGroup(model: self) },
             .init(id: "reading-list", title: "Reading List", subtitle: "Articles saved to read offline", symbol: "books.vertical", shortcut: "") { [self] in sheet = .readingList },
             .init(id: "add-reading", title: "Add to Reading List", subtitle: "", symbol: "text.badge.plus", shortcut: "") { [self] in Task { await addToReadingList() } },
+            // One entry per local tool. The list is only read when the palette is built, and the tools themselves are only built when one is used.
+            .init(id: "tools-panel", title: "Tools", subtitle: "JSON, Base64, hashes, JWT and more, on this device", symbol: "wrench.and.screwdriver", shortcut: "") { [self] in toolSelection = nil; sheet = .tools },
             .init(id: "highlight", title: "Highlight Selection", subtitle: "In a saved article", symbol: "highlighter", shortcut: "") { [self] in Task { await highlightSelection() } },
             .init(id: "sort-site", title: "Sort Tabs by Website", subtitle: "", symbol: "arrow.up.arrow.down", shortcut: "") { [self] in sortTabs(by: .website) },
             .init(id: "sort-title", title: "Sort Tabs by Title", subtitle: "", symbol: "textformat", shortcut: "") { [self] in sortTabs(by: .title) },
@@ -2713,11 +4350,29 @@ extension BrowserModel {
             .init(id: "sessions", title: "Saved Sessions", subtitle: "Save or reopen sets of tabs", symbol: "tray.full", shortcut: "") { [self] in sheet = .sessions },
             .init(id: "timeline", title: "Tab Activity", subtitle: "Which tabs you used, and when", symbol: "clock.arrow.circlepath", shortcut: "") { [self] in sheet = .timeline },
             .init(id: "close-duplicates", title: "Close Duplicate Tabs", subtitle: "", symbol: "square.on.square.dashed", shortcut: "") { [self] in closeDuplicateTabs() },
-        ]
+            .init(id: "clear-tabs", title: "Clear Tabs", subtitle: "Close this workspace’s unpinned tabs; Undo brings them back", symbol: "xmark.bin", shortcut: "") { [self] in clearTabs() },
+            .init(id: "clear-tabs-awake", title: "Clear Tabs Except Sleeping Ones", subtitle: "", symbol: "moon.zzz", shortcut: "") { [self] in clearTabs(includeSleeping: false) },
+            .init(id: "add-essential", title: "Add This Tab to Essentials", subtitle: essentials.count >= Essentials.maxCount ? "You already have \(Essentials.maxCount)" : "", symbol: "square.grid.2x2.fill", shortcut: "") { [self] in if let tab = active { addToEssentials(tab) } },
+            .init(id: "reset-pinned", title: "Reset Pinned Tab to Its Address", subtitle: "", symbol: "pin.slash", shortcut: "") { [self] in if let tab = active, tab.pinned { resetPinnedTab(tab) } else { notice = "The tab in front is not pinned." } },
+        ] + essentials.map { essential in
+            PaletteItem(id: "essential-\(essential.id)", title: "Open Essential: \(essential.title)", subtitle: URL(string: essential.url)?.host ?? "", symbol: "square.grid.2x2", shortcut: "") { [self] in openEssential(essential.id) }
+        }
         for device in sendTargets where active?.isBlank == false && active?.isPrivate == false {
             all.append(.init(id: "send-\(device.id)", title: "Send This Tab to \(device.name)", subtitle: "", symbol: "paperplane", shortcut: "") { [self] in if let tab = active { sendTab(tab, to: device) } })
         }
         all.append(.init(id: "find", title: "Find in Page", subtitle: "", symbol: "magnifyingglass", shortcut: "⌘F") { [self] in showFind() })
+        #if os(macOS)
+        all.append(.init(id: "player-controls", title: "Show Player Controls", subtitle: "Floating over the page", symbol: "play.rectangle", shortcut: "") { [self] in openFloatingPlayer() })
+        // Every command of the menu bar is here too (AppCommands is the one list both are made from); those the palette already offered under the same name are not listed twice.
+        let known = Set(all.map { Self.paletteKey($0.title) })
+        for command in AppCommands.all where !known.contains(Self.paletteKey(command.title)) {
+            all.append(.init(id: command.id, title: command.title, subtitle: command.section, symbol: command.symbol,
+                             shortcut: command.shortcut.flatMap { shortcuts.combo(for: $0)?.display } ?? "", matchesSubtitle: false) { [self] in
+                if !AppCommands.perform(command, self) { notice = "“\(command.title)” is not available right now." }
+            })
+        }
+        #endif
+        for entry in ToolRegistry.paletteEntries { all.append(.init(id: "tool-\(entry.id)", title: "Tool: \(entry.title)", subtitle: "Runs on this device", symbol: entry.symbol, shortcut: "") { [self] in toolSelection = entry.id; sheet = .tools }) }
         all.append(.init(id: "focus", title: focusMode ? "Exit Focus Mode" : "Enter Focus Mode", subtitle: "", symbol: "rectangle.compress.vertical", shortcut: "⌥⌘F") { [self] in toggleFocusMode() })
         all.append(.init(id: "split-new", title: "Split View: New Tab on the Side", subtitle: "", symbol: "rectangle.split.2x1", shortcut: "") { [self] in openSplitNewTab() })
         if splitTabID != nil {
@@ -2771,6 +4426,11 @@ extension BrowserModel {
         return all
     }
 
+    /// A title as the palette compares it: no case, no trailing ellipsis.
+    static func paletteKey(_ title: String) -> String {
+        title.lowercased().replacingOccurrences(of: "…", with: "").replacingOccurrences(of: "...", with: "").trimmingCharacters(in: .whitespaces)
+    }
+
     func paletteItems(query: String) -> [PaletteItem] {
         let all = allPaletteItems(query: query)
         // "pasta recipe last week" lists the pages from history that fit, ahead of the commands.
@@ -2781,13 +4441,14 @@ extension BrowserModel {
                                symbol: "clock.arrow.circlepath", shortcut: "") { [self] in _ = openTab(url: url, isPrivate: false) }
         }
         let ranked = all.compactMap { item -> (Int, PaletteItem)? in
-            guard let score = fuzzyScore(query: query, in: item.title) ?? fuzzyScore(query: query, in: item.subtitle).map({ $0 - 20 }) else { return nil }
+            guard let score = fuzzyScore(query: query, in: item.title) ?? (item.matchesSubtitle ? fuzzyScore(query: query, in: item.subtitle).map({ $0 - 20 }) : nil) else { return nil }
             return (score, item)
         }
         .sorted { $0.0 > $1.0 }
-        .prefix(12)
+        // A typed search shows up to twenty matches (the list scrolls): with every menu command searchable, a dozen would hide matches that are real. Nothing typed still shows a dozen.
+        .prefix(20)
         .map(\.1)
-        return Array((recalled + ranked).prefix(12))
+        return Array((recalled + ranked).prefix(20))
     }
 }
 

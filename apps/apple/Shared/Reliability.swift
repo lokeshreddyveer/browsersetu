@@ -166,12 +166,25 @@ extension BrowserModel {
         checkpoints = list
     }
 
-    private func saveCheckpoints() {
+    func saveCheckpoints() {
         if let data = try? JSONEncoder().encode(checkpoints) { try? data.write(to: checkpointFile, options: .atomic) }
     }
 
+    /// A workspace was renamed: the restore points that remember its tabs by workspace name follow it.
+    func renameWorkspaceInCheckpoints(from old: String, to new: String) {
+        var changed = false
+        for index in checkpoints.indices {
+            for tabIndex in checkpoints[index].tabs.indices where checkpoints[index].tabs[tabIndex].workspace == old {
+                checkpoints[index].tabs[tabIndex].workspace = new
+                changed = true
+            }
+        }
+        if changed { saveCheckpoints() }
+    }
+
     private func currentCheckpointTabs() -> [SessionCheckpoint.Tab] {
-        tabs.filter { !$0.isPrivate && !$0.isBlank }.compactMap { tab in
+        // An Essential comes back from its own record, and a preview or panel page is not the person's tab, so a restore point holds the other tabs only.
+        tabs.filter { $0.privacy.keepsTraces && !$0.isBlank && belongsInLists($0) }.compactMap { tab in
             guard let url = tab.url, ["http", "https"].contains(url.scheme ?? "") else { return nil }
             return SessionCheckpoint.Tab(url: url.absoluteString, title: tab.displayTitle, pinned: tab.pinned, group: tab.group, workspace: tab.workspace)
         }
@@ -219,7 +232,7 @@ struct TimeMachineView: View {
     @EnvironmentObject var model: BrowserModel
 
     var body: some View {
-        List {
+        PanelList {
             Section {
                 Button("Save a Checkpoint Now") { model.takeCheckpoint(reason: "Saved by you", force: true); model.notice = "Checkpoint saved." }
             } footer: {

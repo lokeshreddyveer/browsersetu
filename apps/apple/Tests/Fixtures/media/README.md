@@ -1,0 +1,1 @@
+Test clips cut (stream copy, no re-encoding) from "Big Buck Bunny" (c) Blender Foundation, www.bigbuckbunny.org, licensed CC BY 3.0. About ten seconds of VP9 picture and of Opus sound, as WebM, used to test joining and audio extraction.

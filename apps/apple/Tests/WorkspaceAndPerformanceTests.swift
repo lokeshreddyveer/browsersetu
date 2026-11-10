@@ -119,7 +119,12 @@ final class WorkspaceAndPerformanceTests: XCTestCase {
         let model = makeModel()
         await model.start()
         model.showFind()
+        #if os(macOS)
         XCTAssertTrue(model.findVisible)
+        #else
+        // On iOS the system's own find bar is presented, so the app's flag stays off by design.
+        XCTAssertFalse(model.findVisible)
+        #endif
         model.findText = "x"
         model.hideFind()
         XCTAssertFalse(model.findVisible)

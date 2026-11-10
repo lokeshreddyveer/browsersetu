@@ -34,6 +34,9 @@ final class PrivacyController: ObservableObject {
     private var applyTask: Task<Void, Never>?
     private var generation = 0
 
+    /// How the rules are built from the settings and the downloaded lists. Replaced in tests, to make a build fail.
+    var builder: @Sendable (PrivacyConfiguration, [String: Data]) -> PolicyBuilder.Outcome = { PolicyBuilder.outcome(configuration: $0, downloaded: $1) }
+
     init(engine: BrowserEngine, cacheDirectory: URL, fetcher: ListFetching = URLSessionListFetcher()) {
         self.engine = engine
         self.cache = ListCache(directory: cacheDirectory)
@@ -182,6 +185,13 @@ final class PrivacyController: ObservableObject {
         applyTask = Task { await apply() }
     }
 
+    /// The report shown when the new rules could not even be built. It says what is true: the previous rules are still active, if there were any.
+    static func failedBuildReport(_ reason: String, previous: PolicySnapshot?, previousReport: InstallReport?) -> InstallReport {
+        let kept = previous != nil && previousReport?.installed == true
+        return InstallReport(installed: kept, identifier: kept ? previous?.identifier : nil, attachedWebViews: previousReport?.attachedWebViews ?? 0,
+                             error: reason + (kept ? " The protection that was already working is still on." : " No protection rules are active."), removed: false)
+    }
+
     /// Builds the snapshot off the main thread, compiles and installs it. The previous rules stay active until the
     /// new ones are ready, and stay active if the new ones fail.
     /// `includeDownloaded: false` installs only the small built-in rules, which is quick: used at launch so protection is on before any
@@ -194,9 +204,18 @@ final class PrivacyController: ObservableObject {
         let config = configuration
         let urls = config.effective.downloadedLists
         let downloaded = includeDownloaded ? cache.readAll(urls) : [:]
-        let built = await Task.detached(priority: .userInitiated) { PolicyBuilder.build(configuration: config, downloaded: downloaded) }.value
+        let build = builder
+        let outcome = await Task.detached(priority: .userInitiated) { build(config, downloaded) }.value
         guard mine == generation else { return }          // a newer change superseded this one
         lastBuildMilliseconds = Date().timeIntervalSince(started) * 1000
+        // A build that FAILED leaves the rules that are working in place. Only "protection is off" or "nothing to install" takes the old rules away.
+        if case .failed(let reason) = outcome {
+            report = Self.failedBuildReport(reason, previous: snapshot, previousReport: report)
+            isApplying = false
+            return
+        }
+        let built: PolicySnapshot?
+        if case .built(let made) = outcome { built = made } else { built = nil }
         let result = await engine.applyProtection(built)
         guard mine == generation else { return }
         snapshot = built
@@ -246,8 +265,17 @@ final class PrivacyController: ObservableObject {
         var merged = cache.readAll(urls)
         for (url, data) in fresh { merged[url] = data }
         let candidate = config
-        let built = await Task.detached(priority: .userInitiated) { PolicyBuilder.build(configuration: candidate, downloaded: merged) }.value
-        let result = await engine.applyProtection(built)
+        let build = builder
+        let outcome = await Task.detached(priority: .userInitiated) { build(candidate, merged) }.value
+        let built: PolicySnapshot?
+        let result: InstallReport
+        if case .failed(let reason) = outcome {
+            built = nil
+            result = Self.failedBuildReport(reason, previous: snapshot, previousReport: report)       // nothing is touched: the working rules stay
+        } else {
+            if case .built(let made) = outcome { built = made } else { built = nil }
+            result = await engine.applyProtection(built)
+        }
         guard mine == generation else { isApplying = false; return }
         if result.error == nil, result.installed {
             for (url, data) in fresh {
@@ -261,7 +289,7 @@ final class PrivacyController: ObservableObject {
             cache.trim(keeping: urls)
             snapshot = built
         } else {
-            failures.append("Update was not installed: \(result.error ?? "unknown error"). Previous protection is unchanged.")
+            failures.append("Update was not installed: \(result.error ?? "unknown error")" + (result.installed || report?.installed == true ? " The protection that was already working is still on." : ""))
         }
         report = result
         configuration = config

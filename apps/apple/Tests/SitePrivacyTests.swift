@@ -110,4 +110,16 @@ final class SitePrivacyModelTests: XCTestCase {
         XCTAssertTrue(again.blockWebRTC)
         XCTAssertTrue(again.webRTCExceptions.contains("meet.example.test"))
     }
+
+    func testOnlyTheWorstFindingIsRaisedBeforeADownloadIsOpened() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("scan-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true); defer { try? FileManager.default.removeItem(at: dir) }
+        let fake = dir.appendingPathComponent("report.pdf"); try Data([0x4D, 0x5A, 0x90, 0x00]).write(to: fake)
+        XCTAssertNotNil(DownloadScanner.warning(forFileAt: fake), "a .pdf that is a Windows program is flagged")
+        let real = dir.appendingPathComponent("ok.pdf"); try Data("%PDF-1.7".utf8).write(to: real)
+        XCTAssertNil(DownloadScanner.warning(forFileAt: real))
+        let tool = dir.appendingPathComponent("tool.pkg"); try Data([1, 2, 3]).write(to: tool)
+        XCTAssertNil(DownloadScanner.warning(forFileAt: tool), "an installer is only a caution: no question is asked for it")
+        XCTAssertNil(DownloadScanner.warning(forFileAt: dir.appendingPathComponent("missing.pdf")))
+    }
 }

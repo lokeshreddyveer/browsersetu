@@ -124,3 +124,161 @@ final class PDFEditTests: XCTestCase {
         XCTAssertEqual(PDFEdit.copyURL(for: source, suffix: "signed").lastPathComponent, "form signed 2.pdf")
     }
 }
+
+/// Safe writing, splitting, pictures to PDF, reordering and Undo, and a set of files written for an independent reader (see scripts/verify-pdf-with-ghostscript.sh).
+@MainActor
+final class PDFOperationsTests: XCTestCase {
+    private func makePDF(pages words: [String]) -> PDFDocument {
+        let data = NSMutableData()
+        var box = CGRect(x: 0, y: 0, width: 400, height: 500)
+        let context = CGContext(consumer: CGDataConsumer(data: data as CFMutableData)!, mediaBox: &box, nil)!
+        for word in words {
+            context.beginPDFPage(nil)
+            let line = CTLineCreateWithAttributedString(NSAttributedString(string: word, attributes: [.font: CTFontCreateWithName("Helvetica" as CFString, 24, nil)]))
+            context.textPosition = CGPoint(x: 40, y: 400)
+            CTLineDraw(line, context)
+            context.endPDFPage()
+        }
+        context.closePDF()
+        return PDFDocument(data: data as Data)!
+    }
+
+    private func folder() -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("pdfops-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    private func png(_ width: Int, _ height: Int, color: CGColor) -> Data {
+        let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.setFillColor(color); context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        let image = context.makeImage()!
+        let data = NSMutableData()
+        let destination = CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil)!
+        CGImageDestinationAddImage(destination, image, nil); CGImageDestinationFinalize(destination)
+        return data as Data
+    }
+
+    func testAWriteIsCheckedBeforeItReplacesAnythingAndAFailureLeavesTheOldFileAlone() throws {
+        let dir = folder()
+        let target = dir.appendingPathComponent("out.pdf")
+        let old = Data("not a real pdf but the old contents".utf8)
+        try old.write(to: target)
+        let document = makePDF(pages: ["one", "two"])
+        XCTAssertFalse(PDFEdit.writeValidated(document, to: target, validate: { _ in false }), "a check that fails stops the replacement")
+        XCTAssertEqual(try Data(contentsOf: target), old, "the existing file is exactly as it was")
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: dir.path).filter { $0.hasSuffix(".writing.pdf") }.count, 0, "no temporary file is left")
+        XCTAssertTrue(PDFEdit.writeValidated(document, to: target))
+        XCTAssertEqual(PDFDocument(url: target)?.pageCount, 2, "now it is the new, checked file")
+        XCTAssertFalse(PDFEdit.writeValidated(PDFDocument(), to: dir.appendingPathComponent("empty.pdf")), "a document with no pages is never written")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.appendingPathComponent("empty.pdf").path))
+        // The same for a protected copy: it is opened with its password to check it.
+        let locked = dir.appendingPathComponent("locked.pdf")
+        XCTAssertTrue(PDFEdit.writeValidated(document, to: locked, password: "pw-\(UUID().uuidString.prefix(6))"))
+        XCTAssertTrue(PDFDocument(url: locked)?.isLocked ?? false)
+    }
+
+    func testTheOriginalFileIsNeverTouchedByASavedCopy() throws {
+        let dir = folder()
+        let source = dir.appendingPathComponent("original.pdf")
+        XCTAssertTrue(makePDF(pages: ["a", "b", "c"]).write(to: source))
+        let before = try Data(contentsOf: source)
+        let session = PDFEditorSession(source: source)
+        let all = PDFEdit.pages(of: try XCTUnwrap(session.document))
+        XCTAssertEqual(session.remove([all[1]]), 1)
+        let copy = try XCTUnwrap(session.saveCopy())
+        XCTAssertEqual(PDFDocument(url: copy)?.pageCount, 2)
+        XCTAssertEqual(try Data(contentsOf: source), before, "the original is byte for byte the same")
+        XCTAssertNotEqual(copy, source)
+    }
+
+    func testSplitMakesTheRightPartsAndEachIsWrittenChecked() throws {
+        let doc = makePDF(pages: ["1", "2", "3", "4", "5"])
+        XCTAssertEqual(PDFEdit.split(doc, everyPages: 2).map(\.pageCount), [2, 2, 1])
+        XCTAssertEqual(PDFEdit.split(doc, after: [1, 4]).map(\.pageCount), [1, 3, 1])
+        XCTAssertEqual(PDFEdit.split(doc, after: []).map(\.pageCount), [5], "nothing to cut at is one part")
+        XCTAssertEqual(PDFEdit.split(doc, after: [5, 9, 0]).map(\.pageCount), [5], "cuts outside the document are ignored")
+        XCTAssertEqual(PDFEdit.split(doc, ranges: [2...3, 9...12]).map(\.pageCount), [2], "a range outside is skipped")
+        XCTAssertTrue(PDFEdit.split(doc, everyPages: 0).isEmpty)
+        let dir = folder()
+        let source = dir.appendingPathComponent("book.pdf")
+        XCTAssertTrue(doc.write(to: source))
+        let files = PDFEdit.writeParts(PDFEdit.split(doc, everyPages: 2), beside: source)
+        XCTAssertEqual(files.count, 3)
+        XCTAssertEqual(files.map { PDFDocument(url: $0)?.pageCount }, [2, 2, 1])
+        XCTAssertEqual(Set(files.map(\.lastPathComponent)).count, 3)
+        XCTAssertEqual(PDFDocument(url: files[0])?.page(at: 0)?.string?.contains("1"), true)
+        XCTAssertEqual(PDFDocument(url: files[2])?.page(at: 0)?.string?.contains("5"), true)
+    }
+
+    func testPicturesBecomePagesTheSizeOfThemAndABadOneStopsTheWholeThing() throws {
+        let dir = folder()
+        let a = dir.appendingPathComponent("a.png"), b = dir.appendingPathComponent("b.png")
+        try png(300, 200, color: CGColor(red: 1, green: 0, blue: 0, alpha: 1)).write(to: a)
+        try png(100, 400, color: CGColor(red: 0, green: 0, blue: 1, alpha: 1)).write(to: b)
+        let doc = try XCTUnwrap(PDFEdit.imagesToPDF(urls: [a, b]))
+        XCTAssertEqual(doc.pageCount, 2)
+        let first = try XCTUnwrap(doc.page(at: 0)).bounds(for: .mediaBox), second = try XCTUnwrap(doc.page(at: 1)).bounds(for: .mediaBox)
+        XCTAssertEqual(first.width, 300, accuracy: 1); XCTAssertEqual(first.height, 200, accuracy: 1)
+        XCTAssertEqual(second.width, 100, accuracy: 1); XCTAssertEqual(second.height, 400, accuracy: 1)
+        let bad = dir.appendingPathComponent("bad.png"); try Data("not an image".utf8).write(to: bad)
+        XCTAssertNil(PDFEdit.imagesToPDF(urls: [a, bad]), "one unreadable picture means no half-made PDF")
+        XCTAssertNil(PDFEdit.imagesToPDF(urls: []))
+        // A very large picture is brought down to a sensible size.
+        let big = dir.appendingPathComponent("big.png"); try png(6000, 3000, color: CGColor(gray: 0.5, alpha: 1)).write(to: big)
+        let huge = try XCTUnwrap(PDFEdit.imagesToPDF(urls: [big]))
+        XCTAssertLessThanOrEqual(try XCTUnwrap(huge.page(at: 0)).bounds(for: .mediaBox).width, 843)
+    }
+
+    func testReorderRotateRemoveAndAddPicturesAreAllUndoneByUndo() throws {
+        let dir = folder()
+        let source = dir.appendingPathComponent("doc.pdf")
+        XCTAssertTrue(makePDF(pages: ["A", "B", "C"]).write(to: source))
+        let session = PDFEditorSession(source: source)
+        let document = try XCTUnwrap(session.document)
+        let original = PDFEdit.pages(of: document)
+        func text() -> [String] { PDFEdit.pages(of: document).map { ($0.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines) } }
+        XCTAssertEqual(text(), ["A", "B", "C"])
+        XCTAssertTrue(session.reorder(to: [original[2], original[0], original[1]]))
+        XCTAssertEqual(text(), ["C", "A", "B"])
+        session.undo()
+        XCTAssertEqual(text(), ["A", "B", "C"], "undo puts the order back")
+        XCTAssertFalse(session.reorder(to: [original[0]]), "not the same set of pages: refused")
+        session.rotate([original[1]], by: 90)
+        XCTAssertEqual(original[1].rotation, 90)
+        session.undo()
+        XCTAssertEqual(original[1].rotation, 0)
+        XCTAssertEqual(session.remove([original[0], original[2]]), 2)
+        XCTAssertEqual(text(), ["B"])
+        XCTAssertEqual(session.remove([original[1]]), 0, "never the last page")
+        session.undo()
+        XCTAssertEqual(text(), ["A", "B", "C"], "removed pages come back where they were")
+        let image = dir.appendingPathComponent("p.png"); try png(50, 50, color: CGColor(gray: 0, alpha: 1)).write(to: image)
+        XCTAssertEqual(session.appendPictures([image]), 1)
+        XCTAssertEqual(document.pageCount, 4)
+        session.undo()
+        XCTAssertEqual(document.pageCount, 3)
+        XCTAssertEqual(session.changes, 0)
+    }
+
+    /// Files for an independent reader: written to a folder named in the test output, then checked by scripts/verify-pdf-with-ghostscript.sh.
+    func testWriteFilesForAnIndependentReader() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("bs-pdf-artifacts", isDirectory: true)
+        try? FileManager.default.removeItem(at: dir)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let doc = makePDF(pages: ["alpha", "bravo", "charlie", "delta"])
+        let source = dir.appendingPathComponent("source.pdf")
+        XCTAssertTrue(PDFEdit.writeValidated(doc, to: source))
+        let session = PDFEditorSession(source: source)
+        let pages = PDFEdit.pages(of: try XCTUnwrap(session.document))
+        XCTAssertTrue(session.reorder(to: [pages[3], pages[2], pages[1], pages[0]]))
+        session.rotate([pages[0]], by: 90)
+        _ = session.remove([pages[1]])
+        XCTAssertNotNil(session.saveCopy(suffix: "organized"))
+        let parts = PDFEdit.writeParts(PDFEdit.split(try XCTUnwrap(session.document), everyPages: 1), beside: source)
+        XCTAssertEqual(parts.count, 3)
+        let image = dir.appendingPathComponent("p.png"); try png(240, 160, color: CGColor(red: 0.2, green: 0.6, blue: 0.2, alpha: 1)).write(to: image)
+        XCTAssertTrue(PDFEdit.writeValidated(try XCTUnwrap(PDFEdit.imagesToPDF(urls: [image])), to: dir.appendingPathComponent("from-picture.pdf")))
+        print("PDF ARTIFACTS \(dir.path)")
+    }
+}

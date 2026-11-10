@@ -85,6 +85,9 @@ enum WindowInset {
     static let gap: CGFloat = 4
     /// How far below the window's top edge the folded pill sits. Clear of the border and the rounded corners.
     static let pillTop: CGFloat = 10
+    /// The strip along the top edge that drags the window when there is no bar. The page card starts 4 points down, so a taller strip (it was 10 and 12) took
+    /// the first clicks of the page; this reaches only 2 points into it.
+    static let dragStrip: CGFloat = 6
 }
 
 enum Radius {
@@ -521,20 +524,25 @@ struct TopBar: View {
     let leadingInset: CGFloat
 
     var body: some View {
-        Group { if model.singleRow { InlineBar(leadingInset: leadingInset) } else { standard } }
+        Group {
+            if model.singleRow {
+                // The bar needs the width it is given (not a stored one) to know which buttons still fit, so it is measured here.
+                GeometryReader { geo in InlineBar(leadingInset: leadingInset, width: geo.size.width) }.frame(height: InlineBar.height)
+            } else { standard }
+        }
             .contextMenu { ToolbarContextMenu() }
     }
 
     private var standard: some View {
         GeometryReader { geo in
-            let priority = ToolbarPriority(fitting: geo.size.width, leadingInset: leadingInset, extras: model.toolbarExtrasCount)
+            let priority = ToolbarPriority(fitting: geo.size.width, leadingInset: leadingInset, extras: model.toolbarExtrasCount, visible: model.toolbarVisibility)
             // Controls hug both edges and the address field sits in the middle of the window, not between the
             // two clusters, so it stays put as buttons come and go.
             ZStack {
                 HStack(spacing: 2) {
                     Color.clear.frame(width: leadingInset, height: 1)
                     if model.shows(.sidebar) {
-                        ChromeButton(symbol: "sidebar.left", help: "Toggle Sidebar", identifier: "sidebar-button") { model.sidebarVisible.toggle() }
+                        ChromeButton(symbol: "sidebar.left", help: "Toggle Sidebar", identifier: "sidebar-button") { model.toggleSidebar() }
                     }
                     if let tab = model.active, model.shows(.backForward) {
                         HStack(spacing: 0) { NavigationButtons(tab: tab, showForward: priority.showForward, hideReload: true) }
@@ -552,8 +560,11 @@ struct TopBar: View {
             }
             .frame(width: geo.size.width, height: geo.size.height)
             .motion(.easeOut(duration: 0.2), value: priority)
+            .onChange(of: priority.fieldWidth(window: geo.size.width, leadingInset: leadingInset), initial: true) { _, width in
+                if model.topBarFieldWidth != width { model.topBarFieldWidth = width }
+            }
         }
-        .frame(height: 40)
+        .frame(height: LayoutMetrics.toolbarHeight)
         .background(WindowDragRegion())
     }
 
@@ -577,6 +588,7 @@ struct TopBar: View {
                          tint: model.activeBookmarked ? .yellow : nil) { model.toggleBookmark() }
                 .disabled(model.active?.isBlank ?? true)
         }
+        if model.shows(.media), priority.showDownloads { MediaToolbarButton() }
         if model.shows(.downloads), priority.showDownloads {
             DownloadsToolbarButton(coordinator: model.downloads)
         }
@@ -725,6 +737,7 @@ struct MoreMenu: View {
                 Button("Back") { model.active?.goBack() }.disabled(!(model.active?.canGoBack ?? false))
                 Button("Forward") { model.active?.goForward() }.disabled(!(model.active?.canGoForward ?? false))
                 Button { model.newTab() } label: { Label("New Tab", systemImage: "plus") }
+                Button { model.openPrivateWindow() } label: { Label("New Private Window", systemImage: "eye.slash.fill") }
                 Button { model.openTab(url: nil, isPrivate: true) } label: { Label("New Private Tab", systemImage: "eye.slash") }
                 Button { model.showOverview() } label: { Label("Show Tab Overview", systemImage: "square.on.square") }
                 Button { promptNewGroup(model: model) } label: { Label("New Tab Group…", systemImage: "folder.badge.plus") }
@@ -760,10 +773,21 @@ struct MoreMenu: View {
                 Picker("Layout", selection: $model.layoutPreset) {
                     ForEach(LayoutPreset.allCases) { Text($0.title).tag($0) }
                 }
-                Button(model.sidebarVisible ? "Hide Sidebar" : "Show Sidebar") { model.sidebarVisible.toggle() }
+                Button(model.sidebarVisible ? "Hide Sidebar" : "Show Sidebar") { model.toggleSidebar() }
                 Menu("Window Layout") { ForEach(WindowPreset.allCases) { preset in Button(preset.title) { model.applyWindowPreset(preset) } } }
                 Button("Restore Standard Layout") { model.restoreStandardLayout() }
                 Button("Layout Diagnostics…") { model.sheet = .layout }
+            }
+            // Everything the menu bar offers, by its menus, so no command is only in the menu bar. (The command palette lists the same ones.)
+            Section("All Menu Commands") {
+                ForEach(AppCommands.sections, id: \.self) { section in
+                    Menu(section) {
+                        ForEach(AppCommands.commands(in: section)) { command in
+                            Button { AppCommands.perform(command, model) } label: { Label(command.title, systemImage: command.symbol) }
+                                .disabled(!command.isEnabled(model))
+                        }
+                    }
+                }
             }
             Section("Application") {
                 Button { SettingsRouter.open() } label: { Label("Settings…", systemImage: "gearshape") }

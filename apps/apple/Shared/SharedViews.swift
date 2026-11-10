@@ -18,8 +18,33 @@ struct SheetContainer: View {
     @Environment(\.colorScheme) private var scheme
     let sheet: Sheet
 
+    /// The sheets that need a navigation container: Settings pushes screens, and the lists carry a toolbar button of their own (History's Clear All) under their own large headings. The rest
+    /// are plain panels, which on the Mac sit under a header of our own (title on the left, the one Done on the right) with no system title area above them.
+    private var needsNavigation: Bool { [.history, .bookmarks, .downloads].contains(sheet) }
+
     var body: some View {
-        NavigationStack {
+        #if os(macOS)
+        Group {
+            if needsNavigation {
+                NavigationStack { panel.navigationTitle(title).sheetDoneToolbar { model.requestSheetDismiss() } }
+            } else {
+                VStack(spacing: 0) {
+                    SheetHeader(title: title) { model.requestSheetDismiss() }
+                    panel.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                }
+            }
+        }
+        // Every form in a sheet is grouped: the plain style left separators misaligned and cut captions short.
+        .formStyle(.grouped)
+        // The editors are wide (a row of tools, a page, a bar of buttons): at the usual sheet width their tools and the Save button ran off the edges.
+        // Page Tools has ten tools in a row: wide enough for the whole segmented control, so none is cut off.
+        .frame(minWidth: sheet == .workbench ? 760 : (editsPictures ? 880 : (sheet == .pageTools ? 960 : 520)), minHeight: sheet == .workbench ? 620 : (editsPictures ? 680 : 460))
+        #else
+        NavigationStack { panel.navigationTitle(title).sheetDoneToolbar { model.requestSheetDismiss() } }
+        #endif
+    }
+
+    @ViewBuilder private var panel: some View {
             Group {
                 switch sheet {
                 case .bookmarks: BookmarksPanel()
@@ -44,6 +69,11 @@ struct SheetContainer: View {
                 case .shareTabs: ShareTabsView()
                 case .shopping: ShoppingView()
                 case .repair: PageRepairView()
+                case .webApps: Form { WebAppsSection() }.formStyle(.grouped)
+                case .tools: ToolsPanel()
+                case .picturesToPDF: PicturesToPDFView()
+                case .screenshot: if let draft = model.screenshotDraft { ScreenshotEditorView(document: draft) }
+                case .saveToResearch: if let draft = model.researchDraft { ResearchSaveView(draft: draft) }
                 case .devices: DevicesView()
                 case .pageSearch: PageSearchView()
                 case .resources: ResourceDashboardView()
@@ -62,20 +92,13 @@ struct SheetContainer: View {
             #endif
             .themedSurface()
             .tint(Theme.accent)
-            .navigationTitle(title)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    // Escape closes the sheet as well as the button.
-                    Button("Done") { model.sheet = nil }
-                        .keyboardShortcut(.cancelAction)
-                        .accessibilityIdentifier("sheet-done")
-                }
-            }
-        }
-        #if os(macOS)
-        .frame(minWidth: sheet == .workbench ? 760 : 520, minHeight: sheet == .workbench ? 620 : 460)
-        #endif
+            // An editor with unsaved changes asks before Done or Escape closes the sheet; the editors inside leave out a Done of their own.
+            .environment(\.sheetProvidesDone, true)
+            // No scroll bars in a sheet either (a sheet does not take the window's setting; the Mac's system scrollers are removed by NoScrollBars).
+            .scrollIndicators(.hidden)
     }
+
+    private var editsPictures: Bool { sheet == .pdfEditor || sheet == .screenshot }
 
     private var title: String {
         switch sheet {
@@ -100,6 +123,11 @@ struct SheetContainer: View {
         case .shareTabs: "Share"
         case .shopping: "Shopping"
         case .repair: "Repair Page"
+        case .webApps: "Web Apps"
+        case .tools: "Tools"
+        case .picturesToPDF: "Pictures to PDF"
+        case .screenshot: "Screenshot"
+        case .saveToResearch: "Save to Research"
         case .devices: "Devices"
         case .pageSearch: "Search My Pages"
         case .resources: "Resources"
@@ -145,7 +173,7 @@ struct BookmarksView: View {
                         Button { model.open(urlString: b.url) } label: {
                             VStack(alignment: .leading) {
                                 Text(b.title.isEmpty ? b.url : b.title).lineLimit(1)
-                                Text(b.url).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                Text(b.url).settingsNote().lineLimit(1)
                                 if !model.tags(forBookmark: b.url).isEmpty {
                                     Text(model.tags(forBookmark: b.url).map { "#" + $0 }.joined(separator: " ")).font(.caption2).foregroundStyle(Theme.accent).lineLimit(1)
                                 }
@@ -263,7 +291,7 @@ struct HistoryView: View {
                         Button { model.open(urlString: h.url) } label: {
                             VStack(alignment: .leading) {
                                 Text(h.title.isEmpty ? h.url : h.title).lineLimit(1)
-                                Text(displayHost(URL(string: h.url))).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                Text(displayHost(URL(string: h.url))).settingsNote().lineLimit(1)
                             }
                         }
                         .buttonStyle(.plain)
@@ -329,7 +357,7 @@ struct ProfileSettingsSection: View {
                             .font(.system(size: 20)).foregroundStyle(model.profileStyle(name).tint ?? (name == model.profileName ? Theme.accent : Color.secondary))
                         VStack(alignment: .leading, spacing: 1) {
                             Text(name == "default" ? "Default" : name).fontWeight(.medium)
-                            Text(name == model.profileName ? "In use" : (model.isTemporaryProfile(name) ? "Temporary: deleted when you leave it" : "Separate cookies, history and bookmarks")).font(.caption).foregroundStyle(.secondary)
+                            Text(name == model.profileName ? "In use" : (model.isTemporaryProfile(name) ? "Temporary: deleted when you leave it" : "Separate cookies, history and bookmarks")).settingsNote()
                         }
                         Spacer()
                         Menu {
@@ -391,7 +419,7 @@ struct AppearanceSettingsSection: View {
                 Picker("Toolbar icons", selection: $model.iconWeight) { ForEach(IconWeight.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented)
                 Picker("Site icons", selection: $model.siteIconShape) { ForEach(SiteIconShape.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented)
                 Picker("Animation", selection: $model.motionStyle) { ForEach(MotionStyle.allCases) { Text($0.title).tag($0) } }
-                Text(model.motionStyle.summary).font(.caption).foregroundStyle(.secondary)
+                    .settingsNoted(model.motionStyle.summary)
                 Picker("Theme", selection: $model.appearance) {
                     ForEach(AppearanceMode.allCases) { Text($0.title).tag($0) }
                 }
@@ -401,8 +429,7 @@ struct AppearanceSettingsSection: View {
                     Text("Light").tag(AppearanceMode.light)
                     Text("Dark").tag(AppearanceMode.dark)
                 }
-                Text("Which look websites are asked for. Theme above only changes the browser. “Follow System” lets each site choose its own design, light or dark.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .settingsNoted("Which look websites are asked for. Theme above only changes the browser. “Follow System” lets each site choose its own design, light or dark.")
                 Picker("Accent", selection: Binding(get: { model.accent }, set: { model.accent = $0; model.accentChosen = true })) {
                     ForEach(AccentChoice.allCases) { choice in
                         Label { Text(choice.title) } icon: { Image(systemName: "circle.fill").foregroundStyle(choice.color) }.tag(choice)
@@ -414,7 +441,7 @@ struct AppearanceSettingsSection: View {
                 .pickerStyle(.segmented)
                 Text(model.density == .compact ? "Tighter rows and tab strips: more tabs fit on screen."
                                                : "Roomier rows and tab strips: easier to read and to click.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .settingsNote()
             }
             ThemesSection()
             #if os(macOS)
@@ -425,12 +452,12 @@ struct AppearanceSettingsSection: View {
                 Picker("Preset", selection: $model.layoutPreset) {
                     ForEach(LayoutPreset.allCases) { Text($0.title).tag($0) }
                 }
-                Text(model.layoutPreset.summary).font(.caption).foregroundStyle(.secondary)
+                    .settingsNoted(model.layoutPreset.summary)
                 Toggle("Tint the toolbar with the page’s colour", isOn: $model.tintToolbar)
                 Text(model.themeIsActive
                      ? "The bar takes a lighter touch of each page's colour on top of your theme. A colour that would clash with it (a white page in a dark window) only adds a faint wash."
                      : "The bar takes on the colour of each page, the way Safari's does. A colour that would clash with the window (a white page in a dark window) only adds a faint wash.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .settingsNote()
                 Toggle("Fold the toolbar and tabs into a pill while reading", isOn: $model.collapseOnScroll)
                 Picker("Double-click the top bar", selection: $model.doubleClickAction) {
                     ForEach(DoubleClickAction.allCases) { Text($0.title).tag($0) }
@@ -451,7 +478,7 @@ struct AppearanceSettingsSection: View {
                 .pickerStyle(.segmented)
                 Toggle("Collapse sidebar to icons", isOn: $model.sidebarRail)
                 Toggle("Hide sidebar until the pointer touches the window edge", isOn: Binding(
-                    get: { model.sidebarAutoHide }, set: { on in model.sidebarAutoHide = on; if on { model.sidebarVisible = false } else { model.sidebarVisible = true } }))
+                    get: { model.sidebarAutoHide }, set: { on in model.sidebarAutoHide = on; model.setSidebarShown(!on) }))
                 HStack {
                     Text("Sidebar width")
                     Slider(value: $model.sidebarWidth, in: sidebarWidthRange, step: 10)
@@ -485,9 +512,10 @@ struct AppearanceSettingsSection: View {
             Section {
                 Button("Reset Appearance and Layout") {
                     model.appearance = .system; model.accent = .teal; model.accentChosen = false; model.density = .comfortable
-                    model.layoutPreset = .classic; model.tabLayout = .separate; model.sidebarPosition = .left
-                    model.sidebarWidth = 250; model.sidebarRail = false; model.addressBarPosition = .bottom
-                    model.toolbarItems = ToolbarItemID.defaults
+                    model.sidebarWidth = 250
+                    model.addressBarPosition = BrowserModel.defaultAddressBarPosition
+                    // The same standard layout every other reset gives: also the pin choice, auto-hide, single toolbar, focus mode and toolbar buttons.
+                    model.restoreStandardLayout()
                 }
             } footer: { Text("Resets only appearance. Your tabs, bookmarks, history and profiles are not touched.") }
         }
@@ -513,13 +541,31 @@ struct TabsSettingsSection: View {
         Group {
             Section("Tab Overview") {
                 Toggle("Show page previews", isOn: $model.tabPreviews)
-                Text("Previews are captured only when you leave a tab or open the overview, and are kept in memory only.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .settingsNoted("Previews are captured only when you leave a tab or open the overview, and are kept in memory only.")
+            }
+            #if os(macOS)
+            Section("Closing Tabs") {
+                Toggle("Double-click a tab to close it", isOn: $model.doubleClickClosesTab)
+                Toggle("Hide the close cross on tabs", isOn: $model.hideTabCloseButtons)
+                    .settingsNoted("A middle click, the tab menu and ⌘W still close a tab.")
+                Toggle("Close the window when its last tab closes", isOn: $model.closeWindowWithLastTab)
+            }
+            #endif
+            Section {
+                Toggle("Glance", isOn: $model.glanceEnabled)
+                #if os(macOS)
+                Picker("Open a link in Glance with", selection: $model.glanceTrigger) {
+                    ForEach(GlanceTrigger.allCases) { Text($0.title).tag($0) }
+                }
+                .disabled(!model.glanceEnabled)
+                #endif
+                Toggle("Use a temporary session", isOn: $model.glanceTemporarySession).disabled(!model.glanceEnabled)
+            } header: { Text("Glance") } footer: {
+                Text("Glance shows a link in a floating preview over the page, without leaving it. Open it as a tab, or close it and it is gone. It browses in the page’s own container (or privately if the page is private), cannot open pop-ups of its own, and a previewed page is not added to history unless you open it as a tab. A temporary session gives it storage of its own that is deleted when it closes, so it is signed in nowhere. Touch and hold a link on iPhone and choose Open in Glance; on the Mac use the link’s menu or the click chosen above.")
             }
             Section("Tab Tree") {
                 Toggle("Show tabs under the tab they were opened from", isOn: $model.tabTree)
-                Text("In the vertical tab list, a tab opened from a link sits one step in under its parent. The arrow beside a parent folds its branch. Closing a parent moves its tabs up a level.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .settingsNoted("In the vertical tab list, a tab opened from a link sits one step in under its parent. The arrow beside a parent folds its branch. Closing a parent moves its tabs up a level.")
             }
             Section("Tab Groups") {
                 if model.groupNames.isEmpty { Text("No tab groups").foregroundStyle(.secondary) }
@@ -543,10 +589,13 @@ struct WorkspacesSettingsSection: View {
             personalRow
             ForEach(model.workspaces) { ws in WorkspaceSettingsRow(workspace: ws, expanded: open == ws.name) { animated(.easeOut(duration: 0.2)) { open = open == ws.name ? nil : ws.name } } }
             Button { promptNewWorkspaceShared() } label: { Label("New Workspace…", systemImage: "plus.circle") }
+            #if os(macOS)
+            Toggle("Open a workspace asked for from outside in a new window", isOn: $model.spaceRequestsOpenNewWindow)
+            #endif
         } header: {
             Text("Workspaces")
         } footer: {
-            Text("A workspace keeps its own tabs, and can have its own accent colour and layout. Switch with the workspace button in the toolbar, the Workspace menu, or the sidebar. Deleting one keeps its tabs; they move to Personal.")
+            Text("A workspace keeps its own tabs, and can have its own accent colour and layout. Switch with the workspace button in the toolbar, the Workspace menu, or the sidebar. Deleting one keeps its tabs; they move to Personal. From outside the app: a browsersetu://space?name=… link, a Shortcuts action, or --space \"Name\" on the command line.")
         }
     }
 
@@ -556,7 +605,7 @@ struct WorkspacesSettingsSection: View {
                 .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(0.07)))
             VStack(alignment: .leading, spacing: 1) {
                 Text("Personal").fontWeight(.medium)
-                Text("The default workspace").font(.caption).foregroundStyle(.secondary)
+                Text("The default workspace").settingsNote()
             }
             Spacer()
             TabCountBadge(count: model.workspaceTabCount(""))
@@ -577,7 +626,7 @@ struct WorkspacesSettingsSection: View {
 private struct TabCountBadge: View {
     let count: Int
     var body: some View {
-        Text("\(count) tab\(count == 1 ? "" : "s")").font(.caption).foregroundStyle(.secondary)
+        Text("\(count) tab\(count == 1 ? "" : "s")").settingsNote()
             .padding(.horizontal, 8).padding(.vertical, 2).background(Capsule().fill(Color.primary.opacity(0.07)))
     }
 }
@@ -599,13 +648,12 @@ private struct WorkspaceSettingsRow: View {
                         Button { model.setWorkspaceIcon(workspace.name, icon: icon) } label: { Label(icon, systemImage: icon) }
                     }
                 } label: {
-                    Image(systemName: workspace.icon).font(.system(size: 14)).foregroundStyle(accent?.color ?? Theme.accent).frame(width: 30, height: 30)
-                        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill((accent?.color ?? Theme.accent).opacity(0.14)))
+                    WorkspaceIconTile(icon: workspace.icon, gradient: workspace.gradient, accent: accent?.color ?? Theme.accent)
                 }
                 .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize().help("Change the icon")
                 VStack(alignment: .leading, spacing: 1) {
                     Text(workspace.name).fontWeight(.medium)
-                    Text(summary).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Text(summary).settingsNote().lineLimit(1)
                 }
                 Spacer()
                 TabCountBadge(count: model.workspaceTabCount(workspace.name))
@@ -637,6 +685,7 @@ private struct WorkspaceSettingsRow: View {
                             ForEach(AccentChoice.allCases) { swatch($0) }
                         }
                     }
+                    WorkspaceThemeEditor(workspace: workspace)
                     #if os(macOS)
                     HStack {
                         Text("Layout when opened").foregroundStyle(.secondary)
@@ -658,7 +707,7 @@ private struct WorkspaceSettingsRow: View {
 
     private var summary: String {
         var parts: [String] = []
-        parts.append(accent.map { "\($0.title) accent" } ?? "Same accent as everywhere")
+        parts.append(accent.map { "\($0.title) accent" } ?? (workspace.gradient != nil ? "Gradient theme" : "Same accent as everywhere"))
         if let layout { parts.append("opens in \(layout.title)") }
         return parts.joined(separator: " · ")
     }
@@ -700,7 +749,7 @@ struct StartPageSettingsSection: View {
             Picker("Background", selection: $model.startBackground) {
                 ForEach(StartBackground.allCases) { Text($0.title).tag($0) }
             }
-            Text("Everything on this page comes from this device. Nothing is sent anywhere.").font(.caption).foregroundStyle(.secondary)
+                .settingsNoted("Everything on this page comes from this device. Nothing is sent anywhere.")
         }
     }
 }
@@ -711,6 +760,7 @@ struct PrivacySettingsSection: View {
     var body: some View {
         Group {
             VayuProtectionSection(privacy: model.privacy)
+            PrivacyPresetSection()
             SecurityFactsSection()
             LinkCleaningSection()
             SiteIconsSection()
@@ -776,7 +826,7 @@ struct ExtensionsSettingsSection: View {
                     VStack(spacing: 6) {
                         Image(systemName: "puzzlepiece.extension").font(.system(size: 26)).foregroundStyle(.tertiary)
                         Text("No extensions installed").fontWeight(.medium)
-                        Text(model.extensionCenter.canInstall ? "Add an extension from a folder or file, or from its Chrome Web Store page." : "Extensions are added on a Mac.").font(.caption).foregroundStyle(.secondary)
+                        Text(model.extensionCenter.canInstall ? "Add an extension from a folder or file, or from its Chrome Web Store page." : "Extensions are added on a Mac.").settingsNote()
                     }
                     .frame(maxWidth: .infinity).padding(.vertical, 6)
                 }
@@ -785,7 +835,7 @@ struct ExtensionsSettingsSection: View {
                         HStack {
                             VStack(alignment: .leading) {
                                 Text(item.name).fontWeight(.medium)
-                                if !item.version.isEmpty { Text("Version \(item.version)").font(.caption).foregroundStyle(.secondary) }
+                                if !item.version.isEmpty { Text("Version \(item.version)").settingsNote() }
                             }
                             Spacer()
                             if item.hasOptions && item.enabled { Button("Settings") { model.extensionCenter.openOptions(item.id) } }
@@ -808,7 +858,7 @@ struct ExtensionsSettingsSection: View {
             }
             Section {
                 Text("Choose an extension folder (the one that contains manifest.json) or a .crx or .zip file, as Chrome extensions come. You review the permissions before anything runs, and extensions never run in private tabs. A folder with a manifest is not a guarantee it works: WebKit supports only part of the extension standard, and anything that can’t load is reported here.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .settingsNote()
             }
         }
         .fileImporter(isPresented: $choosing, allowedContentTypes: [.folder, .zip, UTType(filenameExtension: "crx") ?? .data]) { result in
@@ -867,7 +917,7 @@ struct ExtensionApprovalSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(isUpdate ? "Update “\(info.name)” to version \(info.version)?" : "Add “\(info.name)”?").font(.headline)
-            if info.manifestVersion > 0 { Text("Manifest V\(info.manifestVersion) extension").font(.caption).foregroundStyle(.secondary) }
+            if info.manifestVersion > 0 { Text("Manifest V\(info.manifestVersion) extension").settingsNote() }
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     let cautions = ExtensionRisk.warnings(for: info.permissions + info.sites)
@@ -875,7 +925,7 @@ struct ExtensionApprovalSheet: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Label("Be careful", systemImage: "exclamationmark.shield").font(.subheadline.weight(.semibold)).foregroundStyle(.red)
                             ForEach(cautions, id: \.self) { Text("• \($0)").font(.callout).foregroundStyle(.red) }
-                            Text("Only add extensions from people you trust.").font(.caption).foregroundStyle(.secondary)
+                            Text("Only add extensions from people you trust.").settingsNote()
                         }
                     }
                     group("It will be able to", info.permissions, empty: "Nothing beyond the pages you allow below.")
@@ -923,26 +973,51 @@ struct ExtensionApprovalSheet: View {
 struct DownloadsSettingsSection: View {
     @EnvironmentObject var model: BrowserModel
     var body: some View {
+        Group {
         Section("Downloads") {
             LabeledContent("Saved to", value: DownloadCoordinator.directory.path)
             Picker("Downloads at a time", selection: $model.maxDownloads) { ForEach(DownloadQueueRules.maxConcurrentChoices, id: \.self) { Text("\($0)").tag($0) } }
-            Text("The rest wait their turn, and you can move one to the front. WebKit has no way to limit a download's speed, so there is no bandwidth limit.").font(.caption).foregroundStyle(.secondary)
+                .settingsNoted("The rest wait their turn, and you can move one to the front. Speed limits are under “Speed and network” below.")
             Toggle("Sort downloads into folders by kind", isOn: $model.organizeDownloads)
             if model.organizeDownloads {
-                Text("New downloads go into Images, Documents, Archives, Audio, Video, Installers or Other inside that folder.").font(.caption).foregroundStyle(.secondary)
+                Text("New downloads go into Images, Documents, Archives, Audio, Video, Installers or Other inside that folder.").settingsNote()
             }
             Toggle("Download big files in several pieces at once", isOn: $model.fasterDownloads)
-            Text("For files of 8 MB or more from sites that allow it. Faster where a site slows each connection; it does nothing if your own connection is the limit. Large downloads from sites you must sign in to use the normal way.").font(.caption).foregroundStyle(.secondary)
+                .settingsNoted("For files of 8 MB or more from sites that allow it. Faster where a site slows each connection; it does nothing if your own connection is the limit. Large downloads from sites you must sign in to use the normal way.")
             Toggle("Sort downloads into folders by website", isOn: $model.organizeByDomain)
-            Text("Used when no rule or kind folder applies first: each site gets its own folder, such as example.com.").font(.caption).foregroundStyle(.secondary)
-            Toggle("Notify me when a download finishes", isOn: $model.notifyDownloads)
-            Text("Only when Browser Setu is in the background.").font(.caption).foregroundStyle(.secondary)
-            Text("Files are never opened automatically. Name conflicts get a numbered suffix; nothing is overwritten.")
-                .font(.caption).foregroundStyle(.secondary)
+                .settingsNoted("Used when no rule or kind folder applies first: each site gets its own folder, such as example.com.")
+                .settingsNoted("Only when Browser Setu is in the background.")
+            Picker("When a file with that name is already there", selection: $model.duplicatePolicy) { ForEach(DuplicatePolicy.allCases) { Text($0.title).tag($0) } }
+                .settingsNoted(model.duplicatePolicy == .replace ? "The old file is moved to the Trash, so it can be put back." : model.duplicatePolicy == .ask ? "You are asked each time. If you do not answer, both are kept." : model.duplicatePolicy == .skip ? "The download is not started, and the list tells you why." : "The new file gets a number: “name (1).pdf”. Nothing is overwritten.")
+            TextField("Name template", text: $model.downloadNameTemplate).autocorrectionDisabled()
+            if let problem = DownloadCoordinator.templateProblem(model.downloadNameTemplate) {
+                Text("\(problem) Downloads keep the name the site gave until this is fixed.").font(.caption).foregroundStyle(.orange)
+            } else {
+                Text("{name} is the name the site gave (without its ending), {site} the website, {type} the kind of file, {date} and {time} when it was fetched. Slashes make folders inside Downloads, up to three deep. Example: “{site}/{date}/{name}”. The ending, such as .pdf, is kept.")
+                    .settingsNote()
+                Text("Example: \(NamingTemplate.preview(model.downloadNameTemplate))").font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            }
+            Text("Files are never opened automatically.").settingsNote()
             Button("Clear Download History") {
                 try? model.core.clearDownloads()
                 model.downloads.clearCompleted()
             }
+        }
+        DownloadNetworkSettingsSection()
+        TorrentSettingsSection()
+        ED2KSettingsSection()
+        DownloadExtensionsSettingsSection()
+        #if os(macOS)
+        LinkDetectionSettingsSection()          // defined with the Mac's Link Grabber
+        #endif
+        DownloadNotificationSettingsSection()
+        DownloadAutomationSettingsSection()
+        #if os(macOS)
+        RemoteDevicesSettingsSection()
+        ProviderSettingsSection()
+        MediaSettingsSection()
+        AccountsSettingsSection()
+        #endif
         }
     }
 }
@@ -955,24 +1030,11 @@ struct PerformanceSettingsSection: View {
             MemorySettingsSection()
             NeverSleepSection()
             ResourceMonitorSection()
+            SmoothnessSection()
             Section("Split View") {
                 Text(model.splitTabID == nil ? "Split view is closed." : "Split view keeps two pages live at once, which uses more memory.")
                     .foregroundStyle(.secondary)
             }
-        }
-    }
-}
-
-struct KeyboardSettingsSection: View {
-    private let shortcuts: [(String, String)] = [
-        ("New Tab", "⌘T"), ("Close Tab", "⌘W"), ("Reopen Closed Tab", "⇧⌘T"), ("New Private Tab", "⇧⌘N"),
-        ("Open Location", "⌘L"), ("Command Palette", "⌘K"), ("Find in Page", "⌘F"), ("Bookmark Page", "⌘D"),
-        ("Toggle Sidebar", "⇧⌘L"), ("Tab Overview", "⇧⌘\\"), ("Select Tab 1–9", "⌘1–9"), ("Switch Workspace", "⌃1–9"),
-        ("Focus Mode", "⌥⌘F"), ("Paste and Go", "⇧⌘V"),
-    ]
-    var body: some View {
-        Section("Shortcuts") {
-            ForEach(shortcuts, id: \.0) { LabeledContent($0.0, value: $0.1) }
         }
     }
 }
@@ -983,7 +1045,7 @@ struct AdvancedSettingsSection: View {
         Section("Diagnostics") {
             LabeledContent("Engine", value: model.engine.name)
             LabeledContent("Profile", value: model.profileName)
-            Text("Diagnostics stay on this device. Nothing is collected or sent.").font(.caption).foregroundStyle(.secondary)
+                .settingsNoted("Diagnostics stay on this device. Nothing is collected or sent.")
         }
     }
 }
@@ -1029,7 +1091,7 @@ struct SettingsView: View {
                 } label: {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(entry.title)
-                        Text(title(forTopic: entry.phone)).font(.caption).foregroundStyle(.secondary)
+                        Text(title(forTopic: entry.phone)).settingsNote()
                     }
                 }
             }
@@ -1094,6 +1156,9 @@ struct SettingsView: View {
             ExtensionsSettingsSection()
             RemoteExtensionsSection()
             UserScriptsSection()
+            SponsorBlockSection()
+            WebAppsSection()
+            EnhancementsSection()
         case "advanced":
             AdvancedSettingsSection()
         default:
@@ -1155,6 +1220,9 @@ struct SettingsView: View {
             ExtensionsSettingsSection()
             RemoteExtensionsSection()
             UserScriptsSection()
+            SponsorBlockSection()
+            WebAppsSection()
+            EnhancementsSection()
             #endif
             AdvancedSettingsSection()
             HealthCheckSection()
@@ -1239,7 +1307,7 @@ struct ExtensionPermissionsSheet: View {
                     section("Websites it can read and change", rows.filter(\.isSite))
                     if !history.isEmpty {
                         Text("Recent changes").font(.subheadline.weight(.semibold))
-                        ForEach(history, id: \.self) { Text($0).font(.caption).foregroundStyle(.secondary) }
+                        ForEach(history, id: \.self) { Text($0).settingsNote() }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1254,7 +1322,7 @@ struct ExtensionPermissionsSheet: View {
                 if let siteProblem { Text(siteProblem).font(.caption).foregroundStyle(.red) }
             }
             Text("Turning something off can stop parts of the extension from working. It stays off until you turn it on again.")
-                .font(.caption).foregroundStyle(.secondary)
+                .settingsNote()
             HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
         }
         .padding(20)
@@ -1373,11 +1441,11 @@ struct HealthCheckSection: View {
                         .foregroundStyle(item.status == .ok ? Color.green : (item.status == .warning ? Color.orange : Color.red))
                     VStack(alignment: .leading, spacing: 2) {
                         Text(item.name)
-                        Text(item.detail).font(.caption).foregroundStyle(.secondary)
+                        Text(item.detail).settingsNote()
                     }
                 }
             }
-            Text("Everything is checked on this device. Nothing is uploaded.").font(.caption).foregroundStyle(.secondary)
+            Text("Everything is checked on this device. Nothing is uploaded.").settingsNote()
         }
     }
 }
@@ -1414,7 +1482,7 @@ struct SiteDataSheet: View {
                     HStack {
                         VStack(alignment: .leading) {
                             Text(site.host)
-                            Text(site.kinds.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary)
+                            Text(site.kinds.joined(separator: ", ")).settingsNote()
                         }
                         Spacer()
                         Button("Remove") {
@@ -1427,7 +1495,7 @@ struct SiteDataSheet: View {
                 }
             }
             Text("Removing a site signs you out of it and clears what it saved here. Your history and bookmarks are not touched.")
-                .font(.caption).foregroundStyle(.secondary).padding()
+                .settingsNote().padding()
         }
         .frame(minWidth: 420, minHeight: 420)
         .task { await reload() }

@@ -14,16 +14,38 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.3.3"
-    CURRENT_PROJECT_VERSION: "20"
+    MARKETING_VERSION: "0.4.0"
+    CURRENT_PROJECT_VERSION: "22"
     ENABLE_HARDENED_RUNTIME: YES
     GENERATE_INFOPLIST_FILE: NO
     EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64
 targets:
+  MP3Lame:
+    # LAME 3.100 (LGPL 2.1), the MP3 encoder only, as its own static library. Local conversion of audio to MP3; nothing here touches the network. See ThirdParty/lame/README.browsersetu.md.
+    type: library.dynamic
+    platform: macOS
+    sources:
+      - path: ThirdParty/lame/libmp3lame
+        excludes: ["vector/**"]
+      - path: ThirdParty/lame/libmp3lame/vector
+        buildPhase: none
+    settings:
+      base:
+        SWIFT_VERSION: "5.0"
+        GCC_WARN_INHIBIT_ALL_WARNINGS: YES
+        CLANG_WARN_STRICT_PROTOTYPES: NO
+        HEADER_SEARCH_PATHS: "$(SRCROOT)/ThirdParty/lame/libmp3lame $(SRCROOT)/ThirdParty/lame/include"
+        GCC_PREPROCESSOR_DEFINITIONS: "STDC_HEADERS=1 HAVE_STDINT_H=1 HAVE_LIMITS_H=1 HAVE_STRING_H=1 HAVE_ERRNO_H=1 HAVE_MEMCPY=1 LAME_LIBRARY_BUILD=1 ieee754_float32_t=float"
+        ARCHS: arm64
+        ONLY_ACTIVE_ARCH: NO
+        SKIP_INSTALL: YES
+        PRODUCT_NAME: mp3lame
+        EXECUTABLE_PREFIX: lib
+        DYLIB_INSTALL_NAME_BASE: "@rpath"
   BrowserSetuMac:
     type: application
     platform: macOS
-    sources: [Shared, Engines, macOS, Generated/browser_core.swift]
+    sources: [Shared, Engines, macOS, Generated/browser_core.swift, {path: ThirdParty/Notices, buildPhase: resources}]
     dependencies:
       - package: SetuPrivacyKit
         product: SetuPrivacyCore
@@ -32,6 +54,25 @@ targets:
       - framework: Generated/BrowserCore.xcframework
         embed: false
       - target: BrowserSetuMacShare
+      - target: MP3Lame
+        embed: true
+        codeSign: true
+        copy:
+          destination: frameworks
+    postBuildScripts:
+      - name: Embed bundled tools
+        basedOnDependencyAnalysis: false
+        script: |
+          set -e
+          TOOLS="$SRCROOT/ThirdParty/yt-dlp"
+          DEST="$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH"
+          mkdir -p "$DEST/Resources"
+          cp "$TOOLS/MANIFEST.json" "$DEST/Resources/BundledTools.json"
+          if [ -f "$SRCROOT/ThirdParty/ffmpeg/MANIFEST.json" ]; then cp "$SRCROOT/ThirdParty/ffmpeg/MANIFEST.json" "$DEST/Resources/BundledFFmpeg.json"; fi
+          # In Resources/Tools, not Helpers: codesign refuses a Python tree inside Helpers ("bundle format unrecognized" for the *.dist-info folders). Its Mach-O files are signed one by one in Stage C2.
+          rm -rf "$DEST/Helpers/yt-dlp" "$DEST/Resources/Tools/yt-dlp"; mkdir -p "$DEST/Resources/Tools"
+          # The base app stays small: the tool is embedded only for a build made with BUNDLE_MEDIA_TOOLS=1. Otherwise it is offered in setup and installed on request (MediaToolsInstaller).
+          if [ "$BUNDLE_MEDIA_TOOLS" != "1" ]; then echo "note: media tools are not embedded (installed on request)."; elif [ -d "$TOOLS/bin/yt-dlp" ]; then ditto "$TOOLS/bin/yt-dlp" "$DEST/Resources/Tools/yt-dlp"; else echo "note: ThirdParty/yt-dlp/bin/yt-dlp is missing; run scripts/fetch-bundled-tools.sh. This build has no bundled extractor."; fi
     info:
       path: macOS/Info.plist
       properties:
@@ -62,6 +103,20 @@ targets:
           - CFBundleURLName: Browser Setu actions
             CFBundleURLSchemes: [browsersetu]
             CFBundleTypeRole: Viewer
+        # A .torrent file can be opened with this app (Open With, or dropped on its icon): it shows the torrent preview, and nothing is downloaded until the person starts it.
+        # Alternate rank: it is offered but never made the default handler by itself.
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: BitTorrent file
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes: [org.bittorrent.torrent]
+        UTImportedTypeDeclarations:
+          - UTTypeIdentifier: org.bittorrent.torrent
+            UTTypeDescription: BitTorrent file
+            UTTypeConformsTo: [public.data]
+            UTTypeTagSpecification:
+              public.filename-extension: [torrent]
+              public.mime-type: [application/x-bittorrent]
         # A browser must be able to open plain-HTTP pages. This exempts web content only; the app's own URLSession
         # traffic (filter-list updates) stays under ATS and is HTTPS-only.
         NSAppTransportSecurity:
@@ -79,11 +134,7 @@ targets:
     entitlements:
       path: macOS/BrowserSetu.entitlements
       properties:
-        com.apple.security.app-sandbox: true
-        com.apple.security.network.client: true
-        com.apple.security.files.user-selected.read-write: true
-        com.apple.security.files.downloads.read-write: true
-        com.apple.security.print: true
+        # Not sandboxed: Browser Setu is distributed as a direct-download DMG (hardened runtime, Developer ID, notarized), never through the Mac App Store. The sandbox-only keys (network, files, print) are gone with it.
         com.apple.security.device.camera: true
         com.apple.security.device.audio-input: true
         com.apple.security.personal-information.calendars: true
@@ -93,6 +144,7 @@ targets:
       base:
         # The bundled Rust XCFramework currently supplies Apple Silicon macOS only.
         ARCHS: arm64
+        SWIFT_INCLUDE_PATHS: "$(SRCROOT)/ThirdParty/lame/include"
         BROWSERSETU_BUNDLE_ID: com.browsersetu.mac
         PRODUCT_BUNDLE_IDENTIFIER: $(BROWSERSETU_BUNDLE_ID)
         PRODUCT_NAME: Browser Setu
@@ -102,6 +154,8 @@ targets:
         CODE_SIGN_STYLE: Automatic
         # Debug builds are loaded by the test runner, which signs its bundles another way, so library validation is left off there only.
         ENABLE_HARDENED_RUNTIME[config=Debug]: NO
+        # Debug: the same unsandboxed entitlements, in their own file. Release signs with BrowserSetu.entitlements.
+        CODE_SIGN_ENTITLEMENTS[config=Debug]: macOS/BrowserSetuDebug.entitlements
       configs:
         Release:
           CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
@@ -110,7 +164,7 @@ targets:
     # iCloud sync entitlement difference is needed here: iCloud key-value storage needs a profile only the App Store gives, so sync by iCloud is off in this build.
     type: application
     platform: macOS
-    sources: [Shared, Engines, macOS, Direct, Generated/browser_core.swift]
+    sources: [Shared, Engines, macOS, Direct, Generated/browser_core.swift, {path: ThirdParty/Notices, buildPhase: resources}]
     dependencies:
       - package: SetuPrivacyKit
         product: SetuPrivacyCore
@@ -120,6 +174,25 @@ targets:
         product: Sparkle
       - framework: Generated/BrowserCore.xcframework
         embed: false
+      - target: MP3Lame
+        embed: true
+        codeSign: true
+        copy:
+          destination: frameworks
+    postBuildScripts:
+      - name: Embed bundled tools
+        basedOnDependencyAnalysis: false
+        script: |
+          set -e
+          TOOLS="$SRCROOT/ThirdParty/yt-dlp"
+          DEST="$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH"
+          mkdir -p "$DEST/Resources"
+          cp "$TOOLS/MANIFEST.json" "$DEST/Resources/BundledTools.json"
+          if [ -f "$SRCROOT/ThirdParty/ffmpeg/MANIFEST.json" ]; then cp "$SRCROOT/ThirdParty/ffmpeg/MANIFEST.json" "$DEST/Resources/BundledFFmpeg.json"; fi
+          # In Resources/Tools, not Helpers: codesign refuses a Python tree inside Helpers ("bundle format unrecognized" for the *.dist-info folders). Its Mach-O files are signed one by one in Stage C2.
+          rm -rf "$DEST/Helpers/yt-dlp" "$DEST/Resources/Tools/yt-dlp"; mkdir -p "$DEST/Resources/Tools"
+          # The base app stays small: the tool is embedded only for a build made with BUNDLE_MEDIA_TOOLS=1. Otherwise it is offered in setup and installed on request (MediaToolsInstaller).
+          if [ "$BUNDLE_MEDIA_TOOLS" != "1" ]; then echo "note: media tools are not embedded (installed on request)."; elif [ -d "$TOOLS/bin/yt-dlp" ]; then ditto "$TOOLS/bin/yt-dlp" "$DEST/Resources/Tools/yt-dlp"; else echo "note: ThirdParty/yt-dlp/bin/yt-dlp is missing; run scripts/fetch-bundled-tools.sh. This build has no bundled extractor."; fi
     info:
       path: Direct/Info.plist
       properties:
@@ -136,6 +209,20 @@ targets:
           - CFBundleURLName: Browser Setu actions
             CFBundleURLSchemes: [browsersetu]
             CFBundleTypeRole: Viewer
+        # A .torrent file can be opened with this app (Open With, or dropped on its icon): it shows the torrent preview, and nothing is downloaded until the person starts it.
+        # Alternate rank: it is offered but never made the default handler by itself.
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: BitTorrent file
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes: [org.bittorrent.torrent]
+        UTImportedTypeDeclarations:
+          - UTTypeIdentifier: org.bittorrent.torrent
+            UTTypeDescription: BitTorrent file
+            UTTypeConformsTo: [public.data]
+            UTTypeTagSpecification:
+              public.filename-extension: [torrent]
+              public.mime-type: [application/x-bittorrent]
         NSAppTransportSecurity:
           NSAllowsArbitraryLoadsInWebContent: true
         LSApplicationQueriesSchemes: [youtube, instagram, twitter, spotify, reddit, whatsapp]
@@ -154,22 +241,16 @@ targets:
     entitlements:
       path: Direct/BrowserSetuDirect.entitlements
       properties:
-        com.apple.security.app-sandbox: true
-        com.apple.security.network.client: true
-        # The AI-tool connection listens on this Mac's loopback address only (off until the person turns it on).
-        com.apple.security.network.server: true
-        com.apple.security.files.user-selected.read-write: true
-        com.apple.security.files.downloads.read-write: true
-        com.apple.security.print: true
+        # Not sandboxed (direct-download DMG). Camera, microphone and calendar are hardened-runtime entitlements and stay.
         com.apple.security.device.camera: true
         com.apple.security.device.audio-input: true
         com.apple.security.personal-information.calendars: true
-        # Sparkle's installer helpers, which the sandbox must be told about (its documented setup for sandboxed apps).
-        com.apple.security.temporary-exception.mach-lookup.global-name:
-          - com.browsersetu.mac-spks
-          - com.browsersetu.mac-spki
+        # iCloud sync (an opt-in setting, Shared/Sync.swift, iCloud key-value storage), the same identifier as the other Mac and iPhone builds so the downloadable app syncs with them.
+        # Signing for distribution needs a Developer ID provisioning profile for com.browsersetu.mac that has iCloud key-value storage enabled; an ad hoc signature cannot carry this entitlement.
+        com.apple.developer.ubiquity-kvstore-identifier: $(TeamIdentifierPrefix)com.browsersetu.sync
     settings:
       base:
+        SWIFT_INCLUDE_PATHS: "$(SRCROOT)/ThirdParty/lame/include"
         ARCHS: arm64
         PRODUCT_BUNDLE_IDENTIFIER: com.browsersetu.mac
         # Named apart from the App Store build so both can be built in one products folder; the release script names the shipped copy "Browser Setu.app".
@@ -185,6 +266,8 @@ targets:
       configs:
         Release:
           CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
+          # The Developer ID profile for com.browsersetu.mac (with iCloud key-value storage), installed in Xcode's profile folder. Set on this target only: the framework targets do not accept profiles.
+          PROVISIONING_PROFILE_SPECIFIER: Browser Setu Mac DevID
   BrowserSetuMacShare:
     type: app-extension
     platform: macOS
@@ -316,6 +399,7 @@ targets:
         # traffic (filter-list updates) stays under ATS and is HTTPS-only.
         NSAppTransportSecurity:
           NSAllowsArbitraryLoadsInWebContent: true
+        LSApplicationQueriesSchemes: [youtube, instagram, twitter, spotify, reddit, whatsapp]
         NSCameraUsageDescription: Websites you allow can use your camera.
         NSMicrophoneUsageDescription: Websites you allow can use your microphone, and voice search listens when you tap the microphone in the search box.
         NSSpeechRecognitionUsageDescription: Voice search turns what you say into text on this device. Nothing you say is sent anywhere.
@@ -335,7 +419,10 @@ targets:
   BrowserSetuMacTests:
     type: bundle.unit-test
     platform: macOS
-    sources: [Tests]
+    # Fixtures/stream holds real HLS/DASH segments served from disk by the UI tests; as bundle resources their identical names (init.mp4, seg0.m4s) in two folders would collide.
+    sources:
+      - path: Tests
+        excludes: ["Fixtures/stream/**"]
     dependencies:
       - package: SetuPrivacyKit
         product: SetuPrivacyCore
@@ -345,6 +432,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.browsersetu.mac.tests
+        SWIFT_INCLUDE_PATHS: "$(SRCROOT)/ThirdParty/lame/include"
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_NSPrincipalClass: TestCleanup
         CODE_SIGN_IDENTITY: "-"
@@ -400,6 +488,138 @@ schemes:
         BrowserSetuMac: all
     test:
       targets: [BrowserSetuMacTests, BrowserSetuMacUITests]
+      # About forty tests load pages from scripts/testserver.py on port 18765. The scheme starts it before the tests (unless something already listens there) and stops
+      # only the copy it started, so a plain "xcodebuild test" or Cmd-U is meaningful without a helper started by hand.
+      preActions:
+        - name: Start the fixture server
+          settingsTarget: BrowserSetuMacTests
+          script: |
+            PORT=18765
+            PIDFILE="${TMPDIR:-/tmp}/browsersetu-testserver.pid"
+            if /usr/bin/nc -z 127.0.0.1 $PORT >/dev/null 2>&1; then exit 0; fi
+            /usr/bin/nohup /usr/bin/python3 "$SRCROOT/../../scripts/testserver.py" $PORT >"${TMPDIR:-/tmp}/browsersetu-testserver.log" 2>&1 &
+            echo $! > "$PIDFILE"
+            for i in 1 2 3 4 5 6 7 8 9 10; do /usr/bin/nc -z 127.0.0.1 $PORT >/dev/null 2>&1 && exit 0; /bin/sleep 0.5; done
+            echo "The fixture server did not start" >&2
+        - name: Start the remote-file fixtures (OpenSSH server and FTP)
+          settingsTarget: BrowserSetuMacTests
+          script: |
+            /bin/bash "$SRCROOT/../../scripts/remote_ui_fixture.sh" start || echo "The remote-file UI fixtures could not be started" >&2
+        - name: Start the provider fixtures (GitHub, Hugging Face and bucket stand-ins)
+          settingsTarget: BrowserSetuMacTests
+          script: |
+            /bin/bash "$SRCROOT/../../scripts/provider_ui_fixture.sh" start || echo "The provider UI fixture could not be started" >&2
+        - name: Start the download fixture server
+          settingsTarget: BrowserSetuMacTests
+          script: |
+            PORT=18766
+            PIDFILE="${TMPDIR:-/tmp}/browsersetu-download-fixture.pid"
+            if /usr/bin/nc -z 127.0.0.1 $PORT >/dev/null 2>&1; then exit 0; fi
+            /usr/bin/nohup /usr/bin/python3 -I "$SRCROOT/../../scripts/download_fixture_server.py" $PORT >"${TMPDIR:-/tmp}/browsersetu-download-fixture.log" 2>&1 &
+            echo $! > "$PIDFILE"
+            for i in 1 2 3 4 5 6 7 8 9 10; do /usr/bin/nc -z 127.0.0.1 $PORT >/dev/null 2>&1 && exit 0; /bin/sleep 0.5; done
+            echo "The download fixture server did not start" >&2
+        - name: Start the download proxy fixtures
+          settingsTarget: BrowserSetuMacTests
+          script: |
+            # Two local proxies for the proxy tests (18767-18769 open, 18770-18772 with the login alice:s3cret). The name originhost exists only inside them.
+            for SET in "18767 18768 18769" "18770 18771 18772 --auth alice:s3cret"; do
+              set -- $SET
+              if /usr/bin/nc -z 127.0.0.1 $1 >/dev/null 2>&1; then continue; fi
+              PIDFILE="${TMPDIR:-/tmp}/browsersetu-download-proxy-$1.pid"
+              /usr/bin/nohup /usr/bin/python3 -I "$SRCROOT/../../scripts/download_proxy_fixture.py" --http $1 --socks $2 --ctl $3 ${4:+$4 $5} --map originhost=127.0.0.1:18766 >"${TMPDIR:-/tmp}/browsersetu-download-proxy-$1.log" 2>&1 &
+              echo $! > "$PIDFILE"
+            done
+            for i in 1 2 3 4 5 6 7 8 9 10; do /usr/bin/nc -z 127.0.0.1 18767 >/dev/null 2>&1 && /usr/bin/nc -z 127.0.0.1 18770 >/dev/null 2>&1 && exit 0; /bin/sleep 0.5; done
+            echo "The proxy fixtures did not start" >&2
+        - name: Start the eD2k fixture
+          settingsTarget: BrowserSetuMacTests
+          script: |
+            # A local eD2k server (18801) and two peers (18802 honest, 18803 damaging blocks) for the eD2k socket tests; statistics on 18811.
+            # A copy left over from an interrupted run (its stop step never ran) may be half-dead or hold old statistics, so the one this scheme started earlier is stopped and a fresh one is made.
+            PIDFILE="${TMPDIR:-/tmp}/browsersetu-ed2k-fixture.pid"
+            if [ -f "$PIDFILE" ]; then OLD="$(cat "$PIDFILE")"; if /bin/ps -p "$OLD" -o command= 2>/dev/null | /usr/bin/grep -q ed2k_fixture; then /bin/kill "$OLD" >/dev/null 2>&1; /bin/sleep 0.5; fi; /bin/rm -f "$PIDFILE"; fi
+            if /usr/bin/nc -z 127.0.0.1 18801 >/dev/null 2>&1; then exit 0; fi
+            /usr/bin/nohup /usr/bin/python3 -I "$SRCROOT/../../scripts/ed2k_fixture.py" 18801 18802 18803 >"${TMPDIR:-/tmp}/browsersetu-ed2k-fixture.log" 2>&1 &
+            echo $! > "$PIDFILE"
+            for i in 1 2 3 4 5 6 7 8 9 10; do /usr/bin/nc -z 127.0.0.1 18801 >/dev/null 2>&1 && /usr/bin/nc -z 127.0.0.1 18802 >/dev/null 2>&1 && /usr/bin/nc -z 127.0.0.1 18803 >/dev/null 2>&1 && /usr/bin/nc -z 127.0.0.1 18811 >/dev/null 2>&1 && exit 0; /bin/sleep 0.5; done
+            echo "The eD2k fixture did not start" >&2
+        - name: Start the test process supervisor
+          settingsTarget: BrowserSetuMacTests
+          script: |
+            # Starts the FTP fixture and sshd for the remote-file unit tests on request (127.0.0.1:18821, fixed programs, paths inside the test host's own temporary folder only).
+            # The copy this scheme started earlier is stopped first (only if the pid file still names the supervisor), so a copy left by an interrupted run is never reused.
+            PIDFILE="${TMPDIR:-/tmp}/browsersetu-test-supervisor.pid"
+            if [ -f "$PIDFILE" ]; then OLD="$(cat "$PIDFILE")"; if /bin/ps -p "$OLD" -o command= 2>/dev/null | /usr/bin/grep -q test_process_supervisor; then /bin/kill "$OLD" >/dev/null 2>&1; /bin/sleep 0.5; fi; /bin/rm -f "$PIDFILE"; fi
+            if /usr/bin/nc -z 127.0.0.1 18821 >/dev/null 2>&1; then echo "port 18821 is held by something else" >&2; exit 0; fi
+            /usr/bin/nohup /usr/bin/python3 -I "$SRCROOT/../../scripts/test_process_supervisor.py" 18821 >"${TMPDIR:-/tmp}/browsersetu-test-supervisor.log" 2>&1 &
+            echo $! > "$PIDFILE"
+            for i in 1 2 3 4 5 6 7 8 9 10; do /usr/bin/nc -z 127.0.0.1 18821 >/dev/null 2>&1 && exit 0; /bin/sleep 0.5; done
+            echo "The test process supervisor did not start" >&2
+        - name: Build the media processing tool for the tests
+          settingsTarget: BrowserSetuMacTests
+          script: |
+            # A minimal LGPL FFmpeg + FFprobe (about 30 s, built once, kept in the git-ignored ThirdParty/ffmpeg/bin) for the processing tests. Never embedded in the app.
+            OUT="$SRCROOT/ThirdParty/ffmpeg/bin/ffmpeg"
+            if [ ! -x "$OUT/ffmpeg" ] || [ ! -x "$OUT/ffprobe" ]; then
+              "$SRCROOT/../../scripts/build-ffmpeg-minimal.sh" "$OUT" >"${TMPDIR:-/tmp}/browsersetu-ffmpeg-build.log" 2>&1 || echo "The media processing tool could not be built; see ${TMPDIR:-/tmp}/browsersetu-ffmpeg-build.log" >&2
+            fi
+        - name: Build the media-tools UI fixture
+          settingsTarget: BrowserSetuMacTests
+          script: |
+            # The media-tools UI tests install a tiny pinned package into an isolated folder; the sandboxed UI test runner cannot compile it, so it is built here, every run, fresh.
+            DEST=/private/tmp/bs-mediatools-ui-fixture
+            /bin/rm -rf "$DEST"
+            "$SRCROOT/../../scripts/make-mediatools-ui-fixture.sh" "$DEST" >"${TMPDIR:-/tmp}/browsersetu-mediatools-fixture.log" 2>&1 || { echo "The media-tools UI fixture could not be built; see ${TMPDIR:-/tmp}/browsersetu-mediatools-fixture.log" >&2; }
+        - name: Build the media processing tool UI fixture
+          settingsTarget: BrowserSetuMacTests
+          script: |
+            # Stand-in ffmpeg/ffprobe programs the install flow can download from disk, for the Settings row and the Download sheet's Enable Media Processing button.
+            DEST=/private/tmp/bs-ffmpegtools-ui-fixture
+            /bin/rm -rf "$DEST"
+            /bin/bash "$SRCROOT/../../scripts/make-ffmpegtools-ui-fixture.sh" "$DEST" >"${TMPDIR:-/tmp}/browsersetu-ffmpegtools-fixture.log" 2>&1 || { echo "The media processing UI fixture could not be built; see ${TMPDIR:-/tmp}/browsersetu-ffmpegtools-fixture.log" >&2; }
+      postActions:
+        - name: Stop the fixture server
+          settingsTarget: BrowserSetuMacTests
+          script: |
+            PIDFILE="${TMPDIR:-/tmp}/browsersetu-testserver.pid"
+            if [ -f "$PIDFILE" ]; then /bin/kill "$(cat "$PIDFILE")" >/dev/null 2>&1; /bin/rm -f "$PIDFILE"; fi
+        - name: Remove the media-tools UI fixture and its test preferences
+          settingsTarget: BrowserSetuMacTests
+          script: |
+            /bin/rm -rf /private/tmp/bs-mediatools-ui-fixture /private/tmp/bs-ffmpegtools-ui-fixture
+            /bin/rm -rf "${TMPDIR:-/tmp}"/bs-ui-mediatools-* "${TMPDIR:-/tmp}"/bs-ui-manifest-*
+            /bin/rm -f "$HOME"/Library/Preferences/bs-ui-mediatools-*.plist "$HOME"/Library/Preferences/bs-ui-mt-*.plist "$HOME"/Library/Preferences/bs-ui-consent-*.plist
+        - name: Stop the remote-file fixtures
+          settingsTarget: BrowserSetuMacTests
+          script: |
+            /bin/bash "$SRCROOT/../../scripts/remote_ui_fixture.sh" stop
+        - name: Stop the provider fixtures
+          settingsTarget: BrowserSetuMacTests
+          script: |
+            /bin/bash "$SRCROOT/../../scripts/provider_ui_fixture.sh" stop
+        - name: Stop the download fixture server
+          settingsTarget: BrowserSetuMacTests
+          script: |
+            PIDFILE="${TMPDIR:-/tmp}/browsersetu-download-fixture.pid"
+            if [ -f "$PIDFILE" ]; then /bin/kill "$(cat "$PIDFILE")" >/dev/null 2>&1; /bin/rm -f "$PIDFILE"; fi
+        - name: Stop the test process supervisor
+          settingsTarget: BrowserSetuMacTests
+          script: |
+            PIDFILE="${TMPDIR:-/tmp}/browsersetu-test-supervisor.pid"
+            if [ -f "$PIDFILE" ]; then OLD="$(cat "$PIDFILE")"; if /bin/ps -p "$OLD" -o command= 2>/dev/null | /usr/bin/grep -q test_process_supervisor; then /bin/kill "$OLD" >/dev/null 2>&1; fi; /bin/rm -f "$PIDFILE"; fi
+        - name: Stop the eD2k fixture
+          settingsTarget: BrowserSetuMacTests
+          script: |
+            PIDFILE="${TMPDIR:-/tmp}/browsersetu-ed2k-fixture.pid"
+            if [ -f "$PIDFILE" ]; then /bin/kill "$(cat "$PIDFILE")" >/dev/null 2>&1; /bin/rm -f "$PIDFILE"; fi
+        - name: Stop the download proxy fixtures
+          settingsTarget: BrowserSetuMacTests
+          script: |
+            for P in 18767 18770; do
+              PIDFILE="${TMPDIR:-/tmp}/browsersetu-download-proxy-$P.pid"
+              if [ -f "$PIDFILE" ]; then /bin/kill "$(cat "$PIDFILE")" >/dev/null 2>&1; /bin/rm -f "$PIDFILE"; fi
+            done
   BrowserSetuMacDirect:
     build:
       targets:

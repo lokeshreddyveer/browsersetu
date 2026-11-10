@@ -24,7 +24,7 @@ final class SidebarButtonsUITests: XCTestCase {
 
     /// What is on screen, attached to the test result, for when a button does not do what it should.
     private func snapshot(_ name: String) {
-        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = name; shot.lifetime = .keepAlways; add(shot)
+        let shot = XCTAttachment(screenshot: app.safeScreenshot()); shot.name = name; shot.lifetime = .keepAlways; add(shot)
         let tree = XCTAttachment(string: app.debugDescription); tree.name = name + "-tree"; tree.lifetime = .keepAlways; add(tree)
         print("SNAPSHOT \(name): windows=\(app.windows.count) buttons=\(app.buttons.allElementsBoundByIndex.prefix(60).map { $0.identifier + "|" + $0.label })")
     }
@@ -37,7 +37,7 @@ final class SidebarButtonsUITests: XCTestCase {
     }
 
     private func revealPeekSidebar() {
-        let window = app.windows.firstMatch
+        let window = app.windows["browser-AppWindow-1"]          // the main window, not whichever window happens to be listed first
         window.coordinate(withNormalizedOffset: CGVector(dx: 0.002, dy: 0.5)).hover()
         XCTAssertTrue(button("pin-sidebar").waitForExistence(timeout: 5), "the left edge did not bring out the sidebar")
     }
@@ -48,12 +48,13 @@ final class SidebarButtonsUITests: XCTestCase {
         try launch(state: "sidebar")
         XCTAssertTrue(button("hide-sidebar").waitForExistence(timeout: 8))
 
-        // Downloads open inside the sidebar and the back arrow returns to the tabs.
+        // The footer's Downloads button opens the Downloads panel (docked beside the page) and the same button closes it again.
         click("downloads-button")
-        let opened = any("sidebar-downloads").waitForExistence(timeout: 4); if !opened { snapshot("downloads-missing") }
-        XCTAssertTrue(opened, "Downloads did not open in the sidebar")
-        click("downloads-back")
-        XCTAssertTrue(waitGone(any("sidebar-downloads")), "the back arrow did not return to the tabs")
+        let table = any("downloads-table")
+        let opened = table.waitForExistence(timeout: 6); if !opened { snapshot("downloads-missing") }
+        XCTAssertTrue(opened, "Downloads did not open")
+        click("downloads-button")
+        XCTAssertTrue(waitGone(table), "the Downloads button did not close the panel again")
 
         // A new tab from the + beside the Open Tabs heading.
         let before = app.descendants(matching: .any).matching(identifier: "tab-chip").count
@@ -61,7 +62,7 @@ final class SidebarButtonsUITests: XCTestCase {
         XCTAssertTrue(waitFor(5) { self.app.descendants(matching: .any).matching(identifier: "tab-chip").count == before + 1 }, "New Tab did nothing")
 
         // Settings.
-        click("settings-button")
+        click("footer-settings")
         let settingsOpen = settingsWindowOpens(); if !settingsOpen { snapshot("settings-missing") }
         XCTAssertTrue(settingsOpen, "Settings did not open")
         app.typeKey("w", modifierFlags: .command)
@@ -82,13 +83,19 @@ final class SidebarButtonsUITests: XCTestCase {
         // The pill's own buttons: fold it away and open it again.
         click("pill-chevron.up")
         XCTAssertTrue(any("pill-handle").waitForExistence(timeout: 4), "the pill did not fold into its handle")
-        XCTAssertFalse(button("floating-search-button").exists, "the Search button should fold away with the pill")
+        XCTAssertFalse(button("collapsed-pill").exists, "the pill should fold away into its handle")
         click("pill-handle")
         XCTAssertTrue(button("pill-chevron.up").waitForExistence(timeout: 4), "the handle did not bring the pill back")
-        XCTAssertTrue(button("floating-search-button").waitForExistence(timeout: 4))
+        XCTAssertTrue(button("collapsed-pill").waitForExistence(timeout: 4))
 
-        // The Search button opens the search panel; Escape closes it.
-        click("floating-search-button")
+        // On a blank tab "search" is the search box in the page itself, so a page is loaded first (typed there, as a person would).
+        let box = app.textFields["start-search"]
+        XCTAssertTrue(box.waitForExistence(timeout: 6))
+        box.click(); box.typeText("127.0.0.1:18765/page\n")
+        XCTAssertTrue(waitFor(15) { !self.button("collapsed-pill").label.contains("New Tab") }, "the page did not load")
+
+        // The pill opens the search panel; Escape closes it.
+        click("collapsed-pill")
         XCTAssertTrue(any("floating-address-bar").waitForExistence(timeout: 4), "Search did not open")
         app.typeKey(.escape, modifierFlags: [])
         XCTAssertTrue(waitGone(any("floating-address-bar")), "Escape did not close the search panel")
@@ -107,21 +114,22 @@ final class SidebarButtonsUITests: XCTestCase {
         XCTAssertTrue(waitGone(any("tab-search")), "tab search did not close")
 
         click("downloads-button")
-        let opened = any("sidebar-downloads").waitForExistence(timeout: 4); if !opened { snapshot("downloads-missing") }
-        XCTAssertTrue(opened, "Downloads did not open in the sidebar")
-        click("downloads-back")
-        XCTAssertTrue(waitGone(any("sidebar-downloads")))
+        let downloadsTable = any("downloads-table")
+        let downloadsOpen = downloadsTable.waitForExistence(timeout: 6); if !downloadsOpen { snapshot("downloads-missing") }
+        XCTAssertTrue(downloadsOpen, "Downloads did not open")
+        click("downloads-button")
+        XCTAssertTrue(waitGone(downloadsTable), "the Downloads button did not close the panel again")
 
-        click("bookmarks-button")
+        click("footer-bookmarks")
         XCTAssertTrue(app.sheets.firstMatch.waitForExistence(timeout: 4) || app.staticTexts["Bookmarks"].waitForExistence(timeout: 4), "Bookmarks did not open")
         app.typeKey(.escape, modifierFlags: [])
         revealPeekSidebar()
-        click("history-button")
+        click("footer-history")
         XCTAssertTrue(app.sheets.firstMatch.waitForExistence(timeout: 4) || app.staticTexts["History"].waitForExistence(timeout: 4), "History did not open")
         app.typeKey(.escape, modifierFlags: [])
         revealPeekSidebar()
 
-        click("settings-button")
+        click("footer-settings")
         let settingsOpen = settingsWindowOpens(); if !settingsOpen { snapshot("settings-missing") }
         XCTAssertTrue(settingsOpen, "Settings did not open")
         app.typeKey("w", modifierFlags: .command)

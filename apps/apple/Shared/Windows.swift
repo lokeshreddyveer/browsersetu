@@ -28,10 +28,18 @@ final class WindowRegistry {
     var pendingRestores: [[UInt64]] = []
     /// The next window to open is a guest window.
     var openingGuest = false
+    /// The next window to open is a private window.
+    var openingPrivate = false
+    /// The next window to open is the window of this web app.
+    var openingWebApp: WebAppRecord?
+    /// The workspace (its id; empty is Personal) the next new window should open in, when it was asked for by name (`--space`, a link, Shortcuts).
+    var openingWorkspace: String?
     /// Windows the person closed, newest last: the pages each held (private tabs are never kept). Only for this run of the browser.
     var closedWindows: [ClosedWindow] = []
     /// Pages the next window to open should show, from a window being brought back.
     var reopening: [URL] = []
+    /// The container those pages browse in (an Essential opened in a window of its own keeps its separate identity), or nil.
+    var reopeningContainer: String?
     /// Windows the app itself asked for (New Window, a moved tab, a restored window, the Dock) that have not appeared yet. A window that appears without one
     /// was made by the system, for a link another app opened or a window it remembered, and is not wanted.
     private var requests: [Date] = []
@@ -60,7 +68,7 @@ final class WindowRegistry {
     func externalTarget() -> BrowserModel? {
         let models = all
         let candidates = models.enumerated().map { index, model in
-            WindowPolicy.Candidate(id: index, isGuest: model.isGuest, isUnrequested: model.isUnrequestedWindow, isFocused: model === focused, isPrimary: model === primary)
+            WindowPolicy.Candidate(id: index, isGuest: model.isGuest || model.isPrivateWindow || model.webApp != nil, isUnrequested: model.isUnrequestedWindow, isFocused: model === focused, isPrimary: model === primary)
         }
         return WindowPolicy.externalTarget(among: candidates).map { models[$0] }
     }
@@ -73,14 +81,17 @@ final class WindowRegistry {
 
     func model(forTab id: UInt64) -> BrowserModel? { all.first { $0.tabs.contains { $0.id == id } } }
     var allTabs: [TabController] { all.flatMap(\.tabs) }
-    func anotherWindowHasPrivateTabs(besides model: BrowserModel) -> Bool { others(of: model).contains { $0.tabs.contains(where: \.isPrivate) } }
+    func anotherWindowHasPrivateTabs(besides model: BrowserModel) -> Bool { others(of: model).contains { !$0.isPrivateWindow && $0.tabs.contains(where: \.isPrivate) } }
 
     /// Settings that mean the same in every window. Everything else (layout, sidebar, focus mode, toolbar) belongs to one window.
     static let sharedSettingKeys: Set<String> = [
         "appearance", "accent", "accent_chosen", "lookalike_guard", "focus_rules", "theme", "theme_custom", "density", "workspaces", "dark_pages", "dark_sites", "website_appearance", "site_appearance", "site_zoom",
-        "site_styles", "site_notes", "bookmark_tags", "group_colors", "favorites_order", "search_template", "search_suggestions", "search_shortcuts", "homepage", "startup",
+        "essentials", "pinned_addresses", "site_styles", "site_notes", "bookmark_tags", "group_colors", "favorites_order", "search_template", "search_suggestions", "search_shortcuts", "homepage", "startup",
         "strip_tracking", "app_links", "app_link_sites", "permission_expiry", "show_favorites", "show_continue", "show_frequent", "show_greeting", "show_recently_closed",
-        "start_background", "shortcuts", "organize_downloads", "download_segments", "new_tab_mode", "new_tab_url", "start_color_a", "start_color_b", "protect_pinned", "organize_downloads_domain", "download_notify", "download_concurrent", "save_logins", "spotlight_bookmarks", "site_js_off", "never_sleep_sites", "fingerprint_noise", "fingerprint_exceptions", "de_amp", "video_ads", "cookie_banners", "video_speeds", "user_themes", "start_tile", "block_autoplay", "autoplay_exceptions", "block_popups", "popup_allowed_hosts", "youtube_rules_auto", "command_chains", "web_panels", "theme_schedule", "hidden_menu_items", "hover_previews", "hover_delay", "tab_stacks", "address_sources", "tab_tree",
+        "start_background", "shortcuts", "organize_downloads", "download_segments", "new_tab_mode", "new_tab_url", "start_color_a", "start_color_b", "protect_pinned", "organize_downloads_domain", "download_notify", "download_concurrent", "save_logins",
+        // Scripts, web apps and the switches of the newer features are the profile's, not one window's: a change in one window must show in the others, and never be written over by them.
+        "user_scripts", "user_script_values", "web_apps", "download_duplicate", "download_template", "download_tags", "cookie_banners_hide", "consent_off", "debounce_links", "redirect_skip_off",
+        "searxng_instance", "searxng_suggest", "sponsor_actions", "sponsor_consent", "sponsor_off", "sponsor_on", "sponsor_server", "track_time", "clipboard_history", "link_ask", "spotlight_bookmarks", "site_js_off", "never_sleep_sites", "dark_sites_off", "fingerprint_noise", "fingerprint_exceptions", "de_amp", "video_ads", "cookie_banners", "video_speeds", "user_themes", "start_tile", "block_autoplay", "autoplay_exceptions", "block_popups", "popup_allowed_hosts", "youtube_rules_auto", "command_chains", "web_panels", "theme_schedule", "hidden_menu_items", "hover_previews", "hover_delay", "tab_stacks", "address_sources", "tab_tree",
     ]
 
     /// Tells the other windows that a setting changed, so what they show follows (their own layouts are left alone).
@@ -115,7 +126,8 @@ extension BrowserModel {
     /// Moves a tab to another window. Nothing is reloaded: the same page, with its history and scroll position, simply appears in the other window.
     @discardableResult
     func moveTab(_ id: UInt64, to target: BrowserModel) -> Bool {
-        guard target !== self, windows === target.windows, !target.isGuest || tabs.first(where: { $0.id == id })?.isPrivate == true, let index = tabs.firstIndex(where: { $0.id == id }) else { return false }
+        guard target !== self, windows === target.windows, let index = tabs.firstIndex(where: { $0.id == id }),
+              PrivateTabMove.refusal(tabIsPrivate: tabs[index].isPrivate, sourceIsPrivateWindow: isPrivateWindow, targetIsPrivateWindow: target.isPrivateWindow, targetIsGuest: target.isGuest) == nil else { return false }
         let tab = tabs.remove(at: index)
         let wasActive = id == activeID
         forgetSplitPanel(id)
@@ -139,7 +151,13 @@ extension BrowserModel {
     @discardableResult
     func acceptDroppedTab(_ dragged: UInt64, before target: UInt64?) -> Bool {
         if tabs.contains(where: { $0.id == dragged }) { reorder(dragged, before: target); return true }
-        guard let source = windows.model(forTab: dragged), source !== self, !isGuest || source.tabs.first(where: { $0.id == dragged })?.isPrivate == true else { return false }
+        guard let source = windows.model(forTab: dragged), source !== self else { return false }
+        // A tab never changes who can see its cookies by being moved: say why, and leave it where it is.
+        if let tab = source.tabs.first(where: { $0.id == dragged }),
+           let why = PrivateTabMove.refusal(tabIsPrivate: tab.isPrivate, sourceIsPrivateWindow: source.isPrivateWindow, targetIsPrivateWindow: isPrivateWindow, targetIsGuest: isGuest) {
+            notice = why.message
+            return false
+        }
         guard source.moveTab(dragged, to: self) else { return false }
         reorder(dragged, before: target)
         return true
@@ -166,7 +184,9 @@ extension BrowserModel {
         if lifecycle == nil { let manager = TabLifecycle(model: self); manager.start(); lifecycle = manager }
         var wanted: [UInt64] = []
         var reopened: [URL] = []
-        if windows.openingGuest { windows.openingGuest = false; isGuest = true }
+        if let app = windows.openingWebApp { windows.openingWebApp = nil; webApp = app }
+        else if windows.openingGuest { windows.openingGuest = false; isGuest = true }
+        else if windows.openingPrivate { windows.openingPrivate = false; isPrivateWindow = true; PrivateWindowSessions.known.insert(privateSessionID); NotificationCenter.default.post(name: .privateWindowStarted, object: self) }
         else if !windows.reopening.isEmpty { reopened = windows.reopening; windows.reopening = [] }
         else if !windows.movingTabs.isEmpty { wanted = windows.movingTabs; windows.movingTabs = [] }
         else if !windows.pendingRestores.isEmpty { wanted = windows.pendingRestores.removeFirst() }
@@ -175,8 +195,18 @@ extension BrowserModel {
             guard let source = windows.model(forTab: id), source !== self else { continue }
             if source.moveTab(id, to: self) { adopted += 1 }
         }
-        for url in reopened { _ = openTab(url: url, isPrivate: false); adopted += 1 }
-        if adopted == 0 { _ = openTab(url: nil, isPrivate: isGuest) }
+        let reopenedContainer = windows.reopeningContainer
+        windows.reopeningContainer = nil
+        for url in reopened { _ = openTab(url: url, isPrivate: false, container: reopenedContainer); adopted += 1 }
+        // A window opened for a workspace shows that workspace; its first blank tab belongs to it.
+        if let workspace = windows.openingWorkspace, !isGuest, !isPrivateWindow {
+            windows.openingWorkspace = nil
+            if workspaces.contains(where: { $0.id == workspace }) || workspace.isEmpty { activeWorkspace = workspace }
+        }
+        if adopted == 0, let app = webApp {
+            let tab = openTab(url: app.startURL, isPrivate: false, container: app.container.isEmpty ? nil : app.container)
+            tab.webApp = app
+        } else if adopted == 0 { _ = openTab(url: nil, isPrivate: isGuest || isPrivateWindow) }
         windows.saveWindowLayout(in: self)
     }
 
@@ -207,11 +237,15 @@ extension BrowserModel {
             guard let self, !windows.terminating, windows.all.contains(where: { $0 === self }) else { return }
             onWindowShouldClose = nil
             // Remember what the window held, so it can be brought back (a guest window and private tabs are never kept).
-            if !isGuest {
+            if !isGuest, !isPrivateWindow {
                 let pages = tabs.filter { !$0.isPrivate && !$0.isBlank && !$0.isInternalPage }.compactMap(\.url)
                 if !pages.isEmpty { windows.closedWindows.append(ClosedWindow(urls: pages)); windows.closedWindows = Array(windows.closedWindows.suffix(5)) }
             }
             for tab in tabs { closeTab(id: tab.id, force: true) }
+            if isPrivateWindow {
+                downloads.cancelPrivateSession(privateSessionID)          // what it was still downloading stops with it
+                engine.releasePrivateSession(privateSessionID)            // its temporary storage goes with it
+            }
             windows.remove(self)
             windows.saveWindowLayout(in: self)
             lifecycle?.stop(); lifecycle = nil
@@ -231,9 +265,40 @@ extension BrowserModel {
         windows.onNeedWindow?()
     }
 
+    /// Opens a private window: private tabs only, storage of its own, bookmarks and saved passwords still available, nothing kept when it closes.
+    func openPrivateWindow() {
+        #if os(macOS)
+        windows.openingPrivate = true
+        windows.onNeedWindow?()
+        #else
+        _ = openTab(url: nil, isPrivate: true)          // no windows to open here: a private tab
+        #endif
+    }
+
+    /// Private browsing asked for without saying how (⇧⌘N, the buttons on the start page): what the person chose in Settings, or the question.
+    func newPrivate() {
+        #if os(macOS)
+        let canOpenWindows = true
+        #else
+        let canOpenWindows = false
+        #endif
+        switch PrivateOpening.action(mode: privateOpenMode, inPrivateContext: isGuest || isPrivateWindow, canOpenWindows: canOpenWindows) {
+        case .tabHere: _ = openTab(url: nil, isPrivate: true)
+        case .newWindow: openPrivateWindow()
+        case .askFirst: privateChoicePending = true
+        }
+    }
+
+    /// The answer to the question: with `remember`, it also becomes the Settings choice so the question is not asked again.
+    func answerPrivateChoice(window: Bool, remember: Bool) {
+        privateChoicePending = false
+        if remember { privateOpenMode = window ? .window : .tab }
+        if window { openPrivateWindow() } else { _ = openTab(url: nil, isPrivate: true) }
+    }
+
     /// Opens a new window and moves the tab into it.
     func moveTabToNewWindow(_ id: UInt64) {
-        guard tabs.contains(where: { $0.id == id }), tabs.count > 1 || !isSecondary else { return }
+        guard tabs.contains(where: { $0.id == id }), tabs.count > 1 || !isSecondary, !isPrivateWindow else { return }
         windows.movingTabs = [id]
         windows.onNeedWindow?()
     }
@@ -245,7 +310,7 @@ extension WindowRegistry {
         // Not before the first window has read the saved layout, and not while the windows it names are still coming back: an early save would replace the
         // real layout with whatever blank windows happen to exist at that moment.
         guard let primary, primary.hasStarted, pendingRestores.isEmpty, !terminating else { return }
-        let groups = all.filter { $0 !== primary && !$0.isGuest }.map { $0.tabs.map(\.id) }.filter { !$0.isEmpty }
+        let groups = all.filter { $0 !== primary && !$0.isGuest && !$0.isPrivateWindow && $0.webApp == nil }.map { $0.tabs.map(\.id) }.filter { !$0.isEmpty }
         model.saveSetting("window_tabs", model.encodedMap(["groups": groups]))
     }
 

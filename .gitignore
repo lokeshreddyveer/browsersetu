@@ -16,3 +16,4 @@ build/
 *.p12
 *.mobileprovision
 .env
+apps/apple/ThirdParty/*/bin/

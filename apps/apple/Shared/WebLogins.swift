@@ -6,7 +6,31 @@ struct WebLogin: Codable, Equatable, Identifiable {
     var user: String
     var password: String
     var saved = Date()
+    /// Other places the person said this same sign-in belongs to (a site that signs in at another address). Only ever added by them, never worked out by the browser, so a
+    /// look-alike or a sibling site is never given a password by guesswork.
+    var related: [String] = []
     var id: String { WebLoginVault.account(origin: origin, user: user) }
+
+    static let maxRelated = 5
+
+    private enum CodingKeys: String, CodingKey { case origin, user, password, saved, related }
+
+    init(origin: String, user: String, password: String, saved: Date = Date(), related: [String] = []) {
+        self.origin = origin; self.user = user; self.password = password; self.saved = saved; self.related = related
+    }
+
+    /// Items kept by earlier versions have no `related`: they still open.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        origin = try c.decode(String.self, forKey: .origin)
+        user = try c.decode(String.self, forKey: .user)
+        password = try c.decode(String.self, forKey: .password)
+        saved = try c.decodeIfPresent(Date.self, forKey: .saved) ?? Date()
+        related = try c.decodeIfPresent([String].self, forKey: .related) ?? []
+    }
+
+    /// Whether this sign-in is offered on a page at `origin`: its own, or one the person added.
+    func applies(to origin: String) -> Bool { self.origin == origin || related.contains(origin) }
 }
 
 enum WebLoginOrigin {
@@ -32,7 +56,7 @@ enum WebLoginVault {
         SecretStore.accounts(service: service(profile: profile)).compactMap { account in
             SecretStore.get(service: service(profile: profile), account: account).flatMap { try? JSONDecoder().decode(WebLogin.self, from: $0) }
         }
-        .filter { origin == nil || $0.origin == origin }
+        .filter { origin == nil || $0.applies(to: origin!) }
         .sorted { $0.saved > $1.saved }
     }
 
