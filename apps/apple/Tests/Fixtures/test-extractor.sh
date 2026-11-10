@@ -4,6 +4,7 @@ if [ "$1" = "--version" ]; then echo "2099.01.01-stand-in"; exit 0; fi
 for last; do :; done
 U="$last"
 BASE=$(printf '%s' "$U" | sed -E 's#^(https?://[^/]+/media/[^/]+)/.*#\1#')
+case "$U" in *recordargs*) printf '%s\n' "$@" > "${HOME%/}/bs-ext-args.txt" ;; esac    # lets a test see the exact arguments the app really started this program with
 case "$U" in *counted*) echo run >> "${HOME%/}/bs-ext-count.txt" ;; esac    # lets a test count how many times the program really ran
 case "$U" in
 *flatlist*)
@@ -18,6 +19,7 @@ case "$U" in
   done
   printf ']}' ;;
 *descendant*) sleep 60 & echo $! > "${HOME%/}/bs-ext-child.pid"; wait ;;
+*helperchild*) H=$(cat "${HOME%/}/bs-helper-path.txt"); printf 'while(true){}' | "$H" --deadline 60 - & echo $! > "${HOME%/}/bs-helper-child.pid"; wait ;;
 *stubborn*) trap '' TERM; while :; do sleep 1; done ;;
 *bighuge*) printf '{"id":"h","title":"t","webpage_url":"%s","formats":[{"url":"%s/clip.mp4","ext":"mp4","vcodec":"avc1","acodec":"mp4a","height":1e300,"width":-5,"fps":1e30,"tbr":1e300,"filesize":9e99,"protocol":"https"},{"url":"%s/clip2.mp4","ext":"mp4","vcodec":"avc1","acodec":"mp4a","height":720,"tbr":4000,"protocol":"https","format_id":"ok"}]}' "$U" "$BASE" "$BASE" ;;
 *nowebpage*) printf '{"id":"n","title":"t","formats":[{"url":"%s/clip.mp4","ext":"mp4","vcodec":"avc1","acodec":"mp4a","height":120,"protocol":"https"}]}' "$BASE" ;;

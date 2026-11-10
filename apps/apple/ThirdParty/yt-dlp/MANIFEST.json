@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "name": "yt-dlp",
+  "version": "2026.10.26",
+  "asset": "yt-dlp_macos.zip",
+  "sourceURL": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp_macos.zip",
+  "sums": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/SHA2-256SUMS",
+  "sha256": "20d98fa608998eff87d1d35a6e9fb65e4b874639a6cc89addc19da3becde3ef1",
+  "size": 54165284,
+  "architectures": [
+    "x86_64",
+    "arm64"
+  ],
+  "minimumMacOS": "11.0 (arm64 slice; the x86_64 slice was not inspected)",
+  "signature": "every Mach-O is ad-hoc signed by upstream; they must be re-signed with the release identity and hardened runtime before release (Stage C2)",
+  "sourceLicense": "Unlicense",
+  "binaryLicenseNote": "PyInstaller bundle. Upstream's list for this macOS build names mutagen (GPL-2.0-or-later), certifi (MPL-2.0), OpenSSL, curl, curl-impersonate, BoringSSL, nghttp2, Python and others; the PyInstaller bootloader is GPL-2.0-or-later with the bootloader exception. Upstream states the combined executable is GPLv3+. The licence file in the package is upstream's all-platform list (it also names GNU Readline, libintl, libidn2, libunistring and the GCC runtime; none was found in this build's files). Legal review is still required before distribution.",
+  "javascriptRuntime": "Provided by Browser Setu's own sandboxed JavaScriptCore runner (Helpers/setu-jsc, pinned by BundledJSProvider.json) through a yt-dlp plugin, using the yt_dlp_ejs solver scripts bundled in this package. No Deno or Node is bundled or required. Only YouTube's n/signature challenges use it; other sites are not expected to need it (not tested here).",
+  "verification": "sha256 matches the release's SHA2-256SUMS (fetched from the same release); the GPG signature of the sums file was not verified (no gpg available when this was pinned).",
+  "layout": "onedir",
+  "executable": "yt-dlp_macos",
+  "treeSHA256": "84d743fc14cb65f60d85baf0cbf4f1cc8b65f58680b29f26cc0b982eba70652a",
+  "fileCount": 134,
+  "unpackedSize": "124 MB universal (x86_64 + arm64); main executable arm64 slice 10.5 MB",
+  "runtimeExtraction": "none: the unpackaged build has its Python framework and extensions in place; no temporary executable copies are made at run time (the single-file build unpacks Python into /tmp and macOS rejects that copy: 'Python.framework is damaged')",
+  "unpackedBytes": 129401729,
+  "signaturePolicy": "adhoc"
+}

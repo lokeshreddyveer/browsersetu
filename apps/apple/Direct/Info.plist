@@ -83,6 +83,8 @@
 	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>Websites you allow can use your camera.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>Browser Setu saves the files you download to your Downloads folder, and shows and opens the ones already there.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Browser Setu finds your other devices on this network when you send them a link or file.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>

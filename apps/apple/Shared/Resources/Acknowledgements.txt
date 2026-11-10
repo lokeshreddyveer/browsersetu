@@ -6,6 +6,13 @@ WebKit — the web engine built into macOS and iOS, provided by Apple.
 DATA
 The Public Suffix List — https://publicsuffix.org — Mozilla Public License 2.0. Used to keep privacy rules from matching a whole public suffix such as "co.uk".
 
+OPTIONAL MEDIA TOOLS (programs Browser Setu runs only when you ask for them; they are separate programs, not part of the app)
+FFmpeg 9.0.2 — https://ffmpeg.org — GNU Lesser General Public License 2.1 or later. Built by the publisher as an LGPL-only program with no external libraries; the FFmpeg source is unmodified. The licence texts, the configure line and the written source offer come with the package.
+yt-dlp 2026.10.26 — https://github.com/yt-dlp/yt-dlp — The Unlicense. Its published macOS build is a PyInstaller bundle of yt-dlp, Python and the open-source parts named in its own licence file, including mutagen (GPL-2.0-or-later), certifi (MPL-2.0), OpenSSL, curl and curl-impersonate with BoringSSL and nghttp2, and PyInstaller's bootloader (GPL-2.0-or-later with the PyInstaller bootloader exception). Upstream distributes the combined executable under the GNU General Public License 3 or later (GPL-3.0-or-later), and so does Browser Setu. Upstream's licence file is written for all its platforms and also names GNU Readline, libintl, libidn2, libunistring and the GCC runtime; none of them was found in the files of this macOS build (its readline module uses the macOS system library libedit), and they are named here only because the licence review is not finished. The publisher thinned it to Apple silicon and re-signed it; it is otherwise upstream's build. Licence texts for every part, and where to get the corresponding source, come with the package and in the app's Notices folder.
+LAME 3.100 — https://lame.sourceforge.io — GNU Lesser General Public License 2.1. The MP3 encoder inside the app, unmodified, as a separate library you can replace; its licence and source offer are in the app's Notices.
+JavaScriptCore — the JavaScript engine built into macOS, provided by Apple. Browser Setu's own small runner (setu-jsc) uses it, in a separate sandboxed process, to run the yt-dlp challenge solver scripts for YouTube; it never runs web pages.
+yt-dlp-ejs 0.8.0 (the solver scripts bundled with yt-dlp) — https://github.com/yt-dlp/ejs — The Unlicense, with Meriyah (ISC licence, https://github.com/meriyah/meriyah) and Astring (MIT licence, https://github.com/davidbonnet/astring); their licence texts are in the yt-dlp notice file in the app's Notices folder.
+
 PRIVACY PROTECTION
 VayuSetu protection code — written by the same author and shared with this app.
 

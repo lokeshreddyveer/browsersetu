@@ -3,7 +3,7 @@
 A native, security-first web browser for **macOS** and **iPhone/iPad**. It renders with the system's own WebKit, keeps everything on your device, and
 puts a small Rust core (tabs, address-bar logic, permission and navigation rules, per-profile SQLite storage) under a SwiftUI interface.
 
-> **Status: release candidate, in the production-hardening phase (0.4.0, build 22).** It is a real, working browser with a large automated test suite (about 750 tests), but
+> **Status: release candidate, in the production-hardening phase (0.4.1, build 24).** It is a real, working browser with a large automated test suite (about 750 tests), but
 > it is **not yet called production grade**: that needs the evidence in [`docs/RELEASE-BAR.md`](docs/RELEASE-BAR.md) to be complete and recorded. [`docs/capabilities.md`](docs/capabilities.md)
 > lists every feature as *Checked*, *Built* (compiled, not exercised end to end) or *Parked* (switched off), with the evidence and the limits. Read both before you rely on anything.
 
@@ -12,6 +12,14 @@ puts a small Rust core (tabs, address-bar logic, permission and navigation rules
 - **Mac (Apple Silicon, macOS 14 or later):** the notarized DMG on the [Releases](../../releases) page. The downloadable build updates itself (see
   [Updates](#updates)).
 - **iPhone and iPad (iOS 17 or later):** TestFlight. Ask the author for an invitation.
+
+### New in 0.4.1
+
+- **Magnet links find their details much more reliably.** The public DHT now joins in after a few seconds even when the link names trackers (it used to be skipped, so a link with dead trackers failed even with the DHT on); a peer that never answers or refuses no longer stalls the search; the Add window shows what is happening (trackers answered, peers, DHT) and stays open instead of closing when you click away.
+- **Move to Trash removes the list entry** once the file is really moved; entries for the same file go together; a file that could not be moved keeps its entry.
+- **Link Grabber and the toolbar read the whole page** (up to 5,000 links, and the page's pictures appear as an Images group); wiki "File:" pages are no longer offered as files; **Explore a Website** lists files a page uses from other websites without contacting them, and says plainly when a site refuses automatic reading.
+- **yt-dlp 2026.10.26 and ffmpeg 9.0.2 come inside the app**, signed with the publisher's Developer ID and notarized, so advanced media downloads work without a download. Their licences, build details and source offers are in Settings > Acknowledgements and in the app's Notices folder. YouTube's JavaScript puzzles are solved by a small runner built into the app (Apple's JavaScriptCore, in its own process under the App Sandbox with no network or file access), so no Deno or Node has to be installed. It was checked against 14 YouTube player scripts (seven variants of one version, and seven other versions), and if it is ever unavailable downloads still work but some YouTube formats may be missing (a fallback to a Browser Setu-managed Deno is prepared in the code but is **not** part of this release and is not installed or offered). Other websites are not expected to need it, which has not been tested here, and no website is guaranteed to work. How the tools are built, checked and released: [`docs/media-tools.md`](docs/media-tools.md).
+- **No more repeated Downloads-folder questions from test builds**, and the Downloads permission prompt now explains why the app asks.
 
 ### New in 0.4.0
 

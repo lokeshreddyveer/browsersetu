@@ -511,7 +511,8 @@ struct MediaToolsOffer: View {
             case .checking, .ready:
                 EmptyView()
             default:
-                if store.manifest != nil { Button("Enable Advanced Media Downloads…") { confirm = true }.controlSize(.small).accessibilityIdentifier("media-tools-offer-enable") }
+                if store.manifest?.isInstallable == true { Button("Enable Advanced Media Downloads…") { confirm = true }.controlSize(.small).accessibilityIdentifier("media-tools-offer-enable") }
+                else if store.manifest != nil { Text("Advanced media downloads are not available in this release yet. You can use a program you installed yourself (Settings › Media).").font(.system(size: 11.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("media-tools-offer-unavailable") }
             }
         }
         .onAppear { store.refresh() }

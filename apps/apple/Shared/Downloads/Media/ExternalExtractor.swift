@@ -16,6 +16,17 @@ enum ExtractorSettings {
     static var path: String? { UserDefaults.standard.string(forKey: pathKey) }
 }
 
+/// The actionable text for a YouTube JavaScript-challenge failure (the solver itself is macOS-only; this wording is shared so every platform's error reads the same).
+enum JSChallengeProviderAdvice {
+    /// Added by the lookup of the BUNDLED extractor only. A yt-dlp the person chose themselves never had Browser Setu's solver, so its failures are shown as they are.
+    static let marker = "\u{1}bundled-yt-dlp-js:"
+    static func matches(_ stderr: String) -> Bool {
+        let t = stderr.lowercased()
+        return ["javascript runtime", "n challenge", "challenge solving failed", "signature solving failed", "js challenge"].contains { t.contains($0) }
+    }
+    static let text = "YouTube hides some video addresses behind a small JavaScript puzzle. Browser Setu's built-in solver could not solve it for this page, or is not available in this copy of the app, so some formats may be missing or this video cannot be read. YouTube changes this often: try again later and check for a Browser Setu update. You can also choose a yt-dlp you installed yourself in Settings > Media. Other websites are not affected."
+}
+
 enum ExtractorFailure: Error, Equatable, LocalizedError, Sendable {
     case notConfigured, missing(String), notExecutable(String), unsafeLocation(String), badAddress, tooManyRunning, timedOut, tooMuchOutput, failed(Int32, String), malformed(String), wrongVideo, noFormats(String)
     var errorDescription: String? {
@@ -29,6 +40,7 @@ enum ExtractorFailure: Error, Equatable, LocalizedError, Sendable {
         case .timedOut: "The extractor took too long and was stopped."
         case .tooMuchOutput: "The extractor produced more output than is allowed and was stopped."
         case .failed(let c, let s) where s.isEmpty && (c == 137 || c == 128 + SIGTRAP): "macOS stopped the extractor from starting (code \(c)). This usually means its code signature or notarization was rejected by Gatekeeper. Use the publisher's release package, or choose a different program in Settings › Media."
+        case .failed(_, let s) where s.hasPrefix(JSChallengeProviderAdvice.marker): JSChallengeProviderAdvice.text
         case .failed(let c, let s): "The extractor reported an error (code \(c))" + (s.isEmpty ? "." : ": \(s)")
         case .malformed(let w): "The extractor's answer was not in the expected form (\(w))."
         case .wrongVideo: "The extractor answered about a different page than the one asked."
@@ -124,20 +136,31 @@ enum ExternalExtractor {
         return ["--dump-single-json", "--no-playlist", "--no-warnings", "--", text]
     }
 
+    /// The complete argument list for one lookup. ONLY the bundled, digest-verified extractor gets the app's options (no config file, no plugin folders except the verified provider, the verified runtime); a program
+    /// the person chose themselves gets exactly the page arguments it always got: no plugin folder and no JavaScript runtime is ever handed to an executable the app has not verified.
+    static func launchArguments(for page: URL, bundled: Bool, bundledExtras: [String] = BundledExtractor.extraArguments) throws -> [String] {
+        let pageArguments = try arguments(for: page)
+        return bundled ? bundledExtras + pageArguments : pageArguments
+    }
+
     static func lookup(page: URL, path: String, isPrivate: Bool, allowLocal: Bool = false, timeout: TimeInterval = defaultTimeout, expectedIdentity: String? = nil) async throws -> NormalizedMediaSource {
         guard !isPrivate else { throw ExtractorFailure.unsafeLocation("it is never used in a private tab") }
-        var args = try arguments(for: page)
+        var args = try launchArguments(for: page, bundled: false)
         let exe: URL
         var tool: (name: String, version: String) = (URL(fileURLWithPath: path).lastPathComponent, "unknown")
         if let expectedIdentity, expectedIdentity.hasPrefix("bundled:") {
             // The bundled program: trusted because its bytes equal the pinned digest, not because of where it sits (an app folder may be writable by an administrator).
             guard let v = BundledExtractor.verify(), v.identity == expectedIdentity, v.url.path == path else { throw ExtractorFailure.unsafeLocation("the bundled extractor does not match its pinned digest") }
-            exe = v.url; args = BundledExtractor.extraArguments + args; tool = (v.manifest.name, v.manifest.version)
+            exe = v.url; args = try launchArguments(for: page, bundled: true); tool = (v.manifest.name, v.manifest.version)
         } else {
             exe = try validateLocation(path)
             if let expectedIdentity, identity(of: exe) != expectedIdentity { throw ExtractorFailure.unsafeLocation("the program changed after you allowed it") }
         }
-        let data = try await run(exe, arguments: args, timeout: timeout, maxBytes: maxOutput)
+        let data: Data
+        do { data = try await run(exe, arguments: args, timeout: timeout, maxBytes: maxOutput) }
+        catch ExtractorFailure.failed(let code, let message) where expectedIdentity?.hasPrefix("bundled:") == true && JSChallengeProviderAdvice.matches(message) {
+            throw ExtractorFailure.failed(code, JSChallengeProviderAdvice.marker + message)         // only the bundled extractor is told the built-in solver may be at fault
+        }
         return try ExtractorParser.parse(data, asked: page, allowLocal: allowLocal, tool: tool)
     }
 

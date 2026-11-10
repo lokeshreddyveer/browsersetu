@@ -124,6 +124,8 @@ enum ResourceClassifier {
         let file = name == "/" ? "" : name
         let ext = (file as NSString).pathExtension.lowercased()
         let signed = looksSigned(url)
+        // A wiki's File:Name.ext address is a page about a file, not the file (see LinkClassifier.isNamespacePage).
+        if LinkClassifier.isNamespacePage(url), !marked { return nil }
 
         if cloudHosts.contains(where: { host.lowercased() == $0 || host.lowercased().hasSuffix("." + $0) }), isShareShape(url) {
             // Only a link into a file-sharing service's share or file path, not its home, pricing or sign-in pages.
@@ -250,7 +252,16 @@ extension PageResourceSummary {
     /// Page links classified, bounded, deduplicated; media counts joined from the media summary.
     @MainActor
     static func build(scan: PageLinkScan, media: MediaPageSummary, pageHost: String?) -> PageResourceSummary {
-        let found = scan.links.compactMap { ResourceClassifier.classify(link: $0.href, marked: $0.marked, pageHost: pageHost) }
+        var found = scan.links.compactMap { ResourceClassifier.classify(link: $0.href, marked: $0.marked, pageHost: pageHost) }
+        // The page's pictures (an <img> is not a link, so a gallery of posters used to show nothing in the toolbar). After the links, so a link to the same file keeps its own detail; the list limit applies to all.
+        for address in scan.images {
+            guard let url = URL(string: address), url.scheme == "http" || url.scheme == "https", let host = url.host, !host.isEmpty, !LinkClassifier.isNamespacePage(url) else { continue }
+            let name = url.lastPathComponent.removingPercentEncoding ?? url.lastPathComponent
+            let picture = ResourceClassifier.classify(link: address, marked: false, pageHost: pageHost)
+                ?? DetectedResource(id: LinkClassifier.normalizedKey(url), category: .image, url: address, filename: name.isEmpty || name == "/" ? host : name, ext: (name as NSString).pathExtension.lowercased(),
+                                    pageHost: pageHost, frameOrigin: nil, method: .link, confidence: .medium, signed: ResourceClassifier.looksSigned(url))
+            found.append(picture)
+        }
         var s = PageResourceSummary.make(found, truncated: scan.truncated)
         // A media item and a link to the same file are one thing; the picker's count is what the toolbar promises.
         if media.detected > 0 {

@@ -80,6 +80,11 @@ final class TorrentSession: @unchecked Sendable {
         var peerFilter = PeerFilter()
         /// Peers learned from one PEX message are taken at most this many, and a peer may send one every this many seconds at most.
         var pexInterval: TimeInterval = 60
+        /// A magnet link that names trackers is looked up on the public DHT as well (only when the person allowed the DHT) once its own trackers have had this long to lead to a peer with the details. Before,
+        /// such a link never used the DHT, so a link whose trackers were dead failed even with the DHT on.
+        var dhtFallbackDelay: TimeInterval = 8
+        /// A request for a piece of the torrent's details that gets no answer in this time is asked of another peer instead.
+        var metadataRequestTimeout: TimeInterval = 8
     }
 
     struct Snapshot: Sendable {
@@ -230,6 +235,11 @@ final class TorrentSession: @unchecked Sendable {
     private var metadataBuffer: Data?
     private var metadataGot = Set<Int>()
     private var metadataRequested: [Int: Int] = [:]          // piece -> peer
+    private var metadataRequestedAt: [Int: TimeInterval] = [:]
+    /// Peers that refused or ignored a piece request: not asked for that piece again.
+    private var metadataRefusedBy: [Int: Set<Int>] = [:]
+    private var firstTickAt: TimeInterval?
+    private var lastTickAt: TimeInterval = 0
     private var metadataSenders: [Int: PeerAddress] = [:]     // piece -> who sent it
     private var wrote = Set<Int>()
     private var notedProgress: Int64 = -1
@@ -400,6 +410,8 @@ final class TorrentSession: @unchecked Sendable {
     private func tick() {
         guard running, !finishing else { return }
         let t = now()
+        if firstTickAt == nil { firstTickAt = t }
+        lastTickAt = t
         updateRates(t)
         if seeding { seedTick(t); guard running else { return } }
         // handshakes, silence and slow requests
@@ -418,6 +430,7 @@ final class TorrentSession: @unchecked Sendable {
         guard peerNetworkEnabled else { return }
         if meta?.version != .v1, meta != nil, t - layersAskedAt > 10, let storage = storage(), !storage.missingLayerRoots.isEmpty { layersAskedAt = t; for p in peers.values where p.handshaken { requestLayers(from: p) } }
         announceIfDue(t)
+        retryMetadata(t)
         revalidateLocalPeers()
         sendPex(t)
         pruneRecords(t)
@@ -641,7 +654,20 @@ final class TorrentSession: @unchecked Sendable {
 
     /// Public discovery is for a torrent known not to be private. A magnet whose details are not yet known may use it only when it names no tracker (there is nothing else to find peers with) and the
     /// person has allowed the DHT: trackers are preferred, and a magnet that names some is not looked up on the public network before its details show whether it is private (BEP 27).
-    private var dhtWanted: Bool { dht != nil && !isPrivate && (meta != nil || trackers.isEmpty) }
+    private var dhtWanted: Bool {
+        guard dht != nil, !isPrivate else { return false }
+        if meta != nil || trackers.isEmpty { return true }
+        // A magnet that names trackers: they are tried first. If they have not led to the details after a few seconds, the public DHT joins in (the person has allowed it), unless a tracker address looks like a
+        // private tracker's (it carries a personal key): then the torrent may be private (BEP 27) and its hash is not put on the public network. A torrent that turns out private has its DHT peers forgotten.
+        return lastTickAt - (firstTickAt ?? lastTickAt) >= settings.dhtFallbackDelay && !trackers.contains(where: Self.looksLikePrivateTracker)
+    }
+
+    /// A tracker address with a personal key in it (a query such as passkey=, or a long token in the path) belongs to a private tracker.
+    static func looksLikePrivateTracker(_ url: URL) -> Bool {
+        let keys: Set<String> = ["passkey", "authkey", "torrent_pass", "uid", "pid", "token", "key", "secret"]
+        if URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.contains(where: { keys.contains($0.name.lowercased()) }) == true { return true }
+        return url.pathComponents.contains { $0.count >= 24 && $0.allSatisfy { $0.isLetter || $0.isNumber } && $0.lowercased() != "announce" }
+    }
 
     private func dhtTick(_ t: TimeInterval) {
         guard let dht, dhtWanted, running, !finishing else { if dhtAcquired { stopDHT() }; return }
@@ -745,7 +771,9 @@ final class TorrentSession: @unchecked Sendable {
         peer.queuedBlocks = []
         if superSeeding { for k in superSeen.keys { superSeen[k]?.remove(peer.id) } }
         if seeding, wasKnown { fillSlots() }
-        for (piece, id) in metadataRequested where id == peer.id { metadataRequested[piece] = nil }
+        let hadRequests = metadataRequested.values.contains(peer.id)
+        for (piece, id) in metadataRequested where id == peer.id { metadataRequested[piece] = nil; metadataRequestedAt[piece] = nil }
+        if hadRequests, meta == nil { for p in peers.values where p.id != peer.id { requestMetadata(from: p) } }          // its pieces go to the others at once
         if retry, !peer.inbound, !banned.contains(peer.address), tried[peer.address, default: 0] <= settings.connectRetryLimit { candidates.append(peer.address) }
         if running { connectMore() }
     }
@@ -1504,7 +1532,11 @@ final class TorrentSession: @unchecked Sendable {
         guard id == PeerWire.ExtensionID.utMetadata, let message = try? PeerWire.parseMetadataMessage(payload) else { return }
         switch message.type {
         case 0: if let theirs = peer.theirMetadataID { send(.extended(id: theirs, payload: PeerWire.metadataReject(piece: message.piece)), to: peer) }     // we hold none to give
-        case 2: metadataRequested[message.piece] = nil
+        case 2:
+            // A refusal: that peer is not asked for this piece again, and another peer is asked at once.
+            if metadataRequested[message.piece] == peer.id { metadataRefusedBy[message.piece, default: []].insert(peer.id) }
+            metadataRequested[message.piece] = nil; metadataRequestedAt[message.piece] = nil
+            if meta == nil { for p in peers.values { requestMetadata(from: p) } }
         case 1: receivedMetadata(peer, piece: message.piece, data: message.data)
         default: break
         }
@@ -1554,10 +1586,27 @@ final class TorrentSession: @unchecked Sendable {
     private func requestMetadata(from peer: Peer) {
         guard let total = metadataTotal, let theirs = peer.theirMetadataID else { return }
         let count = (total + PeerWire.metadataPieceSize - 1) / PeerWire.metadataPieceSize
-        for piece in 0..<count where !metadataGot.contains(piece) && metadataRequested[piece] == nil && metadataRequested.values.filter({ $0 == peer.id }).count < 4 {
-            metadataRequested[piece] = peer.id
+        // At most 2 outstanding per peer (as libtorrent does), so the pieces spread over several peers; a piece this peer refused or ignored is not asked of it again.
+        for piece in 0..<count where !metadataGot.contains(piece) && metadataRequested[piece] == nil && metadataRefusedBy[piece]?.contains(peer.id) != true && metadataRequested.values.filter({ $0 == peer.id }).count < 2 {
+            metadataRequested[piece] = peer.id; metadataRequestedAt[piece] = now()
             send(.extended(id: theirs, payload: PeerWire.metadataRequest(piece: piece)), to: peer)
         }
+    }
+
+    /// While the details are not known: a request nobody answered in `metadataRequestTimeout` seconds goes to another peer (the silent one is asked last), and any piece without a request is
+    /// offered to every peer that can serve it. Before, a peer that never answered, or one that dropped, left its pieces unrequested until some other event happened to trigger a request.
+    private func retryMetadata(_ t: TimeInterval) {
+        guard meta == nil, let total = metadataTotal else { return }
+        var silent = Set<Int>()
+        for (piece, at) in metadataRequestedAt where t - at >= settings.metadataRequestTimeout {
+            if let id = metadataRequested[piece] { silent.insert(id) }
+            metadataRequested[piece] = nil; metadataRequestedAt[piece] = nil
+        }
+        let count = (total + PeerWire.metadataPieceSize - 1) / PeerWire.metadataPieceSize
+        guard (0..<count).contains(where: { !metadataGot.contains($0) && metadataRequested[$0] == nil }) else { return }
+        // Peers that did not answer are asked last, so a piece moves to another peer when there is one, and is asked of the slow one again only when there is not.
+        for p in peers.values where !silent.contains(p.id) { requestMetadata(from: p) }
+        for p in peers.values where silent.contains(p.id) { requestMetadata(from: p) }
     }
 
     private func receivedMetadata(_ peer: Peer, piece: Int, data: Data) {
@@ -1566,7 +1615,7 @@ final class TorrentSession: @unchecked Sendable {
         let expected = min(PeerWire.metadataPieceSize, total - start)
         guard start < total, data.count == expected else { drop(peer, reason: "bad metadata piece"); return }
         metadataBuffer!.replaceSubrange(start..<(start + expected), with: data)
-        metadataGot.insert(piece); metadataRequested[piece] = nil; metadataSenders[piece] = peer.address
+        metadataGot.insert(piece); metadataRequested[piece] = nil; metadataRequestedAt[piece] = nil; metadataSenders[piece] = peer.address
         let count = (total + PeerWire.metadataPieceSize - 1) / PeerWire.metadataPieceSize
         if metadataGot.count == count {
             let assembled = metadataBuffer!
@@ -1575,7 +1624,7 @@ final class TorrentSession: @unchecked Sendable {
                 // Any of them could have sent the bad part, so all who took part in this attempt are set aside.
                 for address in metadataSenders.values { banned.insert(address) }
                 for p in Array(peers.values) where banned.contains(p.address) { drop(p, reason: "metadata did not match") }
-                metadataBuffer = nil; metadataGot = []; metadataRequested = [:]; metadataTotal = nil; metadataSenders = [:]
+                metadataBuffer = nil; metadataGot = []; metadataRequested = [:]; metadataRequestedAt = [:]; metadataRefusedBy = [:]; metadataTotal = nil; metadataSenders = [:]
                 return
             }
             meta = parsed

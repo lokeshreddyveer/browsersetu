@@ -125,7 +125,7 @@ struct DownloadsDashboardContent: View {
         .confirmationDialog(trashTitle, isPresented: Binding(get: { !vm.pendingTrash.isEmpty }, set: { if !$0 { vm.cancelTrash() } }), titleVisibility: .visible) {
             Button("Move to Trash", role: .destructive) { vm.confirmTrash() }
             Button("Keep Files", role: .cancel) { vm.cancelTrash() }
-        } message: { Text("The files are moved to the Trash. The downloads stay in this list until you remove them.") }
+        } message: { Text("The files are moved to the Trash and removed from this list. Use Remove from List to keep a file and only forget the entry.") }
         .confirmationDialog("Clear all download history?", isPresented: $confirmingClearAll, titleVisibility: .visible) {
             Button("Clear \(vm.rowsToClear(.allFinished).count) Finished Downloads", role: .destructive) { vm.clearHistory(.allFinished) }
             Button("Keep Them", role: .cancel) {}
@@ -210,7 +210,7 @@ struct DownloadsDashboardContent: View {
                 .help("Create a torrent from a file or folder").accessibilityLabel("Create torrent")
             Button { adding = true } label: { Image(systemName: "plus") }
                 .help("Add a download from a link").accessibilityLabel("Add download")
-                .popover(isPresented: $adding, arrowEdge: .bottom) { AddDownloadForm(coordinator: coordinator, extensions: model.downloadExtensions, initialText: prefill, initialTorrentFile: prefillTorrent, preferences: model.mediaPreferences, initialOrigin: model.addDownloadPrefillOrigin) { adding = false; prefill = nil; prefillTorrent = nil }.environmentObject(model)
+                .sheet(isPresented: $adding) { AddDownloadForm(coordinator: coordinator, extensions: model.downloadExtensions, initialText: prefill, initialTorrentFile: prefillTorrent, preferences: model.mediaPreferences, initialOrigin: model.addDownloadPrefillOrigin) { adding = false; prefill = nil; prefillTorrent = nil }.environmentObject(model)
                     .id(prefill ?? prefillTorrent?.path ?? "form") }
             Button { animated(.easeOut(duration: 0.18)) { vm.inspectorShown.toggle() } } label: { Image(systemName: "sidebar.right") }
                 .help(vm.inspectorShown ? "Hide Details" : "Show Details").accessibilityLabel(vm.inspectorShown ? "Hide details" : "Show details")

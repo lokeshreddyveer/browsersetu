@@ -1428,10 +1428,10 @@ final class BrowserModel: ObservableObject {
 
     /// Starts reading. An address the person typed in the explorer's own field is theirs; one that came from a page is page-derived and is held to those limits. Returns a message when it cannot start.
     @discardableResult
-    func startExplorer(_ url: URL, depth: Int, pages: Int, sameSite: Bool, stayInFolder: Bool, typedByPerson: Bool) -> String? {
+    func startExplorer(_ url: URL, depth: Int, pages: Int, sameSite: Bool, stayInFolder: Bool, typedByPerson: Bool, listOtherWebsites: Bool = true) -> String? {
         guard DownloadSchedule.canSchedule(url) else { return "That is not a web address." }
         var scope = ExplorerScope(start: url, origin: typedByPerson ? .user : .page)
-        scope.maxDepth = depth; scope.maxPages = pages; scope.sameOriginOnly = sameSite; scope.stayInDirectory = stayInFolder
+        scope.maxDepth = depth; scope.maxPages = pages; scope.sameOriginOnly = sameSite; scope.stayInDirectory = stayInFolder; scope.includeReferencedFiles = listOtherWebsites
         do {
             let fetch = try WebsiteExplorer.networkFetch(scope: scope.clamped(), network: engine.downloads.http.engine.currentNetwork)
             websiteExplorer.start(scope, explorer: WebsiteExplorer(fetch: fetch))

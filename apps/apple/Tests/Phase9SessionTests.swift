@@ -13,6 +13,8 @@ final class FakePeer: PeerTransport, @unchecked Sendable {
         var connectError: Error?
         var serveMetadata: Data?                   // BEP 9: the info section it will hand out
         var badMetadata = false
+        var silentOnMetadata = false                // it advertises ut_metadata and never answers a request
+        var rejectMetadata = false                  // it answers every request with a reject
         var asksForPiece: Int?                     // after unchoking us, it requests this piece's first block
         var neverUnchoke = false
     }
@@ -78,6 +80,8 @@ final class FakePeer: PeerTransport, @unchecked Sendable {
         case .extended(let id, let payload):
             if id == 0 { theirMetadataID = (try? BencodeDecoder.decode(payload, limits: .message))?.value.dict?["m"]?.dict?["ut_metadata"]?.int.map { UInt8($0) } ?? 0; reply(PeerWire.encode(.unchoke)) }
             else if id == PeerWire.ExtensionID.utMetadata, let info = behaviour.serveMetadata, let msg = try? PeerWire.parseMetadataMessage(payload), msg.type == 0 {
+                if behaviour.silentOnMetadata { return }
+                if behaviour.rejectMetadata { reply(PeerWire.encode(.extended(id: theirMetadataID, payload: PeerWire.metadataReject(piece: msg.piece)))); return }
                 let start = msg.piece * 16384
                 guard start < info.count else { return }
                 var chunk = info.subdata(in: start..<min(info.count, start + 16384))

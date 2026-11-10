@@ -485,9 +485,11 @@ final class ExplorerTraversalTests: MediaCase {
         return (items, summary)
     }
 
+    /// The strict single-website list. Since 0.4.1 the DEFAULT also lists files that in-scope pages use on other websites (never contacting them; see ExplorerReferencedFilesTests, which covers the default and this
+    /// mode), so this test asks for the strict mode explicitly: every assertion below, including that nothing outside the site is fetched, is unchanged.
     func testItProposesTheFilesInScopeAndNothingElse() async throws {
         try await publishSite()
-        let (items, summary) = try await explore()
+        let (items, summary) = try await explore(tweak: { $0.includeReferencedFiles = false })
         XCTAssertEqual(Set(items.map(\.name)), ["a.zip", "pic.png", "clip", "index.m3u8", "b.pdf", "inside.txt", "c.zip", "x.zip"])
         XCTAssertEqual(items.first { $0.name == "pic.png" }?.category, .image); XCTAssertEqual(items.first { $0.name == "clip" }?.category, .video, "the page says it is a video"); XCTAssertEqual(items.first { $0.name == "index.m3u8" }?.category, .stream)
         XCTAssertTrue(items.allSatisfy { $0.availability == .proposed }, "nothing is called available because it was seen")

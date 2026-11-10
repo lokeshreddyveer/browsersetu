@@ -48,7 +48,7 @@ private struct MediaDiscoveryContent: View {
             footer
         }
         .frame(minWidth: 740, minHeight: 420)
-        .animation(.easeInOut(duration: 0.18), value: store.candidates)
+        .motion(.easeInOut(duration: 0.18), value: store.candidates.isEmpty)          // the empty/filled state animates; the rows of the list do not
         .onDisappear { model.cancelMediaDiscovery() }
     }
 

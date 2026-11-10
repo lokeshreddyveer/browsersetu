@@ -4,6 +4,12 @@
 #
 #   scripts/release.sh --check              only checks that the certificate and notary login are usable
 #   scripts/release.sh <version> <build>    full release, e.g. scripts/release.sh 0.2.0 7
+#   scripts/release.sh <version> <build> --verify-only
+#                                           the same pipeline up to and including the final signature and the media-tools preflight, into isolated folders
+#                                           (RELEASE_DERIVED / RELEASE_DIST, default a temp folder). Nothing is notarized, no DMG is made, dist/ is not touched; the result is NOT releasable.
+#
+# Media tools (yt-dlp, ffmpeg/ffprobe): scripts/release-media-tools.sh --ensure reuses the cached signed + notarized packages when their inputs are unchanged and re-verify,
+# and builds, signs, notarizes and caches them otherwise; scripts/embed-media-tools.sh puts them in the app; scripts/check-media-tools.sh refuses to continue unless the built app is consistent.
 #
 # One-time setup (the same login works for every app on your team):
 #   xcrun notarytool store-credentials BrowserSetu-NOTARY --apple-id <Apple ID email> --team-id <TEAM ID>
@@ -69,12 +75,25 @@ echo "▸ Notary profile: $NOTARY_PROFILE"
 
 [ "${1:-}" = "--check" ] && { echo "✔ certificate and notary login are usable"; exit 0; }
 
-VERSION="${1:?usage: scripts/release.sh <version> <build>  (or --check)}"
-BUILD="${2:?usage: scripts/release.sh <version> <build>  (or --check)}"
+VERSION="${1:?usage: scripts/release.sh <version> <build> [--verify-only]  (or --check)}"
+BUILD="${2:?usage: scripts/release.sh <version> <build> [--verify-only]  (or --check)}"
+VERIFY_ONLY=0; [ "${3:-}" = "--verify-only" ] && VERIFY_ONLY=1
+[ -z "${3:-}" ] || [ "$VERIFY_ONLY" = 1 ] || fail "unknown option '${3:-}'"
 APP_NAME="Browser Setu"
-DERIVED="build/release"
-DIST="dist"
+if [ "$VERIFY_ONLY" = 1 ]; then
+  VROOT="${RELEASE_VERIFY_ROOT:-$(mktemp -d "${TMPDIR:-/tmp}/browsersetu-verify.XXXXXX")}"
+  DERIVED="${RELEASE_DERIVED:-$VROOT/derived}"; DIST="${RELEASE_DIST:-$VROOT/dist}"
+  case "$DERIVED $DIST" in *" dist"|"build/release "*) fail "--verify-only must not use the real build/release or dist folders" ;; esac
+  echo "▸ VERIFY ONLY: building into $VROOT (not releasable; nothing is notarized or published)"
+else
+  DERIVED="build/release"
+  DIST="dist"
+fi
 rm -rf "$DIST" "$DERIVED"; mkdir -p "$DIST"
+
+# The signed + notarized media-tool packages come first: reused from the cache when unchanged and still valid, otherwise built, signed, notarized and cached. Fails the release before any app build.
+echo "▸ Media tools: ensuring signed + notarized packages (yt-dlp, ffmpeg)"
+scripts/release-media-tools.sh --ensure --identity "$SIGN_IDENTITY" --team "$TEAM_ID" --notary-profile "$NOTARY_PROFILE" --tool all || fail "the media-tool packages are not ready (see above)."
 
 # Always rebuilt, from the locked dependencies and the pinned toolchain: a framework left from earlier would link older Rust code.
 echo "▸ Building the Rust core"; scripts/build-xcframework.sh
@@ -93,6 +112,10 @@ BUILT="$DERIVED/Build/Products/Release/$APP_NAME Direct.app"
 [ -d "$BUILT" ] || fail "the build did not produce $BUILT"
 APP="$DERIVED/Build/Products/Release/$APP_NAME.app"
 mv "$BUILT" "$APP"     # the shipped app is called Browser Setu; the build target is named apart only so both builds can share a folder
+echo "▸ Embedding the signed media tools (from the verified cache)"
+scripts/embed-media-tools.sh "$APP" --team "$TEAM_ID" || fail "the media tools could not be embedded."
+echo "▸ Embedding the JavaScript challenge runner (setu-jsc + yt-dlp plugin)"
+scripts/embed-js-provider.sh "$APP" --identity "$SIGN_IDENTITY" --team "$TEAM_ID" || fail "the JavaScript provider could not be embedded."
 # Sparkle's helpers are signed innermost first with the same identity, hardened runtime and a timestamp, as notarization requires.
 SP="$APP/Contents/Frameworks/Sparkle.framework/Versions/B"
 if [ -d "$SP" ]; then
@@ -121,6 +144,15 @@ case "$ENTS" in *"sandbox=false"*) ;; *) fail "the app's entitlements read '$ENT
 SIGNING_INFO="$(codesign -dvv "$APP" 2>&1 || true)"
 case "$SIGNING_INFO" in *"flags="*"runtime"*) ;; *) fail "the Hardened Runtime flag is missing; notarization would refuse it." ;; esac
 case "$ENTS" in *"kvs=true"*) [ -f "$APP/Contents/embedded.provisionprofile" ] || fail "the app carries the iCloud key-value entitlement but has no embedded Developer ID provisioning profile, so macOS would not launch it. Create a Developer ID profile for com.browsersetu.mac with iCloud key-value storage and embed it (see apps/apple/project.yml)." ;; esac
+
+echo "▸ Checking the media tools inside the built app"
+SRC_FLAG=""
+if [ "${MEDIA_SOURCES_PUBLISHED:-}" = "1" ]; then SRC_FLAG="--sources-published"; elif [ "$VERIFY_ONLY" = 1 ]; then SRC_FLAG="--allow-unpublished-sources"; fi
+scripts/check-media-tools.sh "$APP" --team "$TEAM_ID" --readme README.md $SRC_FLAG || fail "the media tools in the built app are not release-ready (see above)."
+if [ "$VERIFY_ONLY" = 1 ]; then
+  echo "✔ VERIFY ONLY complete: $APP is built, signed and passes the media-tools preflight. It was NOT notarized and is NOT releasable."
+  exit 0
+fi
 
 echo "▸ Notarizing the app (this waits for Apple)"
 ZIP="$DIST/$APP_NAME.zip"

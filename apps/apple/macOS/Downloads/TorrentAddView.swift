@@ -38,6 +38,15 @@ final class TorrentAddModel: ObservableObject {
     var enabled: Bool { coordinator.torrentSettings.enabled }
 
     /// Turns peer-to-peer on from the link's own preview, after the same question Settings asks, and only if the person agrees. Nothing is contacted by this; Get Details still has to be pressed.
+    /// Whether the public DHT is on (it is off until the person allows it).
+    var dhtOn: Bool { coordinator.torrentSettings.dhtEnabled }
+    /// The same question Settings asks before the DHT is used, asked here where the lookup failed.
+    func turnOnDHT() {
+        Task { @MainActor in
+            let pressed = await Dialogs.choose(title: TorrentSettings.dhtConsentTitle, message: TorrentSettings.dhtConsentMessage, buttons: ["Turn On", "Cancel"])
+            if pressed == 0 { coordinator.torrentSettings.dhtEnabled = true; objectWillChange.send() }
+        }
+    }
     func turnOnPeerToPeer() {
         Task { @MainActor in
             let pressed = await Dialogs.choose(title: TorrentSettings.consentTitle, message: TorrentSettings.consentMessage, buttons: ["Turn On", "Cancel"])
@@ -77,12 +86,15 @@ final class TorrentAddModel: ObservableObject {
         return Array(Set(WebSeedMapping.sources(meta: meta, magnetSeeds: magnet?.webSeeds ?? []).map(\.displayName))).sorted()
     }
 
+    /// What the details search is doing, while it runs (nil before and after).
+    @Published var lookupStatus: MetadataProbeStatus?
+
     func getDetails() {
         guard let magnet, !busy else { return }
-        busy = true; problem = nil
+        busy = true; problem = nil; lookupStatus = nil
         Task {
             do {
-                let fetched = try await coordinator.torrents.fetchDetails(of: magnet, origin: origin)
+                let fetched = try await coordinator.torrents.fetchDetails(of: magnet, origin: origin, progress: { [weak self] status in self?.lookupStatus = status })
                 var withTrackers = fetched; if withTrackers.trackers.isEmpty { withTrackers.trackers = TorrentRunner.usableTrackers(magnet.trackers, origin: origin, granted: coordinator.torrents.localTrackerPermission.granted()) }
                 meta = withTrackers; inspection = coordinator.torrents.inspection(of: withTrackers)
                 // A magnet link may name the files it wants (BEP 53). What it names is checked against the real list; a malformed or impossible choice is explained, and never turns into "everything".
@@ -92,7 +104,7 @@ final class TorrentAddModel: ObservableObject {
                 case nil: selection = TorrentSelection.all(fetched)
                 }
             } catch { problem = (error as? LocalizedError)?.errorDescription ?? "The details could not be fetched." }
-            busy = false
+            busy = false; lookupStatus = nil
         }
     }
 
@@ -152,9 +164,12 @@ struct TorrentAddView: View {
                     }
                 }
             }
-            if let problem = model.problem { Text(problem).font(.system(size: 11.5)).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true) }
+            if let problem = model.problem {
+                Text(problem).font(.system(size: 11.5)).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                if model.magnet != nil, model.meta == nil, !model.dhtOn { Button("Turn On the Public DHT…") { model.turnOnDHT() }.buttonStyle(.link).font(.system(size: 11.5)) }
+            }
             HStack {
-                if model.busy { ProgressView().controlSize(.small) }
+                if model.busy { ProgressView().controlSize(.small); if model.meta == nil { Text(model.lookupStatus.map { "Looking for peers… " + $0.summary } ?? "Looking for peers…").font(.system(size: 11.5)).foregroundStyle(.secondary) } }
                 Spacer()
                 Button("Cancel", action: done)
                 if model.meta == nil {

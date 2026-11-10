@@ -456,7 +456,7 @@ final class MediaToolsStore: ObservableObject {
 
     /// Install, update or repair: the same verified path. The person's confirmation happens before this is called.
     func install() {
-        guard !isBusy, removalsPending == 0, let m = manifest else { return }          // not while a removal is still going: the two would fight over the folder
+        guard !isBusy, removalsPending == 0, let m = manifest, m.isInstallable else { return }          // not while a removal is still going: the two would fight over the folder
         setChoice(.accepted)
         phase = .working(0, "Starting…")
         generation += 1; let mine = generation

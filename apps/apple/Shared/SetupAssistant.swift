@@ -403,20 +403,20 @@ struct SetupAssistantView: View {
     #if os(macOS)
     /// Continue is the confirmation: with the box ticked the download starts (and carries on while the person browses); unticked, nothing is installed and nothing asks again.
     private func applyMediaChoice() {
-        if mediaOn, mediaTools.manifest != nil { if !mediaTools.isBusy, !mediaTools.isReady { mediaTools.install() } }
+        if mediaOn, mediaTools.manifest?.isInstallable == true { if !mediaTools.isBusy, !mediaTools.isReady { mediaTools.install() } }
         else { mediaTools.decline() }
     }
 
     private var mediaStep: some View {
         VStack(alignment: .leading, spacing: 12) {
             heading("Advanced media downloads", "Optional. Browser Setu already saves ordinary files, streams and torrents. This adds a program that can find the formats of videos on more sites, so you can pick the quality and save the video or just its sound.")
-            if mediaTools.manifest != nil {
+            if mediaTools.manifest?.isInstallable == true {
                 row("Download and install the media tools", "Browser Setu downloads \(mediaTools.manifest?.name ?? "yt-dlp") \(mediaTools.manifest?.version ?? "") from its official release page, checks it against a fingerprint built into this app, and keeps it in its own folder. \(mediaTools.sizeSummary ?? "") It runs on this Mac only when you ask for a video’s formats and allow it for that site, never in private tabs. No administrator password, Terminal or Homebrew is needed. Browsing carries on while it downloads.") {
                     Toggle("Install advanced media downloads", isOn: $mediaOn).labelsHidden().toggleStyle(.switch).accessibilityLabel("Install advanced media downloads").accessibilityIdentifier("setup-media-toggle")
                 }
                 Text("You can change this at any time in Settings › Media.").font(.system(size: 11.5)).foregroundStyle(.secondary)
             } else {
-                Text("This build has no media-tools package to install.").font(.callout).foregroundStyle(.secondary)
+                Text("Advanced media downloads are not available in this release yet, so nothing will be downloaded now. Ordinary files, streams and torrents work without them.").font(.callout).foregroundStyle(.secondary)
             }
         }
     }

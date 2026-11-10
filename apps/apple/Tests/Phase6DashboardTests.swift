@@ -421,6 +421,119 @@ final class DownloadsViewModelTests: XCTestCase {
         XCTAssertFalse(coordinator.trashFile(of: UUID()))
     }
 
+    /// A finished download with a real file in the downloads folder.
+    private func finishedWithFile(_ name: String) throws -> (id: UUID, file: URL) {
+        let id = make(name, [.queued, .started, .running, .verifying, .completed(.verified)])
+        let file = folder.appendingPathComponent(name)
+        try Data("x".utf8).write(to: file)
+        coordinator.ledger.update(id) { $0.file.destinationPath = file.path }
+        return (id, file)
+    }
+
+    func testMovingAFileToTheTrashAlsoRemovesItsListEntryOnlyOnceTheFileIsGone() throws {
+        let (id, file) = try finishedWithFile("gone.txt")
+        let vm = model(); vm.recheckFiles(); vm.refreshNow()
+        vm.selection = [id]; vm.requestTrash()
+        // The Trash itself is replaced by a delete in this test so the person's real Trash is not touched; what is under test is the entry's lifecycle.
+        vm.trashPerformer = { _ in (try? FileManager.default.removeItem(at: file)) != nil }
+        vm.confirmTrash()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+        XCTAssertNil(coordinator.ledger.record(id), "the entry goes with its file")
+        XCTAssertEqual(vm.message, "Moved 1 file to the Trash and removed it from the list")
+        XCTAssertTrue(vm.pendingTrash.isEmpty)
+    }
+
+    func testAFileThatCouldNotBeMovedKeepsItsEntryAndItsFile() throws {
+        let (id, file) = try finishedWithFile("stuck.txt")
+        let vm = model(); vm.recheckFiles(); vm.refreshNow()
+        vm.selection = [id]; vm.requestTrash()
+        vm.trashPerformer = { _ in false }
+        vm.confirmTrash()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path), "nothing was changed on disk")
+        XCTAssertNotNil(coordinator.ledger.record(id), "an entry never disappears while its file is still there")
+        XCTAssertEqual(vm.message, "“stuck.txt” could not be moved to the Trash. It is still in the list, and its file has not been changed")
+    }
+
+    func testSeveralFilesAreHandledOneByOneAndAFailureDoesNotUndoTheOthers() throws {
+        let a = try finishedWithFile("a.txt"), b = try finishedWithFile("b.txt"), c = try finishedWithFile("c.txt")
+        let vm = model(); vm.recheckFiles(); vm.refreshNow()
+        vm.selection = [a.id, b.id, c.id]; vm.requestTrash()
+        XCTAssertEqual(vm.pendingTrash.count, 3)
+        vm.trashPerformer = { id in
+            guard id != b.id else { return false }          // b fails
+            let url = id == a.id ? a.file : c.file
+            return (try? FileManager.default.removeItem(at: url)) != nil
+        }
+        vm.confirmTrash()
+        XCTAssertNil(coordinator.ledger.record(a.id)); XCTAssertNil(coordinator.ledger.record(c.id))
+        XCTAssertNotNil(coordinator.ledger.record(b.id), "the one that failed stays, with its file")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: b.file.path))
+        XCTAssertEqual(vm.message, "Moved 2 to the Trash. 1 could not be moved and stay in the list: “b.txt”")
+    }
+
+    func testAnActiveDownloadIsNeverOfferedForTheTrashAndRemoveFromListStaysSeparate() throws {
+        let running = make("run.bin", [.queued, .started, .running])
+        let (id, file) = try finishedWithFile("keep.txt")
+        let vm = model(); vm.recheckFiles(); vm.refreshNow()
+        vm.selection = [running, id]; vm.requestTrash()
+        XCTAssertEqual(vm.pendingTrash.map(\.id), [id], "only the finished download with a file qualifies")
+        vm.cancelTrash()
+        vm.selection = [id]
+        XCTAssertEqual(vm.perform(.removeRecord), 1)
+        XCTAssertNil(coordinator.ledger.record(id), "Remove from List forgets the entry")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path), "and never touches the file")
+        XCTAssertNotNil(coordinator.ledger.record(running), "the running download is untouched")
+    }
+
+    /// Two list entries for one file (a duplicate, a re-download that kept the name): moving the file takes both entries, and selecting both is not a failure for the second.
+    func testEntriesSharingOneFileGoTogetherAndASecondSelectedEntryIsNotAFailure() throws {
+        let first = try finishedWithFile("same.txt")
+        let second = make("same-again.txt", [.queued, .started, .running, .verifying, .completed(.verified)])
+        coordinator.ledger.update(second) { $0.file.destinationPath = first.file.path }
+        let other = try finishedWithFile("other.txt")
+        let vm = model(); vm.recheckFiles(); vm.refreshNow()
+        // Only the first entry is selected: the entry that shares its file is found and removed with it; an unrelated file is untouched.
+        vm.selection = [first.id]; vm.requestTrash()
+        var calls = 0
+        vm.trashPerformer = { id in calls += 1; return (try? FileManager.default.removeItem(at: first.file)) != nil }
+        vm.confirmTrash()
+        XCTAssertEqual(calls, 1, "the file is moved once")
+        XCTAssertNil(coordinator.ledger.record(first.id)); XCTAssertNil(coordinator.ledger.record(second), "the other entry for the same file goes with it")
+        XCTAssertNotNil(coordinator.ledger.record(other.id)); XCTAssertTrue(FileManager.default.fileExists(atPath: other.file.path))
+        XCTAssertEqual(vm.message, "Moved 1 file to the Trash and removed it from the list (1 other entry for the same file removed too)")
+        // Both entries selected at once: the second must not be reported as a failure just because the first already moved the file.
+        let a = try finishedWithFile("pair.txt")
+        let b = make("pair-copy.txt", [.queued, .started, .running, .verifying, .completed(.verified)])
+        coordinator.ledger.update(b) { $0.file.destinationPath = a.file.path }
+        vm.recheckFiles(); vm.refreshNow()
+        vm.selection = [a.id, b]; vm.requestTrash()
+        var again = 0
+        vm.trashPerformer = { _ in again += 1; return (try? FileManager.default.removeItem(at: a.file)) != nil }
+        vm.confirmTrash()
+        XCTAssertEqual(again, 1, "one move for one file, however many entries name it")
+        XCTAssertNil(coordinator.ledger.record(a.id)); XCTAssertNil(coordinator.ledger.record(b))
+        XCTAssertFalse(vm.message?.contains("could not") ?? false, "no false failure: \(vm.message ?? "")")
+    }
+
+    /// What the person sees after quitting and reopening: a removed entry stays removed, and an entry whose file could not be moved is still there.
+    func testTheListAfterARelaunchMatchesWhatTheTrashStepDid() throws {
+        let store = FileManager.default.temporaryDirectory.appendingPathComponent("relaunch-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: store, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: store) }
+        let ledger = DownloadLedger(profile: "default"); _ = ledger.attach(folder: store, safeName: { $0 })
+        func finished(_ name: String) -> UUID {
+            let r = ledger.create(protocolID: .http, source: URL(string: "https://example.com/\(name)"), filename: name, isPrivate: false, priority: .normal)
+            for e: DownloadEvent in [.queued, .started, .running, .verifying, .completed(.verified)] { _ = ledger.apply(e, to: r.id) }
+            return r.id
+        }
+        let trashed = finished("trashed.bin"), stuck = finished("stuck.bin")
+        ledger.remove(trashed)          // what a successful trash does to the entry
+        ledger.flush()
+        let reopened = DownloadLedger(profile: "default"); _ = reopened.attach(folder: store, safeName: { $0 })
+        XCTAssertNil(reopened.record(trashed), "a removed entry does not come back after a relaunch")
+        XCTAssertEqual(reopened.record(stuck)?.state, .completed, "an entry whose file stayed is still listed after a relaunch")
+    }
+
     func testRemoveFromListKeepsTheFile() throws {
         let id = make("stay.txt", [.queued, .started, .running, .verifying, .completed(.verified)])
         let file = folder.appendingPathComponent("stay.txt")

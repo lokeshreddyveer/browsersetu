@@ -16,6 +16,7 @@ private struct ExplorerContent: View {
     @State private var pages = 25
     @State private var sameSite = true
     @State private var stayInFolder = true
+    @State private var listOtherWebsites = true
     @State private var message: String?
     /// The address the sheet was opened with from a page. It is the page's until the person changes it.
     @State private var prefilled: String?
@@ -56,6 +57,7 @@ private struct ExplorerContent: View {
             HStack(spacing: 14) {
                 Toggle("This website only", isOn: $sameSite)
                 Toggle("Stay in this folder", isOn: $stayInFolder)
+                Toggle("List files they use from other websites", isOn: $listOtherWebsites).help("Pictures, sound and files that these pages use from another website (a media server, a CDN) are listed. Those websites are not contacted and their pages are not read.")
                 Text("Respects the website's robots.txt. Reads a few pages, slowly, and downloads nothing.").font(.system(size: 11)).foregroundStyle(.tertiary)
                 Spacer()
                 if let line = statusLine { Text(line).font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(1) }
@@ -68,6 +70,7 @@ private struct ExplorerContent: View {
         guard store.phase != .idle else { return message }
         var t = "\(s.pagesVisited) page\(s.pagesVisited == 1 ? "" : "s") read"
         if s.blockedByRobots > 0 { t += ", \(s.blockedByRobots) blocked by robots.txt" }
+        if s.referencedElsewhere > 0 { t += ", \(s.referencedElsewhere) file\(s.referencedElsewhere == 1 ? "" : "s") on other websites listed (not contacted)" }
         if s.outOfScope > 0 { t += ", \(s.outOfScope) outside the scope" }
         if s.insideNetworkRefused > 0 { t += ", \(s.insideNetworkRefused) inside your network refused" }
         switch s.stop {
@@ -104,7 +107,7 @@ private struct ExplorerContent: View {
                         HStack(spacing: 8) {
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(i.name).font(.system(size: 12.5)).lineLimit(1).truncationMode(.middle)
-                                Text("\(i.category.title) · \(i.host) · \(i.directory) · level \(i.depth)").font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+                                Text("\(i.category.title) · \(i.host)\(i.hostedElsewhere ? " (another website)" : "") · \(i.directory) · level \(i.depth)").font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
                             }
                             Spacer()
                             Text(label(i.availability)).font(.system(size: 11)).foregroundStyle(.secondary)
@@ -147,6 +150,6 @@ private struct ExplorerContent: View {
     private func go() {
         let text = address.trimmingCharacters(in: .whitespaces)
         guard let url = URL(string: text) else { return }
-        message = model.startExplorer(url, depth: depth, pages: pages, sameSite: sameSite, stayInFolder: stayInFolder, typedByPerson: address.trimmingCharacters(in: .whitespaces) != prefilled)
+        message = model.startExplorer(url, depth: depth, pages: pages, sameSite: sameSite, stayInFolder: stayInFolder, typedByPerson: address.trimmingCharacters(in: .whitespaces) != prefilled, listOtherWebsites: listOtherWebsites)
     }
 }

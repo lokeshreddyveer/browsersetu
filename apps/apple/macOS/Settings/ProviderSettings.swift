@@ -198,7 +198,7 @@ struct ManagedMediaToolsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if let m {
+            if let m, m.isInstallable || store.isReady {
                 LabeledContent("Advanced media downloads") { statusView(m) }.accessibilityIdentifier("media-tools-status")
                 if case .working(let f, _) = store.phase { ProgressView(value: f).accessibilityLabel("Installing media tools").accessibilityValue("\(Int(f * 100)) percent").accessibilityIdentifier("media-tools-progress") }
                 HStack {
@@ -221,9 +221,21 @@ struct ManagedMediaToolsSection: View {
                 }.controlSize(.small)
                 Toggle("Use these tools to find a video's formats", isOn: $useBundled).accessibilityIdentifier("extractor-bundled")
                 Text("It runs on this Mac only when you ask for a video's formats and allow it for that site. It may contact websites itself. It is never used in private tabs, and it is only ever replaced when you choose Update here.").settingsNote()
+                let solver = JSSolver.report()
+                LabeledContent("YouTube compatibility") {
+                    if !useBundled {
+                        Text("Not in use: the bundled yt-dlp is switched off").foregroundStyle(.secondary)       // the solver belongs to the bundled yt-dlp; a yt-dlp you chose never receives it
+                    } else {
+                        switch JSChallengeProvider.status() {
+                        case .builtIn(let v): Text("Built in · JavaScript solver \(v), sandboxed").foregroundStyle(.secondary)
+                        case .unavailable(let why): Text("Built-in solver unavailable: \(why.summary)").foregroundStyle(.secondary)
+                        }
+                    }
+                }.accessibilityIdentifier("js-provider-status").help(useBundled ? solver.diagnostics : "A yt-dlp you chose yourself is never given Browser Setu's solver.")
+                Text("Some YouTube videos need a small JavaScript puzzle solved before their addresses are known. Browser Setu does it with a helper built into the app that cannot reach the internet, your files or your browsing data. If it is ever unavailable, downloads still work but some YouTube formats may be missing. A managed fallback is planned and is not part of this release. Other websites do not need any of this, and no website is guaranteed to work.").font(.caption).foregroundStyle(.secondary)
                 Text("Components: \(m.name) \(m.version) (Unlicense source; the packaged program combines Python, OpenSSL, curl-impersonate and other open-source parts under their own licences, including GPL-3.0-or-later and LGPL). Licence texts are in the package.").settingsNote()
             } else {
-                Text("This build has no media-tools package.").font(.system(size: 11.5)).foregroundStyle(.secondary).accessibilityIdentifier("extractor-bundled-absent")
+                Text("Advanced media downloads are not available in this release yet. Ordinary files, streams and torrents are not affected, and you can still point Browser Setu at a program you installed yourself.").font(.system(size: 11.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("extractor-bundled-absent")
             }
         }
         .onAppear { store.refresh() }

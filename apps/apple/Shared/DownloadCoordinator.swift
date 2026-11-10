@@ -713,6 +713,14 @@ final class DownloadCoordinator: ObservableObject {
 
     static var directory: URL {
         if let directoryOverride { return directoryOverride }
+        #if DEBUG
+        // A test run (the app is its test host) that did not choose a folder must not read the person's real Downloads: macOS would ask permission for it, again for every new test build.
+        if NSClassFromString("XCTestCase") != nil {
+            let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("bs-test-downloads", isDirectory: true)
+            try? FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+            return scratch
+        }
+        #endif
         #if os(macOS)
         return FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
         #else

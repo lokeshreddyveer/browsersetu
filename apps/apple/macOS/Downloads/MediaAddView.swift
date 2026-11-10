@@ -140,7 +140,7 @@ struct MediaAddView: View {
         }
         .padding(14).frame(width: 380)
         .onAppear { if model.manifest == nil { model.load() } }
-        .animation(.easeInOut(duration: 0.18), value: model.phase)
+        .motion(.easeInOut(duration: 0.18), value: model.phase)
     }
 
     @ViewBuilder private func choices(_ m: MediaManifest) -> some View {

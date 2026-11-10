@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "name": "ffmpeg",
+  "version": "9.0.2",
+  "executable": "ffmpeg",
+  "layout": "flat",
+  "sourceURL": "",
+  "sha256": "",
+  "signaturePolicy": "teamID:X4MH29QNRS",
+  "architectures": [
+    "arm64"
+  ],
+  "sourceArchive": "https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz",
+  "sourceArchiveSHA256": "8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e",
+  "license": "LGPL-2.1-or-later (built with --disable-gpl --disable-nonfree --disable-version3, no external libraries, no network); see scripts/build-ffmpeg-minimal.sh for the exact configure line",
+  "notes": "Source template. The download address, package digests, sizes and architectures are never edited here: each release generates the app's manifest from the verified, signed and notarized package (scripts/media_tools_cache.py manifest). Until a package is hosted and verified the shipped manifest has an empty sourceURL and the app offers no download."
+}

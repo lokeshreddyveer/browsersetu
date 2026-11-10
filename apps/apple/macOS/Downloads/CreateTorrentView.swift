@@ -154,9 +154,9 @@ struct CreateTorrentView: View {
         }
         .padding(18)
         .frame(width: 520, height: 600)
-        .animation(.easeOut(duration: 0.18), value: model.result != nil)
-        .animation(.easeOut(duration: 0.18), value: model.working)
-        .animation(.easeOut(duration: 0.18), value: model.problem)
+        .motion(.easeOut(duration: 0.18), value: model.result != nil)
+        .motion(.easeOut(duration: 0.18), value: model.working)
+        .motion(.easeOut(duration: 0.18), value: model.problem)
     }
 
     private var sourceRow: some View {

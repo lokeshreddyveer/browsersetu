@@ -21,7 +21,20 @@ struct BundledToolManifest: Decodable, Equatable {
     /// "adhoc" for the upstream build; "teamID:XXXXXXXXXX" once the release pipeline re-signs the package.
     var signaturePolicy: String?
     /// A package that can really be downloaded: an https address and a pinned digest. A manifest without them (not hosted yet) is shown as "no package", never offered for install.
-    var isInstallable: Bool { URL(string: sourceURL)?.scheme == "https" && treeSHA256?.isEmpty == false && !sha256.isEmpty }
+    var hasPackage: Bool { URL(string: sourceURL)?.scheme == "https" && treeSHA256?.isEmpty == false && !sha256.isEmpty }
+    /// Whether THIS build would accept the package's signature. A release build accepts only the publisher's ("teamID:..."); the ad-hoc upstream package is for Debug fixtures. Mirrors `MediaToolsInstall.policyAllowed`
+    /// (macOS-only), so the screens can ask the question without importing the installer.
+    var signatureAcceptedByThisBuild: Bool {
+        let policy = signaturePolicy ?? ""
+        if policy.hasPrefix("teamID:") { return true }
+        #if DEBUG
+        return policy == "adhoc" || policy.isEmpty
+        #else
+        return false
+        #endif
+    }
+    /// Offered for install only when it can really succeed here: a hosted package AND a signature this build accepts. Anything else is "not available in this build yet": never offered, never started on its own.
+    var isInstallable: Bool { hasPackage && signatureAcceptedByThisBuild }
 }
 
 /// Where installed tools live and which version is active: no platform-specific code, so shared files can use it.
@@ -211,7 +224,19 @@ enum BundledExtractor {
     static func sha256(of url: URL) -> String? { ManagedTool.sha256(of: url) }
 
     /// Options added for this tool only: it reads no configuration file, writes no cache, and never updates itself (updates are the app's, explicit and verified).
-    static let extraArguments = ["--ignore-config", "--no-cache-dir", "--no-update", "--no-plugin-dirs"]
+    /// `--no-js-runtimes` clears yt-dlp's DEFAULT runtime list (it enables "deno" and finds one in PATH, here /usr/bin:/bin): only a runtime Browser Setu verified is ever passed, by absolute path, after this.
+    static let baseArguments = ["--ignore-config", "--no-cache-dir", "--no-update", "--no-plugin-dirs", "--no-js-runtimes"]
+    /// The one place the options are put together: the base options (which clear every other plugin folder and every default runtime), then the verified provider, then a verified managed runtime.
+    static func composeExtraArguments(plugin: [String], runtime: [String]) -> [String] { baseArguments + plugin + runtime }
+    /// The base options, plus Browser Setu's own JavaScript challenge provider when the app carries it and it matches its pin (macOS Direct builds only; otherwise exactly the base options).
+    static var extraArguments: [String] {
+        #if os(macOS)
+        // Order of the tiers (see ManagedJSRuntime.swift): the verified native provider, then, only if one is installed and verified, a managed Deno by ABSOLUTE path (never PATH). yt-dlp prefers the native one.
+        return composeExtraArguments(plugin: JSChallengeProvider.pluginArguments(), runtime: ManagedDeno.runtimeArguments())
+        #else
+        return baseArguments
+        #endif
+    }
 }
 
 

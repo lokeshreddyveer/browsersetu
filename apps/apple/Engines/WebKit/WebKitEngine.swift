@@ -1117,7 +1117,9 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
 
     func scanPageLinks() async -> PageLinkScan {
         let r = await LinkPageExtractor.collect(from: webView)
-        return PageLinkScan(links: r.links.map { ($0.href, $0.marked) }, truncated: r.truncated)
+        // The pictures too, from the same page, in the same isolated world; only addresses are read (see GalleryExtractor).
+        let pictures = await GalleryExtractor.collect(from: webView)
+        return PageLinkScan(links: r.links.map { ($0.href, $0.marked) }, truncated: r.truncated || pictures.truncated, images: pictures.candidates)
     }
 
     /// The media on the page, read once when asked. See MediaPageExtractor.
@@ -2422,7 +2424,8 @@ enum GalleryExtractor {
           const w = img.naturalWidth || 0, h = img.naturalHeight || 0;
           if (w && h && (w < 160 || h < 160)) continue;          // icons, avatars and spacers are not gallery pictures
           const link = img.closest('a[href]');
-          if (link && isImg(link.href)) { add(link.href); continue; }
+          // A wiki's /wiki/File:Name.jpg link is the page ABOUT the picture, not the picture: its own image address is used instead.
+          if (link && isImg(link.href) && !/\\/wiki\\/[^\\/]*:/.test(new URL(link.href, document.baseURI).pathname)) { add(link.href); continue; }
           let best = img.currentSrc || img.src, bw = 0;
           if (!best || best.startsWith('data:')) best = img.getAttribute('data-src') || img.getAttribute('data-lazy-src') || img.getAttribute('data-original') || best;
           for (const part of (img.getAttribute('srcset') || '').split(/,\\s+/)) { const p = part.trim().split(/\\s+/); const d = parseFloat(p[1]) || 0; if (p[0] && d >= bw) { bw = d; best = p[0]; } }
