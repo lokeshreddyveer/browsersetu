@@ -12,6 +12,10 @@ How each archive is verified (the strongest independent digest available, stated
   pypi          the sha256 PyPI publishes for that exact release file (metadata fetched separately from the file)
   release-sums  the SHA2-256SUMS file published in the same GitHub release
   repo-pin      the sha256 already pinned in this repository (ffmpeg's in apps/apple/ThirdParty/ffmpeg/MANIFEST.json)
+  upstream-pin  the sha256 the upstream build recipe itself pins (curl-impersonate's CMakeLists.txt at the tag curl_cffi 0.17.0 names)
+  publisher     a digest the publisher releases next to the file (openssl's .sha256, python.org's signed-release SPDX document)
+  debian-dsc    the sha256 in Debian's source record for the same upstream tarball
+  tag-commit    a GitHub tag archive whose top folder must carry the commit id the GitHub API reports for the tag
   none          no independent digest exists: the sha256 is only RECORDED (what we downloaded), not verified; marked clearly
 This script prepares material. It is not a legal opinion and does not close any legal review.
 """
@@ -83,6 +87,13 @@ def requirement_items(ytdlp_version, have):
     return items
 
 
+def lame_digest():
+    """Debian's signed source record for lame 3.100 lists the sha256 of the unmodified upstream tarball (lame_3.100.orig.tar.gz): a channel independent of SourceForge."""
+    dsc = get("https://deb.debian.org/debian/pool/main/l/lame/lame_3.100-6.dsc", binary=False)
+    m = re.search(r"Checksums-Sha256:\n(?:\s+\w+ \d+ \S+\n)*?\s+([0-9a-f]{64}) \d+ lame_3\.100\.orig\.tar\.gz", dsc)
+    return m.group(1) if m else None
+
+
 def sources():
     """The components whose source this project redistributes or must offer, with how each is fetched and verified."""
     ff = template("ffmpeg")
@@ -110,9 +121,49 @@ def sources():
         except Exception as e:
             items.append({"id": pid, "name": project, "version": version, "license": note, "url": None, "filename": None, "expectedSHA256": None, "verifiedBy": "none", "builds": builds, "error": str(e)})
     items.extend(requirement_items(ver, {i["id"] for i in items}))
+    items.extend(runtime_items())
     items.append({"id": "lame", "name": "LAME", "version": "3.100", "license": "LGPL-2.1", "url": "https://downloads.sourceforge.net/project/lame/lame/3.100/lame-3.100.tar.gz",
-                  "filename": "lame-3.100.tar.gz", "expectedSHA256": None, "verifiedBy": "none",
+                  "filename": "lame-3.100.tar.gz", "expectedSHA256": lame_digest(), "verifiedBy": "debian-dsc",
                   "builds": "Contents/Frameworks/libmp3lame.dylib (built by this project's Xcode target MP3Lame from apps/apple/ThirdParty/lame)", "recipe": "apps/apple/project.yml target MP3Lame; sources in apps/apple/ThirdParty/lame"})
+    return items
+
+
+CURL_IMPERSONATE = "v2.3.1"          # curl_cffi 0.17.0: scripts/build.py  __version__ = "2.3.1"  (the upstream libcurl-impersonate it downloads)
+
+
+def runtime_items():
+    """CPython and OpenSSL (versions read from the shipped binaries), and curl-impersonate with every dependency its build recipe pins."""
+    items = []
+    spdx = json.loads(get("https://www.python.org/ftp/python/3.14.7/Python-3.14.7.tgz.spdx.json", binary=False))
+    py = next(p for p in spdx["packages"] if p["name"] == "CPython")
+    items.append({"id": "python", "name": "CPython", "version": "3.14.7", "license": "PSF-2.0", "url": py["downloadLocation"], "filename": "Python-3.14.7.tgz",
+                  "expectedSHA256": next(c["checksumValue"] for c in py["checksums"] if c["algorithm"] == "SHA256"), "verifiedBy": "publisher",
+                  "builds": "Python.framework and python3.14/lib-dynload inside yt-dlp_macos (version read from the shipped binary)", "recipe": "python.org's macOS build, as bundled by upstream's PyInstaller workflow"})
+    sums = get("https://github.com/openssl/openssl/releases/download/openssl-3.5.7/openssl-3.5.7.tar.gz.sha256", binary=False).split()[0]
+    items.append({"id": "openssl", "name": "OpenSSL", "version": "3.5.7", "license": "Apache-2.0", "url": "https://github.com/openssl/openssl/releases/download/openssl-3.5.7/openssl-3.5.7.tar.gz",
+                  "filename": "openssl-3.5.7.tar.gz", "expectedSHA256": sums, "verifiedBy": "publisher", "builds": "libssl.3.dylib, libcrypto.3.dylib (version read from the shipped binary)", "recipe": "see the archive"})
+    sha = json.loads(get(f"https://api.github.com/repos/lexiforest/curl-impersonate/git/ref/tags/{CURL_IMPERSONATE}", binary=False))["object"]["sha"]
+    items.append({"id": "curl-impersonate", "name": "curl-impersonate (lexiforest)", "version": CURL_IMPERSONATE[1:], "license": "MIT", "url": f"https://github.com/lexiforest/curl-impersonate/archive/refs/tags/{CURL_IMPERSONATE}.tar.gz",
+                  "filename": f"curl-impersonate-{CURL_IMPERSONATE[1:]}.tar.gz", "expectedSHA256": None, "expectedTagCommit": sha, "verifiedBy": "tag-commit",
+                  "builds": "curl_cffi/_wrapper.abi3.so (statically; shipped libcurl reports 8.23.0-IMPERSONATE)", "recipe": "CMakeLists.txt, patches/ and docs/ in the archive"})
+    cm = get(f"https://raw.githubusercontent.com/lexiforest/curl-impersonate/{CURL_IMPERSONATE}/CMakeLists.txt", binary=False)
+    def var(name): return re.search(rf'set\({name} "([^"]+)"\)', cm).group(1)
+    def hashed(name): return var(name + "_URL_HASH").split("=", 1)[1]
+    z, zs, b, nh2, nq, nh3, ca = var("ZLIB_VERSION"), var("ZSTD_VERSION"), var("BROTLI_VERSION"), var("NGHTTP2_VERSION"), var("NGTCP2_VERSION"), var("NGHTTP3_VERSION"), var("CARES_VERSION")
+    curl, bs = var("CURL_VERSION"), var("BORINGSSL_COMMIT")
+    dep = lambda i, n, v, lic, url, fn, h: {"id": i, "name": n, "version": v, "license": lic, "url": url, "filename": fn, "expectedSHA256": h, "verifiedBy": "upstream-pin",
+                                           "builds": "statically inside curl_cffi/_wrapper.abi3.so (via curl-impersonate " + CURL_IMPERSONATE + ")", "recipe": "curl-impersonate CMakeLists.txt"}
+    items += [
+        dep("curl", "curl", curl.replace("curl-", "").replace("_", "."), "curl licence (MIT-style)", f"https://github.com/curl/curl/archive/{curl}.tar.gz", f"{curl}.tar.gz", hashed("CURL")),
+        dep("boringssl", "BoringSSL", bs[:12], "OpenSSL/ISC-style (see the archive's LICENSE)", f"https://github.com/google/boringssl/archive/{bs}.zip", f"boringssl-{bs[:12]}.zip", hashed("BORINGSSL")),
+        dep("nghttp2", "nghttp2", nh2, "MIT", f"https://github.com/nghttp2/nghttp2/releases/download/v{nh2}/nghttp2-{nh2}.tar.bz2", f"nghttp2-{nh2}.tar.bz2", hashed("NGHTTP2")),
+        dep("ngtcp2", "ngtcp2", nq, "MIT", f"https://github.com/ngtcp2/ngtcp2/releases/download/v{nq}/ngtcp2-{nq}.tar.bz2", f"ngtcp2-{nq}.tar.bz2", hashed("NGTCP2")),
+        dep("nghttp3", "nghttp3", nh3, "MIT", f"https://github.com/ngtcp2/nghttp3/releases/download/v{nh3}/nghttp3-{nh3}.tar.bz2", f"nghttp3-{nh3}.tar.bz2", hashed("NGHTTP3")),
+        dep("zlib", "zlib", z, "Zlib", f"https://github.com/madler/zlib/releases/download/v{z}/zlib-{z}.tar.gz", f"zlib-{z}.tar.gz", hashed("ZLIB")),
+        dep("zstd", "Zstandard", zs, "BSD-3-Clause (dual BSD / GPL-2.0; BSD elected)", f"https://github.com/facebook/zstd/releases/download/v{zs}/zstd-{zs}.tar.gz", f"zstd-{zs}.tar.gz", hashed("ZSTD")),
+        dep("brotli-c", "Brotli (C library)", b, "MIT", f"https://github.com/google/brotli/archive/refs/tags/v{b}.tar.gz", f"brotli-c-{b}.tar.gz", hashed("BROTLI")),
+        dep("c-ares", "c-ares", ca, "MIT", f"https://github.com/c-ares/c-ares/releases/download/v{ca}/c-ares-{ca}.tar.gz", f"c-ares-{ca}.tar.gz", hashed("CARES")),
+    ]
     return items
 
 
@@ -128,7 +179,15 @@ def cmd_fetch(a):
             data = open(path, "rb").read() if os.path.exists(path) else get(it["url"])
             got = sha256(data)
             row.update(sha256=got, size=len(data))
-            if it["expectedSHA256"] and got != it["expectedSHA256"]:
+            if it.get("expectedTagCommit"):
+                import tarfile, io
+                with tarfile.open(fileobj=io.BytesIO(data)) as t:
+                    t.getnames(); carried = t.pax_headers.get("comment", "")      # GitHub writes the commit it archived into the tar's global header
+                if carried != it["expectedTagCommit"]:
+                    row["status"] = f"REFUSED: archive carries commit {carried!r}, the tag is {it['expectedTagCommit']}"
+                else:
+                    open(path, "wb").write(data); row["status"] = f"verified (tag {it['version']} = commit {it['expectedTagCommit'][:12]}; sha256 recorded)"
+            elif it["expectedSHA256"] and got != it["expectedSHA256"]:
                 row["status"] = f"REFUSED: sha256 {got} != expected {it['expectedSHA256']} ({it['verifiedBy']})"
             else:
                 open(path, "wb").write(data)
@@ -151,7 +210,7 @@ RULES = [  # (path regex, component, source ids, licence)
     (r"libzstd\.1\.dylib$", "Zstandard", ["zstd"], "BSD-3-Clause (dual BSD / GPL-2.0; BSD elected)"),
     (r"_brotli\..*\.so$", "Brotli Python binding", ["brotli"], "MIT"),
     (r"_cffi_backend\..*\.so$", "cffi", ["cffi"], "MIT"),
-    (r"curl_cffi/.*\.so$", "curl_cffi wrapper (statically contains curl-impersonate, curl, BoringSSL, nghttp2)", ["curl_cffi", "curl-impersonate"], "MIT (and the licences of the statically contained components)"),
+    (r"curl_cffi/.*\.so$", "curl_cffi wrapper (statically contains curl-impersonate, curl, BoringSSL, nghttp2)", ["curl_cffi", "curl-impersonate", "curl", "boringssl", "nghttp2", "ngtcp2", "nghttp3", "zlib", "zstd", "brotli-c", "c-ares"], "MIT (and the licences of the statically contained components)"),
     (r"charset_normalizer/.*\.so$", "charset-normalizer extensions", ["charset-normalizer"], "MIT"),
     (r"Cryptodome/.*\.so$", "PyCryptodome extensions", ["pycryptodomex"], "Public domain and BSD-2-Clause"),
     (r"websockets/.*\.so$", "websockets speedups", ["websockets"], "BSD-3-Clause"),
@@ -159,11 +218,7 @@ RULES = [  # (path regex, component, source ids, licence)
     (r"libmp3lame\.dylib$", "LAME MP3 encoder library", ["lame"], "LGPL-2.1"),
 ]
 EXTERNAL = {  # components we do not mirror: where their source lives, and why
-    "python": {"url": "https://www.python.org/downloads/source/", "note": "permissive licence (PSF-2.0); attribution only"},
-    "openssl": {"url": "https://www.openssl.org/source/", "note": "Apache-2.0; attribution only"},
-    "zstd": {"url": "https://github.com/facebook/zstd", "note": "BSD-3-Clause elected"},
-    "curl-impersonate": {"url": "https://github.com/lexiforest/curl-impersonate", "note": "MIT; the exact version bundled by curl_cffi 0.17.0 is NOT verified here"},
-}
+    }
 
 
 def macho_files(root):
