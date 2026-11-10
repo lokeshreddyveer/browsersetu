@@ -31,10 +31,15 @@ Upstream's `THIRD_PARTY_LICENSES.txt` is written for **all** of yt-dlp's platfor
 | FFmpeg 9.0.2 | the sha256 pinned in this repository (`8c385028…96e002e`) |
 | yt-dlp 2026.10.26 release tarball | upstream's published `SHA2-256SUMS` for that release |
 | 20 Python packages (mutagen, PyInstaller 6.22.0, yt-dlp-ejs 0.8.0, curl_cffi 0.17.0, cffi, brotli, certifi, charset-normalizer, idna, pycryptodomex, requests, urllib3, websockets, and the build tools) | the sha256 PyPI publishes for each file |
+| yt-dlp release tarball, second channel | the digest GitHub itself computed for the release asset (`21f942d2…087f95`), equal to the first |
+| CPython 3.14.7 | the SPDX document python.org publishes with the release (`62859805…dbe07`) |
+| OpenSSL 3.5.7 | the `.sha256` file OpenSSL publishes with the release |
+| curl-impersonate v2.3.1 (the version `curl_cffi` 0.17.0 downloads: `scripts/build.py`) | GitHub tag `v2.3.1` = commit `98de20ee…`; the archive's own header names that commit |
+| curl 8.23.0, BoringSSL `156c7b75…`, nghttp2 1.63.0, ngtcp2 1.20.0, nghttp3 1.15.0, zlib 1.3.1, zstd 1.5.7, Brotli 1.2.1, c-ares 1.34.9 | the sha256 values pinned by curl-impersonate's own `CMakeLists.txt` at that tag; the shipped binaries agree (libcurl reports `8.23.0-IMPERSONATE`, `libzstd` 1.5.7, OpenSSL 3.5.7, CPython 3.14.7) |
 | yt-dlp git-tag archive (holds the build recipe: the release tarball does not) | recorded only; no independent digest exists |
-| LAME 3.100 | recorded only (`ddfe36ca…b1da1e`); but **45 repository files are byte-identical to the upstream tarball, 0 differ**, and the 2 extra files are ours (`README.browsersetu.md`, `module.modulemap`) |
+| LAME 3.100 | Debian's source record for `lame_3.100.orig.tar.gz` (`ddfe36ca…b1da1e`) equals the SourceForge download; also **45 repository files are byte-identical to the upstream tarball, 0 differ**, and the 2 extra files are ours (`README.browsersetu.md`, `module.modulemap`) |
 
-Not mirrored, on purpose: CPython, OpenSSL, zstd, curl, curl-impersonate, BoringSSL, nghttp2, libffi, SQLite, zlib, bzip2, liblzma, Expat, mpdecimal. Their licences need attribution only (see the licence file); the notices point to their projects. **The exact curl-impersonate version inside `curl_cffi` 0.17.0 has not been verified.** The CPython patch version, and the exact versions of the C libraries statically inside it, have not been extracted either.
+Mirrored as well, although their licences need attribution only: CPython 3.14.7, OpenSSL 3.5.7, and curl-impersonate 2.3.1 with every dependency its recipe pins (patches included in its tag archive). Not mirrored: libffi, SQLite, bzip2, liblzma, Expat, mpdecimal inside the Python runtime (attribution only; python.org's SPDX document for 3.14.7 lists the bundled ones); the notices point to their projects.
 
 Upstream's build recipe, from the tag archive: `.github/workflows/build.yml` job `macos` (runs-on `macos-14`; hash-pinned wheels from `bundle/requirements/macos.txt`; universal2 `cffi` and `curl_cffi` fused with `delocate`; `python3 -m bundle.pyinstaller --target-architecture universal2 --onedir`). Our changes to that output, and only those: thin to arm64 with `lipo`, restore the `Python.framework` links, re-sign every Mach-O (`scripts/release-media-tools.sh`).
 
@@ -42,10 +47,15 @@ FFmpeg: unmodified source, LGPL-only configure line (`--disable-gpl --disable-no
 
 LAME: LGPL-2.1, built as a **separate dynamic library** (`libmp3lame.dylib`) that the app loads, so it can be replaced by rebuilding from the repository sources (re-signing is needed for the signed app).
 
+## GPG
+
+`python3 scripts/prepare-media-sources.py verify-gpg` checks the signature on yt-dlp's `SHA2-256SUMS` for 2026.10.26 with a throwaway keyring: **good signature**, key fingerprint `AC0C BBE6 848D 6A87 3464 AF4E 57CF 6593 3B5A 7581` (Simon Sawicki, yt-dlp signing key; pinned in the script). The public key is taken from yt-dlp's own repository, so this proves the file is the one the key holder signed, not who the key holder is. CPython also publishes Sigstore bundles, which were not checked (its SPDX digest was).
+
 ## Reproduce
 
 ```
-python3 scripts/prepare-media-sources.py fetch                       # download + verify the 25 archives into build/media-sources
+python3 scripts/prepare-media-sources.py fetch                       # download + verify the 37 archives into build/media-sources
+python3 scripts/prepare-media-sources.py verify-gpg                  # upstream's signature on yt-dlp's checksums (needs gpg)
 python3 scripts/prepare-media-sources.py verify-lame                 # LAME: this repository against the upstream tarball
 python3 scripts/prepare-media-sources.py map --app "<Browser Setu.app>"   # every Mach-O in the built app -> its source; fails if any file is unmapped
 ```
@@ -57,7 +67,7 @@ The map is regenerated per built app; a future yt-dlp bump that adds a native fi
 1. **Legal review.** Someone qualified must confirm the GPL-3.0-or-later combined-work position for yt-dlp, including the PyInstaller bootloader and mutagen, and that distributing it from our release is acceptable. This file does not do that.
 2. **Hosting.** The source archives, `SOURCES.json`, `BINARY-TO-SOURCE.json`, the source offers and `build-ffmpeg-minimal.sh` must be published next to the release (GPL-3.0 section 6) and the release notes must link them. The notices already say the publisher publishes them "with the release that contains this package"; that must be made true.
 3. **Written-offer contact.** The offers say "the address in the release notes"; the release notes must carry a working address.
-4. **Unverified items:** the curl-impersonate version, the CPython patch version, the C library versions statically inside it; the GPG signature of upstream's `SHA2-256SUMS` was not checked (no gpg here); the LAME archive digest is recorded, not independently verified.
+4. **Provenance:** see "GPG" below for upstream's signature; no unverified version remains in the table above.
 5. Intel Macs are unsupported until the app and the tools are built for x86_64.
 
 ## Hosting plan (not done)

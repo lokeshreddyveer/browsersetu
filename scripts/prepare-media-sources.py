@@ -263,6 +263,27 @@ def cmd_map(a):
     return 1 if unmapped or missing else 0
 
 
+YTDLP_KEY_FPR = "AC0CBBE6848D6A873464AF4E57CF65933B5A7581"      # yt-dlp signing key (Simon Sawicki), as published in yt-dlp's public.key
+
+def cmd_verify_gpg(a):
+    """Checks upstream's GPG signature on the release's SHA2-256SUMS with a throwaway keyring, and that the signing key is the pinned fingerprint. Needs gpg."""
+    ver = template("yt-dlp")["version"]
+    with tempfile.TemporaryDirectory() as d:
+        os.chmod(d, 0o700)
+        for name, url in (("SHA2-256SUMS", f"https://github.com/yt-dlp/yt-dlp/releases/download/{ver}/SHA2-256SUMS"), ("SHA2-256SUMS.sig", f"https://github.com/yt-dlp/yt-dlp/releases/download/{ver}/SHA2-256SUMS.sig"), ("public.key", "https://github.com/yt-dlp/yt-dlp/raw/master/public.key")):
+            open(os.path.join(d, name), "wb").write(get(url))
+        env = dict(os.environ, GNUPGHOME=d)
+        run = lambda *args: subprocess.run(["gpg", "--batch", *args], env=env, cwd=d, capture_output=True, text=True)
+        run("--import", "public.key")
+        v = run("--status-fd", "1", "--verify", "SHA2-256SUMS.sig", "SHA2-256SUMS")
+        good = "[GNUPG:] GOODSIG" in v.stdout
+        valid = [l.split() for l in v.stdout.splitlines() if l.startswith("[GNUPG:] VALIDSIG")]
+        fpr = valid[0][2] if valid else ""
+        ok = good and fpr == YTDLP_KEY_FPR
+        print(f"  yt-dlp {ver}: SHA2-256SUMS signature " + ("GOOD, key " + fpr if ok else f"NOT VERIFIED (good={good}, key={fpr!r})") + "  (the key is taken from yt-dlp's own repository: trust in it is as strong as that channel, not independently certified)")
+        return 0 if ok else 1
+
+
 def cmd_verify_lame(a):
     path = os.path.join(a.out, "lame-3.100.tar.gz")
     if not os.path.exists(path):
@@ -293,7 +314,7 @@ def cmd_verify_lame(a):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name, fn in (("fetch", cmd_fetch), ("map", cmd_map), ("verify-lame", cmd_verify_lame)):
+    for name, fn in (("fetch", cmd_fetch), ("map", cmd_map), ("verify-lame", cmd_verify_lame), ("verify-gpg", cmd_verify_gpg)):
         s = sub.add_parser(name); s.add_argument("--out", default=os.path.join(ROOT, "build", "media-sources"))
         if name == "map": s.add_argument("--app", required=True)
         s.set_defaults(f=fn)
