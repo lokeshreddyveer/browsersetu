@@ -569,6 +569,30 @@ final class PageExtractionTests: XCTestCase {
         XCTAssertEqual(r.links.count, LinkPageExtractor.maxResults); XCTAssertTrue(r.truncated)
     }
 
+    /// The reported case (an encyclopedia article): thousands of ordinary links, with the real download links far down the page.
+    func testADownloadLinkFarDownALongPageIsStillFound() async throws {
+        let plain = (0..<3300).map { "<a href='https://en.example.org/wiki/Topic_\($0)'>t</a>" }.joined()
+        let web = try await page(plain + "<a href='https://example.org/refs/paper.pdf'>paper</a><a href='https://upload.example.org/audio/talk.mp3'>talk</a>")
+        let raw = await LinkPageExtractor.collect(from: web)
+        XCTAssertGreaterThan(raw.links.count, 3300, "every link on the page was read, not the first 500")
+        XCTAssertFalse(raw.truncated)
+        let chosen = LinkPageExtractor.downloadCandidates(raw)
+        XCTAssertEqual(Set(chosen), Set(["https://example.org/refs/paper.pdf", "https://upload.example.org/audio/talk.mp3"]))
+    }
+
+    /// A wiki's File:Name.svg address is a page about a file. It must not be offered as the file; the real file's address still is.
+    func testAWikiFilePageIsNotOfferedAsTheFile() async throws {
+        XCTAssertEqual(LinkClassifier.classify("https://en.wikipedia.org/wiki/File:Telugu.svg").kind, .webpage)
+        XCTAssertEqual(LinkClassifier.classify("https://en.wikipedia.org/wiki/Image:Map.png").kind, .webpage)
+        XCTAssertEqual(LinkClassifier.classify("https://upload.wikimedia.org/wikipedia/commons/9/96/Telugu.svg").kind, .httpResource, "the real file stays a file")
+        XCTAssertEqual(LinkClassifier.classify("https://example.org/wiki/notes/report.pdf").kind, .httpResource, "a normal path under /wiki/ is not a namespace page")
+        XCTAssertNil(ResourceClassifier.classify(link: "https://en.wikipedia.org/wiki/File:Telugu.svg", marked: false, pageHost: "en.wikipedia.org"))
+        XCTAssertNotNil(ResourceClassifier.classify(link: "https://upload.wikimedia.org/wikipedia/commons/9/96/Telugu.svg", marked: false, pageHost: "en.wikipedia.org"))
+        let web = try await page("<a href='/wiki/File:Telugu.svg'>f</a><a href='https://upload.wikimedia.org/a/Telugu.ogg'>o</a>")
+        let chosen = LinkPageExtractor.downloadCandidates(await LinkPageExtractor.collect(from: web))
+        XCTAssertEqual(chosen, ["https://upload.wikimedia.org/a/Telugu.ogg"])
+    }
+
     func testCancellingGivesNothing() async throws {
         let web = try await page((0..<200).map { "<a href='https://a.org/f\($0).zip'>x</a>" }.joined())
         let t = Task { await LinkPageExtractor.collect(from: web) }

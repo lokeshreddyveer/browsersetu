@@ -14,8 +14,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.4.0"
-    CURRENT_PROJECT_VERSION: "22"
+    MARKETING_VERSION: "0.4.1"
+    CURRENT_PROJECT_VERSION: "24"
     ENABLE_HARDENED_RUNTIME: YES
     GENERATE_INFOPLIST_FILE: NO
     EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64
@@ -60,19 +60,17 @@ targets:
         copy:
           destination: frameworks
     postBuildScripts:
-      - name: Embed bundled tools
+      - name: Media tools manifests (templates only; binaries are embedded by scripts/embed-media-tools.sh)
         basedOnDependencyAnalysis: false
         script: |
           set -e
-          TOOLS="$SRCROOT/ThirdParty/yt-dlp"
+          # The ONE embedder is scripts/embed-media-tools.sh (release.sh runs it on the built app). This phase embeds no executables, so there is no second system with different rules.
+          # Builds that skip it (Debug, tests, App Store, iOS) carry the pinned templates only and show the tools as "not available in this build" (Debug also accepts the ad-hoc upstream fixture).
           DEST="$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH"
           mkdir -p "$DEST/Resources"
-          cp "$TOOLS/MANIFEST.json" "$DEST/Resources/BundledTools.json"
+          cp "$SRCROOT/ThirdParty/yt-dlp/MANIFEST.json" "$DEST/Resources/BundledTools.json"
           if [ -f "$SRCROOT/ThirdParty/ffmpeg/MANIFEST.json" ]; then cp "$SRCROOT/ThirdParty/ffmpeg/MANIFEST.json" "$DEST/Resources/BundledFFmpeg.json"; fi
-          # In Resources/Tools, not Helpers: codesign refuses a Python tree inside Helpers ("bundle format unrecognized" for the *.dist-info folders). Its Mach-O files are signed one by one in Stage C2.
-          rm -rf "$DEST/Helpers/yt-dlp" "$DEST/Resources/Tools/yt-dlp"; mkdir -p "$DEST/Resources/Tools"
-          # The base app stays small: the tool is embedded only for a build made with BUNDLE_MEDIA_TOOLS=1. Otherwise it is offered in setup and installed on request (MediaToolsInstaller).
-          if [ "$BUNDLE_MEDIA_TOOLS" != "1" ]; then echo "note: media tools are not embedded (installed on request)."; elif [ -d "$TOOLS/bin/yt-dlp" ]; then ditto "$TOOLS/bin/yt-dlp" "$DEST/Resources/Tools/yt-dlp"; else echo "note: ThirdParty/yt-dlp/bin/yt-dlp is missing; run scripts/fetch-bundled-tools.sh. This build has no bundled extractor."; fi
+          rm -rf "$DEST/Helpers/yt-dlp" "$DEST/Resources/Tools"
     info:
       path: macOS/Info.plist
       properties:
@@ -128,6 +126,7 @@ targets:
         NSSpeechRecognitionUsageDescription: Voice search turns what you say into text on this device. Nothing you say is sent anywhere.
         NSRemindersFullAccessUsageDescription: Browser Setu adds a reminder only when you choose Remind Me on selected text.
         NSLocalNetworkUsageDescription: Browser Setu finds your other devices on this network when you send them a link or file.
+        NSDownloadsFolderUsageDescription: Browser Setu saves the files you download to your Downloads folder, and shows and opens the ones already there.
         NSUserActivityTypes: [com.browsersetu.page]
         NSBonjourServices: [_browsersetu._tcp]
         NSLocationWhenInUseUsageDescription: Websites you allow can use your location.
@@ -180,19 +179,17 @@ targets:
         copy:
           destination: frameworks
     postBuildScripts:
-      - name: Embed bundled tools
+      - name: Media tools manifests (templates only; binaries are embedded by scripts/embed-media-tools.sh)
         basedOnDependencyAnalysis: false
         script: |
           set -e
-          TOOLS="$SRCROOT/ThirdParty/yt-dlp"
+          # The ONE embedder is scripts/embed-media-tools.sh (release.sh runs it on the built app). This phase embeds no executables, so there is no second system with different rules.
+          # Builds that skip it (Debug, tests, App Store, iOS) carry the pinned templates only and show the tools as "not available in this build" (Debug also accepts the ad-hoc upstream fixture).
           DEST="$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH"
           mkdir -p "$DEST/Resources"
-          cp "$TOOLS/MANIFEST.json" "$DEST/Resources/BundledTools.json"
+          cp "$SRCROOT/ThirdParty/yt-dlp/MANIFEST.json" "$DEST/Resources/BundledTools.json"
           if [ -f "$SRCROOT/ThirdParty/ffmpeg/MANIFEST.json" ]; then cp "$SRCROOT/ThirdParty/ffmpeg/MANIFEST.json" "$DEST/Resources/BundledFFmpeg.json"; fi
-          # In Resources/Tools, not Helpers: codesign refuses a Python tree inside Helpers ("bundle format unrecognized" for the *.dist-info folders). Its Mach-O files are signed one by one in Stage C2.
-          rm -rf "$DEST/Helpers/yt-dlp" "$DEST/Resources/Tools/yt-dlp"; mkdir -p "$DEST/Resources/Tools"
-          # The base app stays small: the tool is embedded only for a build made with BUNDLE_MEDIA_TOOLS=1. Otherwise it is offered in setup and installed on request (MediaToolsInstaller).
-          if [ "$BUNDLE_MEDIA_TOOLS" != "1" ]; then echo "note: media tools are not embedded (installed on request)."; elif [ -d "$TOOLS/bin/yt-dlp" ]; then ditto "$TOOLS/bin/yt-dlp" "$DEST/Resources/Tools/yt-dlp"; else echo "note: ThirdParty/yt-dlp/bin/yt-dlp is missing; run scripts/fetch-bundled-tools.sh. This build has no bundled extractor."; fi
+          rm -rf "$DEST/Helpers/yt-dlp" "$DEST/Resources/Tools"
     info:
       path: Direct/Info.plist
       properties:
@@ -231,6 +228,7 @@ targets:
         NSSpeechRecognitionUsageDescription: Voice search turns what you say into text on this device. Nothing you say is sent anywhere.
         NSRemindersFullAccessUsageDescription: Browser Setu adds a reminder only when you choose Remind Me on selected text.
         NSLocalNetworkUsageDescription: Browser Setu finds your other devices on this network when you send them a link or file.
+        NSDownloadsFolderUsageDescription: Browser Setu saves the files you download to your Downloads folder, and shows and opens the ones already there.
         NSUserActivityTypes: [com.browsersetu.page]
         NSBonjourServices: [_browsersetu._tcp]
         NSLocationWhenInUseUsageDescription: Websites you allow can use your location.

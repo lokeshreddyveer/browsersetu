@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "name": "deno",
+  "version": "2.9.8",
+  "layout": "flat",
+  "executable": "deno",
+  "sourceURL": "",
+  "sha256": "",
+  "architectures": [
+    "arm64"
+  ],
+  "signaturePolicy": "",
+  "license": "MIT (Deno); V8 and its dependencies under their own permissive licences, listed in Deno's release notes",
+  "forYtDlp": [
+    "2026.10.26"
+  ],
+  "upstream": {
+    "asset": "deno-aarch64-apple-darwin.zip",
+    "url": "https://github.com/denoland/deno/releases/download/v2.9.8/deno-aarch64-apple-darwin.zip",
+    "sha256": "9f0bf660393da2eaff044cdc7444cb08c73f235849b61d224d825a194ce7c98e",
+    "size": 38770795,
+    "signedBy": "Deno Land Inc.",
+    "teamID": "2H4KBF436B"
+  },
+  "notes": "OPTIONAL and NOT part of 0.4.1: nothing downloads, hosts, bundles or requires it. Template only: package digests, sizes and the download address are generated from a verified, signed and notarized package (scripts/media_tools_cache.py manifest), never edited here. forYtDlp lists the yt-dlp releases this Deno is verified to solve with."
+}

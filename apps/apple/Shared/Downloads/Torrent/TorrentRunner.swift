@@ -348,7 +348,7 @@ final class TorrentRunner {
     }
 
     /// A magnet link names a torrent but does not describe it. Getting the description means contacting its trackers and peers, so it happens only when the person asks.
-    func fetchDetails(of magnet: MagnetLink, timeout: TimeInterval = 60, origin: DownloadRequestOrigin = .user, isPrivateSession: Bool = false) async throws -> TorrentMetainfo {
+    func fetchDetails(of magnet: MagnetLink, timeout: TimeInterval = 60, origin: DownloadRequestOrigin = .user, isPrivateSession: Bool = false, progress: ((MetadataProbeStatus) -> Void)? = nil) async throws -> TorrentMetainfo {
         guard settings.enabled else { throw TorrentError.disabled }
         let outcome = await localTrackerPermission.authorize(magnet.trackers, origin: origin, source: nil, isPrivateSession: isPrivateSession) { await Dialogs.permission($0) }
         let granted = outcome.trackers
@@ -386,13 +386,36 @@ final class TorrentRunner {
                 }
             }
             session.start()
-            DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { [self] in
-                guard !finished else { return }
-                finished = true; self.endProbe(probe); PeerBudget.shared.releaseAll(task: probe)
-                continuation.resume(throwing: TorrentError.notReady("No peer sent the torrent's details in time. Try again later, or use the .torrent file."))
+            // `timeout` is how long the search may go WITHOUT any sign of life (no peer connected that was not before, no piece of the details arrived); a search that keeps finding peers or receiving
+            // pieces goes on, up to three times that. Each second the person is shown what is happening (trackers, peers, DHT), so a slow swarm no longer looks like a hang.
+            let began = Date(); var lastSign = began; var best = -1
+            let heartbeat = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [self] timer in
+                guard !finished else { timer.invalidate(); return }
+                let status = MetadataProbeStatus(snapshot: session.snapshot, elapsed: Date().timeIntervalSince(began))
+                let score = status.peersConnected * 1000 + Int((status.metadataProgress ?? 0) * 1000)
+                if score > best { best = score; lastSign = Date() }
+                progress?(status)
+                if Date().timeIntervalSince(lastSign) >= timeout || Date().timeIntervalSince(began) >= timeout * 3 {
+                    timer.invalidate()
+                    finished = true; self.endProbe(probe); PeerBudget.shared.releaseAll(task: probe)
+                    continuation.resume(throwing: TorrentError.notReady(Self.noDetailsMessage(status)))
+                }
             }
+            _ = heartbeat
         }
     }
+
+    /// What the person is told when a magnet link's details did not arrive: what was tried and found, and what can help. Not a bare "failed".
+    static func noDetailsMessage(_ status: MetadataProbeStatus) -> String {
+        var found = "In \(Int(status.elapsed)) seconds: \(status.summary)."
+        if status.trackersTotal > 0 && status.trackersAnswered == 0 { found += " None of the link's trackers answered." }
+        let advice = status.dhtOn
+            ? "The torrent may have no active peers right now. Try again later, or use the .torrent file."
+            : "“Find peers on the public DHT” often finds peers when trackers are dead: turn it on, then choose Get Details again. Or use the .torrent file."
+        return "No peer sent the torrent's details. " + found + " " + advice
+    }
+    /// The same text without a live status (tests, and callers that have none).
+    static func noDetailsMessage(dhtOn: Bool) -> String { noDetailsMessage(MetadataProbeStatus(dhtOn: dhtOn)) }
 
     // MARK: Starting
 

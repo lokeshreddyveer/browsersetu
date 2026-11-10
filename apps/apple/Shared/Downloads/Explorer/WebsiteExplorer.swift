@@ -21,6 +21,10 @@ struct ExplorerScope: Sendable {
     /// Seconds between two requests to one website.
     var pacing: TimeInterval = 0.5
     var timeLimit: TimeInterval = 120
+    /// Files that the pages being read point at on OTHER websites (an image or audio file served from a media host, a PDF on a university server) are LISTED, not followed: they are proposals taken from an address that an
+    /// in-scope page contains, nothing on those websites is requested, and no page of theirs is ever read. Without this, a site whose media lives on another host (an encyclopedia, any site behind a CDN) shows
+    /// almost nothing. "This website only" still governs what is READ.
+    var includeReferencedFiles = true
 
     static let depthRange = 0...3, pageRange = 1...100, candidateRange = 1...2000, totalRange = 100_000...50_000_000
 
@@ -107,6 +111,8 @@ struct ExplorerItem: Identifiable, Equatable, Sendable {
     var foundOn: String
     var availability: Availability = .proposed
     var kind: LinkKind
+    /// The address is on another website than the one being explored: the page uses or links it, and it was only listed, never contacted.
+    var hostedElsewhere = false
 }
 
 struct ExplorerSummary: Equatable, Sendable {
@@ -115,6 +121,8 @@ struct ExplorerSummary: Equatable, Sendable {
     var pagesFailed = 0
     var blockedByRobots = 0
     var outOfScope = 0
+    /// Files on other websites that pages in scope use, listed without contacting those websites.
+    var referencedElsewhere = 0
     var insideNetworkRefused = 0
     var bytesRead = 0
     var stop = Stop.finished
@@ -236,6 +244,17 @@ final class WebsiteExplorer {
                 // Not a page: if it is a file the traversal can say what it is from the type alone, with nothing of it read.
                 if depth > 0, candidates < scope.maxCandidates, let item = Self.item(for: url, depth: depth, foundOn: nil, tag: nil, mime: type), proposed.insert(item.id).inserted { candidates += 1; found(item) }
                 continue
+            } catch ExplorerFetchError.status(let code) {
+                summary.pagesFailed += 1
+                if depth == 0 {
+                    summary.stop = .startFailed
+                    // 401/403/429/503 on a first read is usually a site that does not answer automatic reads (a bot or human check such as Cloudflare's "Just a moment"): this reader has no browser, no cookies and no scripts.
+                    summary.note = [401, 403, 429, 503].contains(code)
+                        ? "The website did not allow the page to be read automatically (status \(code)); it may be asking for a human check. Open the page in a tab and use Collect from This Page, which reads what your browser shows."
+                        : "The starting page could not be read (the website answered \(code))."
+                    break
+                }
+                continue
             } catch {
                 summary.pagesFailed += 1
                 if depth == 0 { summary.stop = .startFailed; summary.note = "The starting page could not be read."; break }
@@ -265,7 +284,19 @@ final class WebsiteExplorer {
                 switch scope.admits(abs) {
                 case .inScope: break
                 case .insideYourNetwork: summary.insideNetworkRefused += 1; continue
-                case .otherWebsite, .outsideDirectory: summary.outOfScope += 1; continue
+                case .otherWebsite:
+                    // A file the page itself uses or links, on another website: listed (never fetched). A link to another website's PAGE is out of scope and is never followed.
+                    let referencedKind = LinkClassifier.classify(abs.absoluteString).kind
+                    var isFileKind = false
+                    switch referencedKind { case .httpResource, .streamManifest, .torrentURL: isFileKind = true; default: break }
+                    if scope.includeReferencedFiles, isFileKind || ["img", "video", "audio", "source", "embed"].contains(link.tag) {
+                        if candidates < scope.maxCandidates, var item = Self.item(for: abs, depth: depth, foundOn: here, tag: link.tag, mime: nil, kind: isFileKind ? referencedKind : .httpResource), proposed.insert(item.id).inserted {
+                            item.hostedElsewhere = true; candidates += 1; summary.referencedElsewhere += 1; found(item)
+                        }
+                        continue
+                    }
+                    summary.outOfScope += 1; continue
+                case .outsideDirectory: summary.outOfScope += 1; continue
                 case .notWeb: continue
                 }
                 let kind = LinkClassifier.classify(abs.absoluteString).kind

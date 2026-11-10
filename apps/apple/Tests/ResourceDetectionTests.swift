@@ -2,6 +2,20 @@ import XCTest
 @testable import Browser_Setu
 
 final class ResourceDetectionTests: XCTestCase {
+    /// The reported case: a gallery page (IMDb's interest page) whose pictures are <img srcset> tags, not links. The toolbar used to show only the few media items.
+    @MainActor
+    func testAPagesPicturesAreListedAsImagesAndASameFileLinkIsNotCountedTwice() {
+        let scan = PageLinkScan(links: [("https://www.example.org/title/tt1/", false), ("https://cdn.example.org/posters/a.jpg", false)], truncated: false,
+                                images: ["https://cdn.example.org/posters/a.jpg", "https://cdn.example.org/posters/b._V1_QL75_UX380_.jpg", "https://img.example.org/render?id=77&w=400", "data:image/png;base64,AAAA",
+                                         "https://en.wikipedia.org/wiki/File:Telugu.svg"])
+        let s = PageResourceSummary.build(scan: scan, media: .empty, pageHost: "www.example.org")
+        let images = s.items[.image] ?? []
+        XCTAssertEqual(images.map(\.url), ["https://cdn.example.org/posters/a.jpg", "https://cdn.example.org/posters/b._V1_QL75_UX380_.jpg", "https://img.example.org/render?id=77&w=400"],
+                       "the linked file is one item, an extension-less image address is kept, a data: URL and a wiki File: page are not pictures")
+        XCTAssertEqual(images.count, 3)
+        XCTAssertFalse(s.isEmpty)
+    }
+
     private func c(_ u: String, marked: Bool = false) -> DetectedResource? { ResourceClassifier.classify(link: u, marked: marked, pageHost: "example.org") }
 
     func testCategoriesByExtension() {

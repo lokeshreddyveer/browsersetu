@@ -28,6 +28,8 @@ struct BrowserSetuMacApp: App {
                 ExternalExtractor.trace = { msg in lines.append("[trace \(Date().timeIntervalSince1970)] \(msg)") }
                 if let v = BundledExtractor.verify() {
                     lines.append("verified \(v.identity)")
+                    lines.append(JSSolver.report().diagnostics)
+                    lines.append("options \(BundledExtractor.extraArguments)")
                     do { let o = try await ExternalExtractor.run(v.url, arguments: ["--version"], timeout: 60, maxBytes: 4096); lines.append("version \(String(decoding: o, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines))") }
                     catch { lines.append("version FAILED \(error)") }
                     if let u = UserDefaults.standard.string(forKey: "SelfTestExtractorURL").flatMap(URL.init(string:)) {
@@ -50,6 +52,19 @@ struct BrowserSetuMacApp: App {
             let json: [String: Any] = ["name": "ffmpeg", "version": "9.0.2", "sha256": "x", "sourceURL": "https://example.com/x.zip", "executable": "ffmpeg", "layout": "flat", "treeSHA256": digest, "signaturePolicy": "adhoc"]
             if let data = try? JSONSerialization.data(withJSONObject: json), (try? data.write(to: pin)) != nil {
                 FFmpegTool.tool.manifestURL = pin; FFmpegTool.tool.helpersFolder = URL(fileURLWithPath: bin); FFmpegTool.tool.forgetCache()
+            }
+        }
+        // Debug only: `-DenoDevTool <folder holding deno/>` pins a locally prepared Deno (by its own digest, for THIS yt-dlp) so a run can exercise the managed-Deno tier. Release builds have no such hook; the tier
+        // itself still requires the app's own Team ID, a valid signature, the hardened runtime, this processor and a verified yt-dlp pairing.
+        if let bin = UserDefaults.standard.string(forKey: "DenoDevTool"), let team = JSChallengeProvider.ownTeamID {
+            let dir = URL(fileURLWithPath: bin).appendingPathComponent("deno", isDirectory: true)
+            guard let digest = ManagedTool.treeDigest(of: dir) else { fatalError("-DenoDevTool: \(dir.path) is not a tool folder") }
+            let version = UserDefaults.standard.string(forKey: "DenoDevVersion") ?? "2.9.8"
+            let pin = FileManager.default.temporaryDirectory.appendingPathComponent("bs-deno-devpin-\(UUID().uuidString).json")
+            let json: [String: Any] = ["name": "deno", "version": version, "sha256": "x", "sourceURL": "", "executable": "deno", "layout": "flat", "treeSHA256": digest,
+                                       "architectures": [ManagedDeno.thisMacsArchitecture], "signaturePolicy": "teamID:\(team)", "forYtDlp": [BundledExtractor.manifest()?.version ?? ""]]
+            if let data = try? JSONSerialization.data(withJSONObject: json), (try? data.write(to: pin)) != nil {
+                ManagedDeno.tool.manifestURL = pin; ManagedDeno.tool.helpersFolder = URL(fileURLWithPath: bin); ManagedDeno.tool.forgetCache()
             }
         }
         // A debug run with the provider fixture starts with no fixture sign-in: the stand-in Vimeo token it saves in the Keychain would otherwise outlive the run and change the next one.

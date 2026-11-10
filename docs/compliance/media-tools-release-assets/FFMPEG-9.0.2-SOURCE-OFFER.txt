@@ -1,0 +1,39 @@
+FFmpeg 9.0.2 as distributed with Browser Setu (optional media tool "ffmpeg")
+=============================================================================
+
+What this is
+  The files ffmpeg and ffprobe in ffmpeg-9.0.2-arm64.zip are FFmpeg 9.0.2 (https://ffmpeg.org), built by the Browser Setu publisher as LGPL-only, statically linked programs for Apple silicon (arm64).
+  They are free software under the GNU Lesser General Public License, version 2.1 or later. They were configured with --disable-gpl --disable-nonfree --disable-version3, use no external libraries
+  (--disable-autodetect) and open no network connections (--disable-network). The licence texts (COPYING.LGPLv2.1, COPYING.LGPLv3, LICENSE.md) are inside the zip, next to BUILDINFO.txt.
+
+Changes made by the publisher
+  1. The FFmpeg source is UNMODIFIED. It is the upstream release archive, checked against its published SHA-256 before it is built.
+  2. The programs are built with a reduced feature set (the configure line is in BUILDINFO.txt and below), which only removes components.
+  3. The finished programs are code-signed with a Developer ID certificate (Team X4MH29QNRS) with the hardened runtime, and the zip was notarized by Apple. Signing changes the file bytes, not the source.
+
+Corresponding source (what you need to rebuild these programs)
+  Source archive   https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz
+  Size             12,040,788 bytes
+  SHA-256          8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e
+  Build script     build-ffmpeg-minimal.sh (published next to this file; the exact script used)
+  Configure line   --arch=arm64 --cc=clang --extra-cflags='-mmacosx-version-min=13.0' --extra-ldflags='-mmacosx-version-min=13.0' --disable-everything --disable-autodetect --disable-gpl
+                   --disable-nonfree --disable-version3 --disable-doc --disable-debug --disable-network --disable-ffplay --disable-avdevice --disable-swscale --enable-ffmpeg --enable-ffprobe
+                   --enable-static --disable-shared --enable-pic --enable-protocol='file,pipe' --enable-demuxer='matroska,mov,ogg,mp3,flac,wav,aac,ac3,eac3,opus'
+                   --enable-muxer='matroska,webm,mp4,ipod,ogg,opus,wav,mp3,flac,null' --enable-decoder='opus,vorbis,aac,aac_fixed,mp3,mp3float,flac,pcm_s16le,pcm_s24le,pcm_s32le,pcm_f32le,pcm_f64le,pcm_u8,ac3,eac3'
+                   --enable-encoder='aac,pcm_s16le,pcm_s24le,pcm_f32le,flac' --enable-parser='aac,aac_latm,opus,vorbis,vp8,vp9,av1,h264,hevc,mpegaudio,flac,ac3'
+                   --enable-bsf='aac_adtstoasc,extract_extradata,vp9_superframe,av1_frame_merge,h264_mp4toannexb,hevc_mp4toannexb,null,opus_metadata,setts'
+                   --enable-filter='aresample,aformat,anull,null,format,atrim,trim,asetpts,setpts,volume'
+  Compiler         Apple clang 21.0.0, macOS 13.0 deployment target
+
+How to rebuild (and replace) the programs
+  1. Download the source archive above and check its SHA-256.
+  2. Run:  sh build-ffmpeg-minimal.sh OUT_DIR arm64     (the script downloads and checks the archive itself, configures, builds and writes ffmpeg, ffprobe and BUILDINFO.txt to OUT_DIR).
+  3. Because the programs are statically linked, this is the way to use a modified FFmpeg library with them: edit the source, rebuild, and use your own ffmpeg. Browser Setu can be pointed at a program you
+     installed yourself (Settings > Media), so you are not tied to the copy we distribute.
+
+Written offer
+  If any of the above is unavailable to you, write to the address in the Browser Setu release notes and the corresponding source, the build script and these instructions will be provided to you for at least
+  three years after this version was last distributed, for no more than the cost of copying.
+
+No warranty
+  FFmpeg is distributed WITHOUT ANY WARRANTY; see the licence texts. FFmpeg is a trademark of Fabrice Bellard, originator of the FFmpeg project.

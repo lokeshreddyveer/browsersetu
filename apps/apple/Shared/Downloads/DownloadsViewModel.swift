@@ -228,7 +228,7 @@ final class DownloadsViewModel: ObservableObject {
                 built.append(row)
             }
         }
-        rows = built
+        if built != rows { rows = built }          // an unchanged list is not published again: nothing downstream re-evaluates
         held = DownloadSchedule.isHeld(until: coordinator.heldUntil)
         holdNote = held ? (coordinator.heldUntil == .distantFuture ? "Queue paused until you resume" : "Queue held until \(coordinator.heldUntil.map { $0.formatted(date: .omitted, time: .shortened) } ?? "later")") : nil
         counts = DownloadQuery.counts(of: rows)
@@ -344,10 +344,47 @@ final class DownloadsViewModel: ObservableObject {
         pendingTrash = DownloadBatch.eligible(.trashFile, in: rows, selection: ids ?? selection)
     }
 
+    /// Test seam: how one download's file is moved to the Trash. The real one is `DownloadCoordinator.trashFile(of:)`.
+    var trashPerformer: ((UUID) -> Bool)?
+
+    /// Moves each confirmed file to the Trash and, only for a file that was really moved, removes that download's list entry too (the file is gone, so the entry has nothing to open or reveal).
+    /// A file that could not be moved keeps its entry and is named in the message, so nothing disappears from the list while its file is still on disk. "Remove from List" stays a separate action
+    /// that never touches a file. Several files are handled one by one: a failure does not stop or undo the others.
     func confirmTrash() {
         let targets = pendingTrash; pendingTrash = []
-        for row in targets { coordinator?.trashFile(of: row.id) }
+        var moved = 0, sharedRemoved = 0, kept: [String] = []
+        var trashedPaths = Set<String>()
+        for row in targets {
+            // Already taken with an earlier row as an entry for the same file: nothing left to do for it.
+            guard coordinator?.ledger.record(row.id) != nil else { continue }
+            let path = coordinator?.managedFile(of: row.id)?.standardizedFileURL.path
+            // Another selected row for the same file: the first one already moved it, so this one is done too (not a failure) and only its entry goes.
+            if let path, trashedPaths.contains(path) { coordinator?.removeRecord(row.id); sharedRemoved += 1; continue }
+            // Other finished downloads in the list that point at the very same file (a duplicate entry, a re-download that kept the name). Looked up BEFORE the move, while the file still exists.
+            let siblings = path.map { entriesSharing(file: $0, except: row.id) } ?? []
+            let ok = trashPerformer?(row.id) ?? (coordinator?.trashFile(of: row.id) ?? false)
+            if ok {
+                coordinator?.removeRecord(row.id); moved += 1
+                if let path { trashedPaths.insert(path) }
+                for other in siblings { coordinator?.removeRecord(other); sharedRemoved += 1 }          // their file is gone too: an entry with nothing to open is not kept
+            } else { kept.append(row.filename) }
+        }
         recheckFiles()
+        let shared = sharedRemoved > 0 ? " (\(sharedRemoved) other entr\(sharedRemoved == 1 ? "y" : "ies") for the same file removed too)" : ""
+        switch (moved, kept.count) {
+        case (_, 0): message = (moved == 1 ? "Moved 1 file to the Trash and removed it from the list" : "Moved \(moved) files to the Trash and removed them from the list") + shared
+        case (0, 1): message = ("“\(kept[0])” could not be moved to the Trash. It is still in the list, and its file has not been changed")
+        case (0, _): message = ("None of the \(kept.count) files could be moved to the Trash. They are still in the list, and no file has been changed")
+        default: message = ("Moved \(moved) to the Trash. \(kept.count) could not be moved and stay in the list: " + kept.prefix(3).map { "“\($0)”" }.joined(separator: ", ") + (kept.count > 3 ? " and \(kept.count - 3) more" : "")) + shared
+        }
+    }
+
+    /// The other finished downloads whose file is the same file on disk.
+    private func entriesSharing(file path: String, except id: UUID) -> [UUID] {
+        guard let coordinator else { return [] }
+        return coordinator.ledger.records(in: .completed).compactMap { r in
+            r.id != id && coordinator.managedFile(of: r.id)?.standardizedFileURL.path == path ? r.id : nil
+        }
     }
 
     func cancelTrash() { pendingTrash = [] }

@@ -477,7 +477,9 @@ extension BrowserEngine {
 struct PageLinkScan: Equatable, Sendable {
     var links: [(href: String, marked: Bool)]
     var truncated: Bool
-    static func == (a: Self, b: Self) -> Bool { a.truncated == b.truncated && a.links.count == b.links.count && zip(a.links, b.links).allSatisfy { $0.href == $1.href && $0.marked == $1.marked } }
+    /// The pictures the page shows (`<img>`, `srcset`, lazy-load attributes): the address of the best version of each, read in the same one-time scan. Plain pictures are not links, so the links alone never saw them.
+    var images: [String] = []
+    static func == (a: Self, b: Self) -> Bool { a.truncated == b.truncated && a.images == b.images && a.links.count == b.links.count && zip(a.links, b.links).allSatisfy { $0.href == $1.href && $0.marked == $1.marked } }
 }
 
 struct LinkPageSnapshot: Equatable, Sendable {

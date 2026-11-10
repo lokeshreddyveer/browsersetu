@@ -150,7 +150,7 @@ enum LinkClassifier {
             let name = last.isEmpty || last == "/" ? host : (DiagnosticRedactor.text(shown, limit: 120) == shown && !(DiagnosticRedactor.url("https://h/" + last) ?? "").hasSuffix("/…") ? shown : host)
             if ext == "torrent" { return Result(kind: .torrentURL, identity: key, name: name, host: host.lowercased(), display: display) }
             if ext == "m3u8" || ext == "mpd" { return Result(kind: .streamManifest, identity: key, name: name, host: host.lowercased(), display: display) }
-            if fileExtensions.contains(ext) { return Result(kind: .httpResource, identity: key, name: name, host: host.lowercased(), display: display) }
+            if fileExtensions.contains(ext), !isNamespacePage(url) { return Result(kind: .httpResource, identity: key, name: name, host: host.lowercased(), display: display) }
             return Result(kind: .webpage, identity: key, name: name, host: host.lowercased(), display: display)
         case "file":
             guard let url = URL(string: text), url.isFileURL else { return invalid("Not a usable file address.") }
@@ -162,6 +162,13 @@ enum LinkClassifier {
             let why = unsafe.contains(scheme) ? "A \(scheme): address is never opened as a download" : "\(scheme): addresses are not supported"
             return Result(kind: .unsupported(why), identity: "scheme:" + scheme + ":" + Data(text.utf8).sha256Hex.prefix(16), name: String(scheme), host: nil, display: "\(scheme):…")
         }
+    }
+
+    /// A wiki's "File:Name.ext" or "Image:Name.ext" address (MediaWiki's /wiki/Namespace:Title) is a PAGE that describes a file, not the file: its name only looks like one. Treating it as a file made the
+    /// LinkGrabber and Explore offer HTML pages as downloads. Following such a page (when the depth allows) is how the real file's address is found.
+    static func isNamespacePage(_ url: URL) -> Bool {
+        let p = url.path
+        return p.hasPrefix("/wiki/") && p.dropFirst(6).contains(":") && !p.dropFirst(6).contains("/")
     }
 
     /// One spelling for one address. Case of the scheme and host, a default port, a fragment and the case of percent-escapes do not make a different address; the path and the query otherwise

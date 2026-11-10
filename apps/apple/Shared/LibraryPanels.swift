@@ -287,6 +287,15 @@ struct DownloadsPanel: View {
         }
     }
 
+    private var shownRows: [(id: String, item: DownloadItem)] {
+        var seen: [String: Int] = [:]
+        return shown.map { d in
+            let base = d.url + "\u{1}" + d.filename
+            let n = seen[base, default: 0]; seen[base] = n + 1
+            return (base + "\u{1}\(n)", d)
+        }
+    }
+
     private var busy: Bool { !coordinator.active.isEmpty || !coordinator.interrupted.isEmpty || !coordinator.waiting.isEmpty || !coordinator.failures.isEmpty }
 
     var body: some View {
@@ -305,7 +314,8 @@ struct DownloadsPanel: View {
                     if busy { queueBar }
                     if !coordinator.active.isEmpty {
                         PanelSection(title: "In Progress", symbol: "arrow.down.circle.fill", count: coordinator.active.count, collapsible: false) {
-                            ForEach(Array(coordinator.active.values)) { d in active(d) }
+                            // Dictionary order is not stable: sorted, so a progress tick never reorders the rows.
+                            ForEach(coordinator.active.values.sorted { ($0.filename, $0.id.uuidString) < ($1.filename, $1.id.uuidString) }) { d in active(d) }
                         }
                     }
                     if !coordinator.failures.isEmpty {
@@ -315,13 +325,14 @@ struct DownloadsPanel: View {
                     }
                     if !coordinator.interrupted.isEmpty {
                         PanelSection(title: "Interrupted", symbol: "exclamationmark.arrow.circlepath", count: coordinator.interrupted.count) {
-                            ForEach(Array(coordinator.interrupted.values)) { d in interrupted(d) }
+                            ForEach(coordinator.interrupted.values.sorted { $0.id.uuidString < $1.id.uuidString }) { d in interrupted(d) }
                         }
                     }
                     if !shown.isEmpty {
                         PanelSection(title: "Completed", symbol: "checkmark.circle", count: shown.count) {
-                            // Downloads that finish in the same second share a time, so the time cannot be the row's identity.
-                            ForEach(Array(shown.enumerated()), id: \.offset) { _, d in completed(d) }
+                            // Downloads that finish in the same second share a time, so the time cannot be the row's identity; nor can the position (a new download at the top would re-identify every row below it).
+                            // Identity is the address and name, plus which occurrence of that same pair it is.
+                            ForEach(shownRows, id: \.id) { row in completed(row.item) }
                         }
                     }
                 }

@@ -1,0 +1,1125 @@
+{
+  "app": "Browser Setu.app",
+  "files": 108,
+  "unmapped": [],
+  "sourcesWithoutAnyRecord": [],
+  "externalSources": {
+    "curl-impersonate": {
+      "url": "https://github.com/lexiforest/curl-impersonate",
+      "note": "MIT; the exact version bundled by curl_cffi 0.17.0 is NOT verified here"
+    },
+    "openssl": {
+      "url": "https://www.openssl.org/source/",
+      "note": "Apache-2.0; attribution only"
+    },
+    "python": {
+      "url": "https://www.python.org/downloads/source/",
+      "note": "permissive licence (PSF-2.0); attribution only"
+    },
+    "zstd": {
+      "url": "https://github.com/facebook/zstd",
+      "note": "BSD-3-Clause elected"
+    }
+  },
+  "components": {
+    "FFmpeg program": 2,
+    "PyCryptodome extensions": 40,
+    "CPython runtime and its extension modules": 55,
+    "Brotli Python binding": 1,
+    "cffi": 1,
+    "charset-normalizer extensions": 2,
+    "curl_cffi wrapper (statically contains curl-impersonate, curl, BoringSSL, nghttp2)": 1,
+    "OpenSSL 3": 2,
+    "Zstandard": 1,
+    "websockets speedups": 1,
+    "yt-dlp executable (PyInstaller bootloader + archive of yt-dlp and its Python dependencies)": 1,
+    "LAME MP3 encoder library": 1
+  },
+  "map": [
+    {
+      "path": "Resources/Tools/ffmpeg/ffmpeg",
+      "sha256": "62482bb271ac9483919519d1da6b0647bcf27c432151efaa4d6d65fca53d5f88",
+      "size": 3679136,
+      "component": "FFmpeg program",
+      "sources": [
+        "ffmpeg"
+      ],
+      "license": "LGPL-2.1-or-later (configured LGPL-only)"
+    },
+    {
+      "path": "Resources/Tools/ffmpeg/ffprobe",
+      "sha256": "8ece5bd148c8968c889666622e5784bb65af85151e2b6dbf11395ff1da692760",
+      "size": 3486848,
+      "component": "FFmpeg program",
+      "sources": [
+        "ffmpeg"
+      ],
+      "license": "LGPL-2.1-or-later (configured LGPL-only)"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Cipher/_ARC4.abi3.so",
+      "sha256": "2b36301d8ee4001d179537addc68a4890ca91ba4133f16c7a34bfb171ba6f923",
+      "size": 68496,
+      "component": "PyCryptodome extensions",
+      "sources": [
+        "pycryptodomex"
+      ],
+      "license": "Public domain and BSD-2-Clause"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Cipher/_Salsa20.abi3.so",
+      "sha256": "752e845886bcb6a13bc639e6229b2aedf25fc5bd928f81c550c85ff3ac08ad45",
+      "size": 68880,
+      "component": "PyCryptodome extensions",
+      "sources": [
+        "pycryptodomex"
+      ],
+      "license": "Public domain and BSD-2-Clause"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Cipher/_chacha20.abi3.so",
+      "sha256": "e8d59782473779aedf5c381180ec35c2b0753fbea2f2a91c2df4bc34666c1ff8",
+      "size": 68960,
+      "component": "PyCryptodome extensions",
+      "sources": [
+        "pycryptodomex"
+      ],
+      "license": "Public domain and BSD-2-Clause"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Cipher/_pkcs1_decode.abi3.so",
+      "sha256": "2eb8b19b3155436f34178a9ca13c5a6697b132f4f868066a4c9a7971bd78e54d",
+      "size": 68544,
+      "component": "PyCryptodome extensions",
+      "sources": [
+        "pycryptodomex"
+      ],
+      "license": "Public domain and BSD-2-Clause"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Cipher/_raw_aes.abi3.so",
+      "sha256": "b1daec3bc537d70d7d0acbefe209429f00936d47cf7eb5ff344fb967e5cc0dd9",
+      "size": 85520,
+      "component": "PyCryptodome extensions",
+      "sources": [
+        "pycryptodomex"
+      ],
+      "license": "Public domain and BSD-2-Clause"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Cipher/_raw_arc2.abi3.so",
+      "sha256": "d105c7a45a2b89791d536154cda485114fcc02cc9eff107f3eac2a4646933ffb",
+      "size": 68832,
+      "component": "PyCryptodome extensions",
+      "sources": [
+        "pycryptodomex"
+      ],
+      "license": "Public domain and BSD-2-Clause"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Cipher/_raw_blowfish.abi3.so",
+      "sha256": "b546d1b14361e527c5c4af2414ee71c5258d5c3defacb31a3c4b669e3815e1c9",
+      "size": 68992,
+      "component": "PyCryptodome extensions",
+      "sources": [
+        "pycryptodomex"
+      ],
+      "license": "Public domain and BSD-2-Clause"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Cipher/_raw_cast.abi3.so",
+      "sha256": "49f15f229dddd6e1ee1ac35364e5add6c65152c7b268be523c4397f7ce4057cb",
+      "size": 69296,
+      "component": "PyCryptodome extensions",
+      "sources": [
+        "pycryptodomex"
+      ],
+      "license": "Public domain and BSD-2-Clause"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Cipher/_raw_cbc.abi3.so",
+      "sha256": "af27f90405bbeca280075811b744e584da711bf76e6850a53127de65f15096f8",
+      "size": 68848,
+      "component": "PyCryptodome extensions",
+      "sources": [
+        "pycryptodomex"
+      ],
+      "license": "Public domain and BSD-2-Clause"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Cipher/_raw_cfb.abi3.so",
+      "sha256": "543d5d606e38d61132dbfcf98fefcab2c20f1fee14094594563f59cf44d65afb",
+      "size": 69088,
+      "component": "PyCryptodome extensions",
+      "sources": [
+        "pycryptodomex"
+      ],
+      "license": "Public domain and BSD-2-Clause"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Cipher/_raw_ctr.abi3.so",
+      "sha256": "38dca6280231808ab94108ec7fc0d17ebc9b52d62410a2dc04eab3669ae10b54",
+      "size": 69104,
+      "component": "PyCryptodome extensions",
+      "sources": [
+        "pycryptodomex"
+      ],
+      "license": "Public domain and BSD-2-Clause"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Cipher/_raw_des.abi3.so",
+      "sha256": "ed8669500969015707bcc9aa9727b496e09239d6833f178942386d5268995ba2",
+      "size": 102304,
+      "component": "PyCryptodome extensions",
+      "sources": [
+        "pycryptodomex"
+      ],
+      "license": "Public domain and BSD-2-Clause"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Cipher/_raw_des3.abi3.so",
+      "sha256": "714a77b0ce213977685326a2b1e9885b6fee1559981de489bae5b631b84c5d7b",
+      "size": 102320,
+      "component": "PyCryptodome extensions",
+      "sources": [
+        "pycryptodomex"
+      ],
+      "license": "Public domain and BSD-2-Clause"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Cipher/_raw_ecb.abi3.so",
+      "sha256": "7f44316a1f5916cc51d7f70dc59aa6a5198ea4d529bb4a414cf29ba93c70d2e4",
+      "size": 35616,
+      "component": "PyCryptodome extensions",
+      "sources": [
+        "pycryptodomex"
+      ],
+      "license": "Public domain and BSD-2-Clause"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Cipher/_raw_eksblowfish.abi3.so",
+      "sha256": "af1ecea27ddde184474f730c2209ceefdf4ecc4123e720fb534e9582d7ca6b6d",
+      "size": 69200,
+      "component": "PyCryptodome extensions",
+      "sources": [
+        "pycryptodomex"
+      ],
+      "license": "Public domain and BSD-2-Clause"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Cipher/_raw_ocb.abi3.so",
+      "sha256": "43a265ffb3a890dfc9385631b052cda3dff58e8bdb9d939afba5bb54b3f2515d",
+      "size": 69312,
+      "component": "PyCryptodome extensions",
+      "sources": [
+        "pycryptodomex"
+      ],
+      "license": "Public domain and BSD-2-Clause"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Cipher/_raw_ofb.abi3.so",
+      "sha256": "0d348d93e82290ff0f96195b3c5830f15b5c7c8af4e8a208b53d9b54e5e82d64",
+      "size": 68800,
+      "component": "PyCryptodome extensions",
+      "sources": [
+        "pycryptodomex"
+      ],
+      "license": "Public domain and BSD-2-Clause"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Hash/_BLAKE2b.abi3.so",
+      "sha256": "695f785f37fe30b46fe1861e47909fa8c8646ee0a7133f385b0e32891fd55fbd",
+      "size": 69200,
+      "component": "PyCryptodome extensions",
+      "sources": [
+        "pycryptodomex"
+      ],
+      "license": "Public domain and BSD-2-Clause"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Hash/_BLAKE2s.abi3.so",
+      "sha256": "db7bd391d524fd2a16dce42229518094e03a519495f9df5cd1e33af9a50f6f51",
+      "size": 69200,
+      "component": "PyCryptodome extensions",
+      "sources": [
+        "pycryptodomex"
+      ],
+      "license": "Public domain and BSD-2-Clause"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Hash/_MD2.abi3.so",
+      "sha256": "1cfbae09d8936246212f51ff918c95b703f631118716a13c3b0ab96ea62c268a",
+      "size": 69104,
+      "component": "PyCryptodome extensions",
+      "sources": [
+        "pycryptodomex"
+      ],
+      "license": "Public domain and BSD-2-Clause"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Hash/_MD4.abi3.so",
+      "sha256": "8af6305e3275fc963afa0b6112fc405075cb580914f45775916629bc8709f2b9",
+      "size": 69120,
+      "component": "PyCryptodome extensions",
+      "sources": [
+        "pycryptodomex"
+      ],
+      "license": "Public domain and BSD-2-Clause"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Hash/_MD5.abi3.so",
+      "sha256": "fad233c7c7198ed56cbde81b8e36b3460b3cf53cc863d119fe2c16dac9c4f6ac",
+      "size": 69824,
+      "component": "PyCryptodome extensions",
+      "sources": [
+        "pycryptodomex"
+      ],
+      "license": "Public domain and BSD-2-Clause"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Hash/_RIPEMD160.abi3.so",
+      "sha256": "1cdb9aa7bacb30003e3a1ad8ebe6c8a5ad44127bc4295fa2b09690cc414aeafc",
+      "size": 69072,
+      "component": "PyCryptodome extensions",
+      "sources": [
+        "pycryptodomex"
+      ],
+      "license": "Public domain and BSD-2-Clause"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Hash/_SHA1.abi3.so",
+      "sha256": "467f474712f5a5e9dcfe118b95145b10f30690870b60387413c9d9e09f13a3cd",
+      "size": 69824,
+      "component": "PyCryptodome extensions",
+      "sources": [
+        "pycryptodomex"
+      ],
+      "license": "Public domain and BSD-2-Clause"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Hash/_SHA224.abi3.so",
+      "sha256": "a672184078fbd627993dd0b1a061729ea148b7e87ac0c63d64595c0125da14c5",
+      "size": 69840,
+      "component": "PyCryptodome extensions",
+      "sources": [
+        "pycryptodomex"
+      ],
+      "license": "Public domain and BSD-2-Clause"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Hash/_SHA256.abi3.so",
+      "sha256": "f1303c9e8bce092bc3d5e35f2651ac9e51e6643fd78e1bf5b84838ac61deb7a7",
+      "size": 69840,
+      "component": "PyCryptodome extensions",
+      "sources": [
+        "pycryptodomex"
+      ],
+      "license": "Public domain and BSD-2-Clause"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Hash/_SHA384.abi3.so",
+      "sha256": "649cf06ff584d8be77ae5583813ca38ae1b2e22ecdcfdbe5a36afb702b08a0ca",
+      "size": 69840,
+      "component": "PyCryptodome extensions",
+      "sources": [
+        "pycryptodomex"
+      ],
+      "license": "Public domain and BSD-2-Clause"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Hash/_SHA512.abi3.so",
+      "sha256": "e8aeaec5bbbf846427558d7512a330ac055391a2eb9b00ff1197416c912a15bb",
+      "size": 69856,
+      "component": "PyCryptodome extensions",
+      "sources": [
+        "pycryptodomex"
+      ],
+      "license": "Public domain and BSD-2-Clause"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Hash/_ghash_portable.abi3.so",
+      "sha256": "6d127078e821be959800876bb169db7f67c89fc0db5c6deeae2dfad2dc68a160",
+      "size": 68720,
+      "component": "PyCryptodome extensions",
+      "sources": [
+        "pycryptodomex"
+      ],
+      "license": "Public domain and BSD-2-Clause"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Hash/_keccak.abi3.so",
+      "sha256": "9587902dde2dfa69b6a0a331370d6fe20832785429d848ac6e514fd358efde01",
+      "size": 69888,
+      "component": "PyCryptodome extensions",
+      "sources": [
+        "pycryptodomex"
+      ],
+      "license": "Public domain and BSD-2-Clause"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Hash/_poly1305.abi3.so",
+      "sha256": "da42d93703a792620316decae4bc70e43ff30aab5108e1b6f6dd6ffd4b02d168",
+      "size": 69424,
+      "component": "PyCryptodome extensions",
+      "sources": [
+        "pycryptodomex"
+      ],
+      "license": "Public domain and BSD-2-Clause"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Math/_modexp.abi3.so",
+      "sha256": "385d5576778afa62094d3096ba447f8b81248d6689f2b182e9f4f8264211fa6f",
+      "size": 92096,
+      "component": "PyCryptodome extensions",
+      "sources": [
+        "pycryptodomex"
+      ],
+      "license": "Public domain and BSD-2-Clause"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Protocol/_scrypt.abi3.so",
+      "sha256": "5c95c3b4a47186395dca4c90f671b12b300e12f627bf57a851a6252217e041e6",
+      "size": 68480,
+      "component": "PyCryptodome extensions",
+      "sources": [
+        "pycryptodomex"
+      ],
+      "license": "Public domain and BSD-2-Clause"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/PublicKey/_curve25519.abi3.so",
+      "sha256": "8e3f437fe533db05ac746e3ab689d56a4699e6850b6b614aa5cfddad75b4481f",
+      "size": 70640,
+      "component": "PyCryptodome extensions",
+      "sources": [
+        "pycryptodomex"
+      ],
+      "license": "Public domain and BSD-2-Clause"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/PublicKey/_curve448.abi3.so",
+      "sha256": "4c87fa224dfa60cd1a1e9e075df12a7339cb3154176ecd62407adbed2437ad47",
+      "size": 92928,
+      "component": "PyCryptodome extensions",
+      "sources": [
+        "pycryptodomex"
+      ],
+      "license": "Public domain and BSD-2-Clause"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/PublicKey/_ec_ws.abi3.so",
+      "sha256": "5eb2875abcdb43baf500d2e56d00220e7c010eb105a4ff619b0ffc5659401060",
+      "size": 752928,
+      "component": "PyCryptodome extensions",
+      "sources": [
+        "pycryptodomex"
+      ],
+      "license": "Public domain and BSD-2-Clause"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/PublicKey/_ed25519.abi3.so",
+      "sha256": "896d6750e077f82969211cc989252af0254d3d4d7c0d6ca50487e479df2df8b4",
+      "size": 71376,
+      "component": "PyCryptodome extensions",
+      "sources": [
+        "pycryptodomex"
+      ],
+      "license": "Public domain and BSD-2-Clause"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/PublicKey/_ed448.abi3.so",
+      "sha256": "756c34630d2cc8ee4448734c2573f5e4f4ed229d33d0f72d255ebb8afd780be9",
+      "size": 93616,
+      "component": "PyCryptodome extensions",
+      "sources": [
+        "pycryptodomex"
+      ],
+      "license": "Public domain and BSD-2-Clause"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Util/_cpuid_c.abi3.so",
+      "sha256": "678ad4bf3cee855c2571f31c95e0efb967f9064d2688a7d0689916e52b04430f",
+      "size": 35376,
+      "component": "PyCryptodome extensions",
+      "sources": [
+        "pycryptodomex"
+      ],
+      "license": "Public domain and BSD-2-Clause"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Util/_strxor.abi3.so",
+      "sha256": "4e945a428e7e72a3f4c561f92617f0c9c0fa167abfb07489412eb3ff2c3c199c",
+      "size": 35344,
+      "component": "PyCryptodome extensions",
+      "sources": [
+        "pycryptodomex"
+      ],
+      "license": "Public domain and BSD-2-Clause"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Python",
+      "sha256": "20bec5af862e78bcb61ac23e19ed74505d350abf9082a3a97f7190357511a8a0",
+      "size": 7162144,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/Python.framework/Versions/3.14/Python",
+      "sha256": "e95e80bce1e5196db010b9de683329f62eceba69b056baa8d1cf29fdda2e6187",
+      "size": 7162208,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/_brotli.cpython-314-darwin.so",
+      "sha256": "749c3762c29c686d8b7f7bbf8eeaf830322f67bce3bbb3b3117651100237cc9b",
+      "size": 949920,
+      "component": "Brotli Python binding",
+      "sources": [
+        "brotli"
+      ],
+      "license": "MIT"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/_cffi_backend.cpython-314-darwin.so",
+      "sha256": "8b85bea93ba7c55435aa4cd0c3174e56a69349c05d6da7b37346da7f54cf0694",
+      "size": 246432,
+      "component": "cffi",
+      "sources": [
+        "cffi"
+      ],
+      "license": "MIT"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/charset_normalizer/cd.cpython-314-darwin.so",
+      "sha256": "978d4e7fc1d6250c206c74578e549d830d9ea01e3183ad82eef779e260837bda",
+      "size": 185376,
+      "component": "charset-normalizer extensions",
+      "sources": [
+        "charset-normalizer"
+      ],
+      "license": "MIT"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/charset_normalizer/md.cpython-314-darwin.so",
+      "sha256": "c7b19e91ad101723bc4dbb138892b8a704295baca376ef5fde1688f673c09215",
+      "size": 306752,
+      "component": "charset-normalizer extensions",
+      "sources": [
+        "charset-normalizer"
+      ],
+      "license": "MIT"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/curl_cffi/_wrapper.abi3.so",
+      "sha256": "d875b623b9842af808d8075938d8809512829bd69dabe019c95feb479d156165",
+      "size": 6753072,
+      "component": "curl_cffi wrapper (statically contains curl-impersonate, curl, BoringSSL, nghttp2)",
+      "sources": [
+        "curl_cffi",
+        "curl-impersonate"
+      ],
+      "license": "MIT (and the licences of the statically contained components)"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/libcrypto.3.dylib",
+      "sha256": "6faee28df743117916b06fa8869c39e5d5db045cf93af7a3c96f409473402281",
+      "size": 4956320,
+      "component": "OpenSSL 3",
+      "sources": [
+        "openssl"
+      ],
+      "license": "Apache-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/libssl.3.dylib",
+      "sha256": "373b4bf1d5f190371adbed1c9acb215d58ef326ece5a531b980ce19813e25216",
+      "size": 1014304,
+      "component": "OpenSSL 3",
+      "sources": [
+        "openssl"
+      ],
+      "license": "Apache-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/libzstd.1.dylib",
+      "sha256": "5fa5295845d60218ee848b4d32d899858235736f0e9e817a8804762fc7c47410",
+      "size": 2032016,
+      "component": "Zstandard",
+      "sources": [
+        "zstd"
+      ],
+      "license": "BSD-3-Clause (dual BSD / GPL-2.0; BSD elected)"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_asyncio.cpython-314-darwin.so",
+      "sha256": "ce99c0bd117015622852705cde9a1b5dc5dd0d9a1e19b752336d0242a9b6990d",
+      "size": 131568,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_bisect.cpython-314-darwin.so",
+      "sha256": "f7ce1ab50961ca34eb74342628836e03c91c4ab03458a163f8840fb34fad4374",
+      "size": 72192,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_blake2.cpython-314-darwin.so",
+      "sha256": "cd24fc1af8432474e0cc60cc9d2ed7a26cae9cb333b6c17e634fba9b875406e9",
+      "size": 91808,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_bz2.cpython-314-darwin.so",
+      "sha256": "06512ba01ee5c7cd931b58e88d2a414c7027848d2f5c93e3ae3de467566ba1a6",
+      "size": 74880,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_codecs_cn.cpython-314-darwin.so",
+      "sha256": "afa65d3a5c100240f7195cf55ba7ed7baf97d44c3344c3816be4d8bed5ba07f5",
+      "size": 187392,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_codecs_hk.cpython-314-darwin.so",
+      "sha256": "2ac70d396181465655cefb957d8c4e4963244a150fa233c1bbcfe50868065c2c",
+      "size": 186960,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_codecs_iso2022.cpython-314-darwin.so",
+      "sha256": "16e0de2b5c1882684b40518c465ba5f43aedddc4feb45bad7e3f616d37a33aeb",
+      "size": 76080,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_codecs_jp.cpython-314-darwin.so",
+      "sha256": "78236b2c2bb8197f5c243e8ae13ab1380668c4c909af40371009471525449682",
+      "size": 303408,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_codecs_kr.cpython-314-darwin.so",
+      "sha256": "97329073f6a9339a4ceb4b5d70981a44581c162f6b3df508e86bc96e5d9aa4f2",
+      "size": 170832,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_codecs_tw.cpython-314-darwin.so",
+      "sha256": "0eae96553228a242859a7b882602c08985a2b68fd3f92b931c93abcb339dc9c3",
+      "size": 170000,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_csv.cpython-314-darwin.so",
+      "sha256": "7257bfcde18f3bb00751a0c4181a85b586177106df6f7e588a4921dd20d0b66c",
+      "size": 94464,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_ctypes.cpython-314-darwin.so",
+      "sha256": "2c927a6ef3f3e8d540b1b34712dfbeb79e85eac1b99e6249bd38dec18ec369d7",
+      "size": 203936,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_decimal.cpython-314-darwin.so",
+      "sha256": "9e91d9fbe1f2382a52478dff8ca97f2faabc48adc3942c9700a30e9411203b49",
+      "size": 356960,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_elementtree.cpython-314-darwin.so",
+      "sha256": "5ab50c253f7442dc2e8b97b44a7c92b44d7b3f4e3ece9dbcaaa69d6fb7da6782",
+      "size": 126960,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_hashlib.cpython-314-darwin.so",
+      "sha256": "ced0a1a803db26309a7c052dd4ab99bbcc42b7bcf26fa8520040f22185e42213",
+      "size": 104656,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_heapq.cpython-314-darwin.so",
+      "sha256": "b53f80fe395fe82b0f6b20a785af0f3990917e6bebfbd3918505f49c93d95e42",
+      "size": 71760,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_hmac.cpython-314-darwin.so",
+      "sha256": "dcbbb144cc9986979045d6cadc398b51a11cdc80b55af75f8a12f43c1be87883",
+      "size": 153744,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_interpqueues.cpython-314-darwin.so",
+      "sha256": "3febd34c57706e3813a9c4a8d185c5d5d9e4151fbd8549f6429014a4c9d9fea3",
+      "size": 79296,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_interpreters.cpython-314-darwin.so",
+      "sha256": "2f6bdd6422805aee5e2c7238eff13e18f38f2be1420f9456509b4afd70de4d91",
+      "size": 98688,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_json.cpython-314-darwin.so",
+      "sha256": "cd80e61bcc21f1f6b774735f6e4ad25027ef6354e833b9d24633e0d4c289257e",
+      "size": 93024,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_lzma.cpython-314-darwin.so",
+      "sha256": "6cf2beaf1d9ca9d530c436fbfd2864918e85362f14a30289985a2f5190dedcea",
+      "size": 274880,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_md5.cpython-314-darwin.so",
+      "sha256": "c40ad4bc961824ab13d7a1eabd7fdd4dfa19e0493f8d9bf0d1e9863edb024068",
+      "size": 73744,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_multibytecodec.cpython-314-darwin.so",
+      "sha256": "c58e24ab1e9ed2e076b7621d14db7298442deba138150662e70d20f9e64ec9f8",
+      "size": 101840,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_multiprocessing.cpython-314-darwin.so",
+      "sha256": "c731a08e255993022f51cdbd97794aa68380b5531c04967f49a7a4660ccc78b7",
+      "size": 75840,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_pickle.cpython-314-darwin.so",
+      "sha256": "8eb50d8443cb762a2293310f8e60b2399ba2de6392f019ded49a629cc90aa586",
+      "size": 177984,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_posixshmem.cpython-314-darwin.so",
+      "sha256": "b7ffa29bad10b3fd1cce540cecd94328ae2cbf05819343898df3054150bd4136",
+      "size": 70400,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_posixsubprocess.cpython-314-darwin.so",
+      "sha256": "25d48215e96d300ab3264e8d3eda4c6a32e7a1091ff3af3a7260336d371de070",
+      "size": 73632,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_queue.cpython-314-darwin.so",
+      "sha256": "f3e90414c40064d2aae8c621f75554a411bfd19b6fda0f53060ce88608ec9809",
+      "size": 74144,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_random.cpython-314-darwin.so",
+      "sha256": "4d63af76d4b24d147d7c3ceac42a6589f47c5c79c72bf16878e97a46fd767fa7",
+      "size": 73440,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_scproxy.cpython-314-darwin.so",
+      "sha256": "be2b05c6732bac11c4effed3f4caec101b6541b59ff96f27169795fbedaf1ba2",
+      "size": 71920,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_sha1.cpython-314-darwin.so",
+      "sha256": "069a2b0f6e478dfb14d5747b7d4802f4571ccd1c254b94e8ed324e7004c67e3b",
+      "size": 73664,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_sha2.cpython-314-darwin.so",
+      "sha256": "7f5af3a19d0a931f895b036971b70b6c7ae751fe8cdbfb368336b8b352148846",
+      "size": 92768,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_sha3.cpython-314-darwin.so",
+      "sha256": "c3febe0d82575db6be980c5fe363c900492eb4cf1531b344d21eb46f33c3196d",
+      "size": 76688,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_socket.cpython-314-darwin.so",
+      "sha256": "ed6b11c559d89147a6a1546d52128644db37c364d7447a27608328c7a38f536c",
+      "size": 142112,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_sqlite3.cpython-314-darwin.so",
+      "sha256": "5d9394069d01ac8c866f5147456e9b55182a367e80e029d42b972151b4a71560",
+      "size": 1263056,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_ssl.cpython-314-darwin.so",
+      "sha256": "110c7e9eb3488014ebbaca74068dc99dcf331f8108b255b8a39a8242b7e946f2",
+      "size": 237984,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_statistics.cpython-314-darwin.so",
+      "sha256": "eba86cef46a00c7d5ae84cb7d5d47dd3cbf8c5d7bb1e8ef399b63ad230e90faa",
+      "size": 69264,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_struct.cpython-314-darwin.so",
+      "sha256": "b0b7d115924099d4ccab8b2884ad568e8f3243bf86a086c38320d9223925cd49",
+      "size": 104416,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_uuid.cpython-314-darwin.so",
+      "sha256": "26d6ad40092cdd3092a610cd8f1b68cedecca959613be5458a9bd2e07dfc5e31",
+      "size": 69072,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_zstd.cpython-314-darwin.so",
+      "sha256": "090b1cd26a7001943d61d98bd79e10e6406f72f6c78d4b702966522191150bdf",
+      "size": 120848,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/array.cpython-314-darwin.so",
+      "sha256": "bdd7caca85fcf8d1d7bffac71edacee8db5e6175e9639b6961d44f89555c9cd7",
+      "size": 122192,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/binascii.cpython-314-darwin.so",
+      "sha256": "08a1578cccdd297d50d86e0861030f30ea1c3f42153e2408e5c37d813a9c6160",
+      "size": 74496,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/fcntl.cpython-314-darwin.so",
+      "sha256": "c6defab43ffdab2cd690c02def43cb133c5a45b3915c9d9d25c10715a968f70f",
+      "size": 72144,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/grp.cpython-314-darwin.so",
+      "sha256": "9d9f6d90be78d9f0e4bbb22da0eaa2456f770b509f463cd5d0e47912632109e7",
+      "size": 72384,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/math.cpython-314-darwin.so",
+      "sha256": "b7ec93effc7b87f6d9b4b59384bc39a12beef37114ef8b0e13e21712e4d37409",
+      "size": 117360,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/mmap.cpython-314-darwin.so",
+      "sha256": "a8aff7a75a6f10519438c764f8a38c21d411c02eb99e2fbb7cbe76c68983ff14",
+      "size": 77264,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/pyexpat.cpython-314-darwin.so",
+      "sha256": "835105f91acca295218d3998a244469c0af9bedb547e85943ca0660f305cb910",
+      "size": 253104,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/readline.cpython-314-darwin.so",
+      "sha256": "fa585c195ad592c35e5079a6cafbf4a4bbf93cf707d78f92e84f878468494046",
+      "size": 83168,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/resource.cpython-314-darwin.so",
+      "sha256": "7950b78626e2a9d427cd3ee42438b96a86ab1d625839fde1989e0c6f6ae52105",
+      "size": 72720,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/select.cpython-314-darwin.so",
+      "sha256": "66271d2943845ae842c5970eb2413a15e8dfe6a62155760f4dcf3986ab5ba5c4",
+      "size": 96128,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/termios.cpython-314-darwin.so",
+      "sha256": "70a95556fad01dd90687c950cd11a6ce0f1f61b50b26bcacab7fc803642fba3c",
+      "size": 73936,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/unicodedata.cpython-314-darwin.so",
+      "sha256": "0e172f6ddf3efab87a4651ee4a9b84cca9ce8df674fb915ed95f629248cc366a",
+      "size": 801088,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/zlib.cpython-314-darwin.so",
+      "sha256": "27de2c94da6f7b52a4c690286f9d5980f1dae1a63cf9fc411cf1eef36d4f5c4f",
+      "size": 98992,
+      "component": "CPython runtime and its extension modules",
+      "sources": [
+        "python"
+      ],
+      "license": "PSF-2.0"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/_internal/websockets/speedups.cpython-314-darwin.so",
+      "sha256": "255105fa0f767e3b24b206a64dc1f36b79d8b80f582ccd1a4735a32165da15f4",
+      "size": 69376,
+      "component": "websockets speedups",
+      "sources": [
+        "websockets"
+      ],
+      "license": "BSD-3-Clause"
+    },
+    {
+      "path": "Resources/Tools/yt-dlp/yt-dlp_macos",
+      "sha256": "c75358b7ed77a785f349b6e0f4b14812b9749995170c2b4f402135dbcf4096d9",
+      "size": 10501792,
+      "component": "yt-dlp executable (PyInstaller bootloader + archive of yt-dlp and its Python dependencies)",
+      "sources": [
+        "yt-dlp",
+        "yt-dlp-git-tag",
+        "mutagen",
+        "yt-dlp-ejs",
+        "pyinstaller"
+      ],
+      "license": "GPL-3.0-or-later (combined, per upstream)"
+    },
+    {
+      "path": "Frameworks/libmp3lame.dylib",
+      "sha256": "d9a4706692b817702bb8cdeb6227c45d3ca9c9a7c1aa2d42010ca2d2af187f9a",
+      "size": 277616,
+      "component": "LAME MP3 encoder library",
+      "sources": [
+        "lame"
+      ],
+      "license": "LGPL-2.1"
+    }
+  ]
+}

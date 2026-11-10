@@ -31,7 +31,7 @@ private struct ProviderFilesContent: View {
         .padding(18).frame(minWidth: 640, idealWidth: 720, minHeight: 480)
         .accessibilityElement(children: .contain).accessibilityIdentifier("provider-sheet")
         .onAppear { provider.isPrivate = model.active?.leavesNoTrace ?? false }
-        .animation(.easeInOut(duration: 0.2), value: provider.phase)
+        .motion(.easeInOut(duration: 0.2), value: provider.phase)
     }
 
     @ViewBuilder private var content: some View {

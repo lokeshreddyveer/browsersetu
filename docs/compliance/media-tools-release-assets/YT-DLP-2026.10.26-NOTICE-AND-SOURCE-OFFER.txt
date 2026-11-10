@@ -1,0 +1,44 @@
+yt-dlp 2026.10.26 as distributed with Browser Setu (media tool "yt-dlp")
+================================================================================
+
+What this is
+  yt-dlp-2026.10.26-arm64.zip contains the yt-dlp program (https://github.com/yt-dlp/yt-dlp) in the form its authors publish for macOS: a PyInstaller "onedir" build that bundles the Python interpreter and
+  libraries. The yt-dlp source code is under The Unlicense. The bundled third-party components carry their own licences. Upstream's licence list for this build includes mutagen (GPL-2.0-or-later) and
+  certifi (MPL-2.0); the PyInstaller bootloader inside the executable is GPL-2.0-or-later with the PyInstaller bootloader exception (see PYINSTALLER-6.22.0-LICENSE.txt). As the upstream project states, the
+  combined executable is distributed under the GNU General Public License, version 3 or later. The full texts of the component licences are in the package (_internal/THIRD_PARTY_LICENSES.txt, and the per-package
+  licence files under _internal) and in this Notices folder (YT-DLP-THIRD_PARTY_LICENSES.txt).
+  Upstream's licence list is written for all of its platform builds and also names GNU Readline, libintl, libidn2, libunistring and the GCC runtime. We found none of those in the files of this macOS build (its
+  readline module links the macOS system library libedit; the compiled curl-impersonate library contains curl, BoringSSL and nghttp2). They are mentioned only so that nothing is hidden: the licence review is not finished.
+
+Changes made by the publisher to the upstream release package (yt-dlp_macos.zip, sha256 20d98fa608998eff87d1d35a6e9fb65e4b874639a6cc89addc19da3becde3ef1)
+  1. Architecture: the upstream universal (x86_64 + arm64) programs were thinned with lipo to arm64 only. Nothing was recompiled and no source was changed.
+  2. Python.framework layout: upstream's archive carries plain copies where a macOS framework expects links (Versions/Current, Python, Resources). The standard links were restored so the framework can be signed.
+  3. Code signing: every Mach-O file was re-signed with a Developer ID certificate (Team X4MH29QNRS) with the hardened runtime, replacing upstream's ad-hoc signature. The result is the package yt-dlp-2026.10.26-arm64.zip,
+     27,310,492 bytes, sha256 b82fec9f012524ac2504c45e24b449cf7a86185c3d6abd2d49932843a818c3d9; Apple notarization submission 6f4291e4-012c-43b8-ba4f-140a98bb59c2 (status Accepted) is for exactly this zip.
+  These are the only differences between this zip and the upstream release asset.
+
+Corresponding source
+  Browser Setu publishes the source of everything below with the release that contains this package, as a list of archives with their SHA-256 (SOURCES.json) and a file-by-file map from every program in this
+  package to the source it was built from (BINARY-TO-SOURCE.json). Each archive was fetched from its official location and checked against an independent digest where one exists (the digest PyPI publishes for
+  that release file, or the SHA2-256SUMS of the yt-dlp release); SOURCES.json says which.
+  yt-dlp               https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp.tar.gz   (6,019,106 bytes, sha256 21f942d258d25cc4e60b4982a25c423460f0bebb835f38e6dfd1fcb140087f95,
+                       matching the project's published SHA2-256SUMS for that release)
+  Build recipe         the git tag archive https://github.com/yt-dlp/yt-dlp/archive/refs/tags/2026.10.26.tar.gz : .github/workflows/build.yml (job "macos": runs-on macos-14; hash-pinned wheels from
+                       bundle/requirements/macos.txt; universal2 cffi and curl_cffi fused with delocate; python3 -m bundle.pyinstaller --target-architecture universal2 --onedir) and bundle/requirements/.
+                       (The release tarball above does not contain the recipe; the tag archive does.)
+  Python components    every package pinned by that recipe, as the source distribution published on PyPI: mutagen 1.48.1 (GPL-2.0-or-later), PyInstaller 6.22.0 (bootloader: GPL-2.0-or-later with exception),
+                       yt-dlp-ejs 0.8.0, curl_cffi 0.17.0, cffi 2.1.1, brotli 1.2.1, certifi 2026.10.23, charset-normalizer 3.5.2, idna 3.20, pycryptodomex 3.24.1, requests 2.34.2, urllib3 2.8.0,
+                       websockets 17.3 and the build tools (altgraph, macholib, delocate, packaging, pycparser, pyinstaller-hooks-contrib, setuptools, typing-extensions). These versions are the ones
+                       the shipped program itself reports with -v.
+  Not mirrored         CPython 3.14 (PSF-2.0), OpenSSL 3, zstd, curl, curl-impersonate, BoringSSL, nghttp2, libffi, SQLite, zlib, bzip2, liblzma, Expat and mpdecimal are under permissive licences that need
+                       attribution only; they come from their own projects (see THIRD_PARTY_LICENSES.txt). The exact curl-impersonate version inside curl_cffi 0.17.0 has NOT been verified.
+  Written offer        As THIRD_PARTY_LICENSES.txt says: if you cannot obtain source for a bundled component, the yt-dlp maintainers will provide it (maintainers@yt-dlp.org). The Browser Setu publisher also
+                       offers, for at least three years after this version was last distributed and for no more than the cost of copying, the corresponding source of the GPL/LGPL components of this exact zip;
+                       ask at the address in the Browser Setu release notes.
+
+Your rights
+  You may use, copy, modify and redistribute this software under the licences above. To run a modified version, build your own from the source above and use it: Browser Setu can be pointed at a program you
+  installed yourself (Settings > Media). Browser Setu runs yt-dlp as a separate program (it is not linked into the app), only when you ask for a video's formats and allow it for that site.
+
+No warranty
+  yt-dlp and its components are distributed WITHOUT ANY WARRANTY, to the extent permitted by law.

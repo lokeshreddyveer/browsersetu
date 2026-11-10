@@ -6,7 +6,9 @@ import WebKit
 @MainActor
 enum LinkPageExtractor {
     static let maxElements = 5000
-    static let maxResults = 500
+    /// As many as the elements read: the cap used to be 500 ANCHORS of any kind, so on a long page (an encyclopedia article has thousands of links) the download links after the first 500 were never seen.
+    /// What is a download is decided afterwards, in Swift, so the page script must hand over every link it read.
+    static let maxResults = 5000
 
     static let script = """
     const found = []; const seen = new Set(); let looked = 0; let cut = false;

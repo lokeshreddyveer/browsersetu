@@ -72,7 +72,7 @@ struct ProviderPanel: View {
             if current == nil || current?.state == .authorizationRequired { flow.resolve(ctx) }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in windowTick += 1 }
-        .animation(.easeInOut(duration: 0.18), value: entry?.state)
+        .motion(.easeInOut(duration: 0.18), value: entry?.state)
     }
 
     private func isLooking(_ e: ProviderFlow.Entry?) -> Bool { e?.state == .resolving || e?.state == .identifying }

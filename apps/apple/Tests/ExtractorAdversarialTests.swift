@@ -33,7 +33,8 @@ final class ExtractorAdversarialTests: XCTestCase {
         do { _ = try await ExternalExtractor.lookup(page: page("descendant"), path: script, isPrivate: false, allowLocal: true, timeout: 1.5); XCTFail() } catch { XCTAssertEqual(error as? ExtractorFailure, .timedOut) }
         let child = pid_t(((try? String(contentsOfFile: pidFile, encoding: .utf8)) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
         XCTAssertGreaterThan(child, 0, "the program started a child")
-        try await Task.sleep(nanoseconds: 3_500_000_000)
+        // Wait for the child to be gone, not for a fixed time: returns the moment it is, and still fails if it outlives the same 6 s the old fixed wait allowed for.
+        for _ in 0..<120 where pidAlive(child) { try await Task.sleep(nanoseconds: 50_000_000) }
         XCTAssertFalse(pidAlive(child), "the child the program started was ended with it")
         let started = Date()
         do { _ = try await ExternalExtractor.lookup(page: page("stubborn"), path: script, isPrivate: false, allowLocal: true, timeout: 1); XCTFail() } catch { XCTAssertEqual(error as? ExtractorFailure, .timedOut) }
@@ -42,6 +43,19 @@ final class ExtractorAdversarialTests: XCTestCase {
         async let a = ExternalExtractor.lookup(page: page("muxed"), path: script, isPrivate: false, allowLocal: true)
         async let b = ExternalExtractor.lookup(page: page("muxed"), path: script, isPrivate: false, allowLocal: true)
         _ = try await (a, b)
+    }
+
+    /// Opt-in (TEST_RUNNER_BS_HELPER=<path to the built app's Contents/Helpers/setu-jsc>): the app's OWN launcher times a program out, and the REAL sandboxed helper that program started must be ended with it.
+    func testTimeoutEndsTheRealHelperStartedByTheProgram() async throws {
+        guard let helper = ProcessInfo.processInfo.environment["BS_HELPER"], FileManager.default.isExecutableFile(atPath: helper) else { throw XCTSkip("set TEST_RUNNER_BS_HELPER to a built app's setu-jsc") }
+        try needScript()
+        let pidFile = NSTemporaryDirectory() + "bs-helper-child.pid"; try? FileManager.default.removeItem(atPath: pidFile)
+        try helper.write(toFile: NSTemporaryDirectory() + "bs-helper-path.txt", atomically: true, encoding: .utf8)
+        do { _ = try await ExternalExtractor.lookup(page: page("helperchild"), path: script, isPrivate: false, allowLocal: true, timeout: 2); XCTFail() } catch { XCTAssertEqual(error as? ExtractorFailure, .timedOut) }
+        let child = pid_t(((try? String(contentsOfFile: pidFile, encoding: .utf8)) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+        XCTAssertGreaterThan(child, 0, "the program started the helper")
+        for _ in 0..<160 where pidAlive(child) { try await Task.sleep(nanoseconds: 50_000_000) }
+        XCTAssertFalse(pidAlive(child), "the sandboxed helper was ended with the program that started it")
     }
 
     // 3. Identity: a webpage_url is required; deceptive and merely-similar hosts are different sites.

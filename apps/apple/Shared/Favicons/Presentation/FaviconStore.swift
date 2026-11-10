@@ -18,7 +18,7 @@ final class FaviconStore: ObservableObject {
     static let shared = FaviconStore()
     nonisolated static let side: CGFloat = 64
     /// Icons kept decoded in memory; the rest are asked for again from the service.
-    static let memoryLimit = 150
+    static let memoryLimit = 600          // a 400-row history of many sites would otherwise evict icons while it is scrolled and load them again
     private static let missingLimit = 4_000
 
     /// Bumped when an icon arrives, so tiles showing a letter switch to the icon.
