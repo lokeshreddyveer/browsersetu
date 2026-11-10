@@ -30,8 +30,11 @@ Corresponding source
                        yt-dlp-ejs 0.8.0, curl_cffi 0.17.0, cffi 2.1.1, brotli 1.2.1, certifi 2026.10.23, charset-normalizer 3.5.2, idna 3.20, pycryptodomex 3.24.1, requests 2.34.2, urllib3 2.8.0,
                        websockets 17.3 and the build tools (altgraph, macholib, delocate, packaging, pycparser, pyinstaller-hooks-contrib, setuptools, typing-extensions). These versions are the ones
                        the shipped program itself reports with -v.
-  Not mirrored         CPython 3.14 (PSF-2.0), OpenSSL 3, zstd, curl, curl-impersonate, BoringSSL, nghttp2, libffi, SQLite, zlib, bzip2, liblzma, Expat and mpdecimal are under permissive licences that need
-                       attribution only; they come from their own projects (see THIRD_PARTY_LICENSES.txt). The exact curl-impersonate version inside curl_cffi 0.17.0 has NOT been verified.
+  Runtime sources      the source of the C runtime the program contains is published with it as well, each verified against its publisher: CPython 3.14.7 (PSF-2.0), OpenSSL 3.5.7 (Apache-2.0),
+                       curl-impersonate 2.3.1 (MIT; the version curl_cffi 0.17.0 downloads) with the dependencies its build recipe pins: curl 8.23.0, BoringSSL 156c7b75ae9b, nghttp2 1.63.0,
+                       ngtcp2 1.20.0, nghttp3 1.15.0, zlib 1.3.1, zstd 1.5.7, Brotli 1.2.1 and c-ares 1.34.9 (MIT; licence text in C-ARES-LICENSE.txt).
+  Not mirrored         libffi, SQLite, bzip2, liblzma, Expat and mpdecimal inside the Python runtime are under permissive licences that need attribution only; python.org's SPDX document for
+                       CPython 3.14.7 lists them, and they come from their own projects (see THIRD_PARTY_LICENSES.txt).
   Written offer        As THIRD_PARTY_LICENSES.txt says: if you cannot obtain source for a bundled component, the yt-dlp maintainers will provide it (maintainers@yt-dlp.org). The Browser Setu publisher also
                        offers, for at least three years after this version was last distributed and for no more than the cost of copying, the corresponding source of the GPL/LGPL components of this exact zip;
                        ask at the address in the Browser Setu release notes.

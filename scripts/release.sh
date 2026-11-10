@@ -93,7 +93,7 @@ rm -rf "$DIST" "$DERIVED"; mkdir -p "$DIST"
 
 # The signed + notarized media-tool packages come first: reused from the cache when unchanged and still valid, otherwise built, signed, notarized and cached. Fails the release before any app build.
 echo "▸ Media tools: ensuring signed + notarized packages (yt-dlp, ffmpeg)"
-scripts/release-media-tools.sh --ensure --identity "$SIGN_IDENTITY" --team "$TEAM_ID" --notary-profile "$NOTARY_PROFILE" --tool all || fail "the media-tool packages are not ready (see above)."
+scripts/release-media-tools.sh --ensure --identity "$SIGN_IDENTITY" --team "$TEAM_ID" --notary-profile "$NOTARY_PROFILE" --tool all --online || fail "the media-tool packages are not ready (see above)."
 
 # Always rebuilt, from the locked dependencies and the pinned toolchain: a framework left from earlier would link older Rust code.
 echo "▸ Building the Rust core"; scripts/build-xcframework.sh
@@ -118,6 +118,7 @@ echo "▸ Embedding the JavaScript challenge runner (setu-jsc + yt-dlp plugin)"
 scripts/embed-js-provider.sh "$APP" --identity "$SIGN_IDENTITY" --team "$TEAM_ID" || fail "the JavaScript provider could not be embedded."
 # Sparkle's helpers are signed innermost first with the same identity, hardened runtime and a timestamp, as notarization requires.
 SP="$APP/Contents/Frameworks/Sparkle.framework/Versions/B"
+[ -d "$SP" ] || fail "Sparkle.framework is missing from the built app; the final signature (which seals the embedded tools) would be skipped."
 if [ -d "$SP" ]; then
   for part in "$SP/XPCServices/Installer.xpc" "$SP/XPCServices/Downloader.xpc" "$SP/Autoupdate" "$SP/Updater.app" "$APP/Contents/Frameworks/Sparkle.framework"; do
     [ -e "$part" ] && codesign --force --timestamp --options runtime --sign "$SIGN_IDENTITY" "$part"
