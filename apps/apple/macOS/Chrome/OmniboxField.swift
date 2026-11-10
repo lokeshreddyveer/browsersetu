@@ -19,7 +19,10 @@ final class OmniboxTextField: NSTextField {
     private var clickMonitor: Any?
     /// The click that gave the field focus ends with a mouse-up that lands in the field editor, which would put the caret where the pointer is and
     /// undo the selection. That one mouse-up is swallowed, so the whole address stays selected.
-    private var swallowMouseUp = false
+    private var swallowMouseUp = false { didSet { if swallowMouseUp { swallowSince = Date() } } }
+    /// When the swallow was asked for: a mouse-up arrives within a moment of its mouse-down, so a flag left over from a click that never reached
+    /// the monitor must not eat a later click on a button, a tab or a sidebar row.
+    private var swallowSince = Date.distantPast
     /// Set when this field took focus because of a mouse click. AppKit hands the field focus before the click's mouse-down reaches it, so that
     /// mouse-down is recognised by this flag, not by the field being idle.
     private var focusedByThisClick = false
@@ -28,12 +31,15 @@ final class OmniboxTextField: NSTextField {
     /// other part of the window when there is no suggestion list that the click might be meant for. (Clicking the page does not
     /// always take the focus away from the field, so the focus alone cannot be relied on.)
     func installClickMonitor() {
+        // Installing again (the field was focused) must not drop a swallow that this very click just asked for.
+        let pending = swallowMouseUp
         removeClickMonitor()
+        swallowMouseUp = pending
         clickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseUp) { [weak self] event in
             let consumed: Bool = MainActor.assumeIsolated {
                 if let self, self.swallowMouseUp, event.window === self.window {
                     self.swallowMouseUp = false
-                    return true
+                    if Date().timeIntervalSince(self.swallowSince) < 1 { return true }
                 }
                 self?.handleClick(event)
                 return false
@@ -45,6 +51,7 @@ final class OmniboxTextField: NSTextField {
     func removeClickMonitor() {
         if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
         clickMonitor = nil
+        swallowMouseUp = false
     }
 
     private func handleClick(_ event: NSEvent) {
@@ -295,8 +302,10 @@ struct OmniboxField: NSViewRepresentable {
         func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
             _field = control as? OmniboxTextField
             switch selector {
-            case #selector(NSResponder.insertNewline(_:)):
-                parent.onSubmit(textView.string)
+            case #selector(NSResponder.insertNewline(_:)), #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
+                // Control+Return completes a bare name into its .com address, as other browsers do ("apple" → www.apple.com).
+                let typed = NSEvent.modifierFlags.contains(.control) ? (AddressShortcut.dotCom(textView.string) ?? textView.string) : textView.string
+                parent.onSubmit(typed)
                 control.window?.makeFirstResponder(nil)
                 if parent.address.isEditing { focusChanged(false) }   // never rely on the resign callback alone
                 return true

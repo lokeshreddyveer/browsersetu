@@ -7,7 +7,7 @@ final class MultiWindowUITests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
         app = XCUIApplication()
-        app.launchArguments += ["-UITestRoot", "bs-ui-windows-\(UUID().uuidString)"]
+        app.launchArguments += ["-UITestRoot", "bs-ui-windows-\(UUID().uuidString)", "-UIState", "none"]
         app.launch()
         try XCTSkipUnless(app.wait(for: .runningForeground, timeout: 10), "Browser Setu is not frontmost")
         XCTAssertTrue(app.buttons.firstMatch.waitForExistence(timeout: 15), "the window never showed any control")
@@ -17,7 +17,7 @@ final class MultiWindowUITests: XCTestCase {
 
     override func tearDown() {
         if testRun?.hasSucceeded == false, app != nil {
-            let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "at-failure"; shot.lifetime = .keepAlways; add(shot)
+            let shot = XCTAttachment(screenshot: app.safeScreenshot()); shot.name = "at-failure"; shot.lifetime = .keepAlways; add(shot)
         }
         app?.terminate()
     }
@@ -40,7 +40,8 @@ final class MultiWindowUITests: XCTestCase {
         app.typeKey("t", modifierFlags: .command)                 // a second tab, so one can leave
         Thread.sleep(forTimeInterval: 0.6)
         app.menuBars.menuBarItems["File"].click()
-        let item = app.menuBars.menuItems["Move Tab to New Window"]
+        // The item named in the File menu we just opened, not the one AppKit also puts in the Window menu (the same name, so the whole menu bar matches twice).
+        let item = app.menuBars.menuBarItems["File"].menus.menuItems["Move Tab to New Window"]
         XCTAssertTrue(item.waitForExistence(timeout: 3))
         item.click()
         XCTAssertTrue(windowCount(equals: 2), "the tab went to a window of its own (found \(app.windows.count))")

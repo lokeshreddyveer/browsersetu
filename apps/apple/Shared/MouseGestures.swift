@@ -52,9 +52,6 @@ enum MouseGesture {
     }
 }
 
-/// A press that turned out not to be a drag: the middle click (or press) goes on to the page as if nothing had been in the way.
-enum MouseGestureOutcome: Equatable { case notAGesture, gesture(String) }
-
 extension BrowserModel {
     /// Called while a gesture is being drawn and when it ends. While drawing, the action the strokes would do is shown; on release it is done.
     func mouseGestureProgress(_ sequence: String, finished: Bool) {

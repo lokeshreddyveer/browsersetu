@@ -75,7 +75,7 @@ final class ResearchStoreTests: XCTestCase {
         store.add(ResearchItem(kind: .page, title: "Bad", url: "javascript:alert(1)", text: nil, citation: nil), to: id)
         let collection = try XCTUnwrap(store.current)
         let markdown = ResearchExport.markdown(collection)
-        XCTAssertTrue(markdown.contains("# Trip <2026>"))
+        XCTAssertTrue(markdown.contains("# Trip \\<2026\\>"), "characters that mean something in Markdown are escaped in a heading")
         XCTAssertTrue(markdown.contains("## Pages") && markdown.contains("## Highlights") && markdown.contains("## Notes") && markdown.contains("## Sources"))
         XCTAssertTrue(markdown.contains("> line one\n> line two"))
         let html = ResearchExport.html(collection)

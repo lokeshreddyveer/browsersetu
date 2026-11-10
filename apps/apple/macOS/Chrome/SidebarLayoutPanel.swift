@@ -13,8 +13,10 @@ struct SidebarLayoutPanel: View {
 
     /// The traffic lights are hidden in this layout (they come back when the pointer is in the window's top-left corner), so nothing is
     /// reserved for them: the buttons start at the edge.
-    private var lightsInset: CGFloat { lightsShown ? 74 : 0 }
+    private var lightsInset: CGFloat { (lightsShown && model.sidebarPosition == .left && !model.windowFullScreen) ? LayoutMetrics.sidebarLights : 0 }
     @State private var lightsShown = TrafficLightsState.shown
+    /// Knows whether the tab in front has scrolled out of view, to offer the way back to it.
+    @StateObject private var locator = TabVisibilityCoordinator()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -65,24 +67,48 @@ struct SidebarLayoutPanel: View {
 
     /// Every tab of this workspace, whichever group it is in: the groups are sections here, so they can all be seen at once.
     private var workspaceTabs: [TabController] {
-        model.tabs.filter { $0.workspace == model.activeWorkspace && (!model.separatesPrivate || $0.isPrivate == model.privateMode) }
+        model.listedTabs(inWorkspace: model.activeWorkspace).filter { !model.separatesPrivate || $0.isPrivate == model.privateMode }
     }
 
     private var tabsArea: some View {
         let all = workspaceTabs
         let pinned = all.filter(\.pinned)
         let open = all.filter { !$0.pinned && $0.group.isEmpty }
-        return ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                SearchTabsRow()
-                workspacesSection
-                pinnedSection(pinned)
-                openSection(open)
-                groupsSection(all)
+        return ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    SearchTabsRow()
+                    workspacesSection
+                    essentialsSection
+                    pinnedSection(pinned)
+                    openSection(open)
+                    groupsSection(all)
+                }
+                .padding(.horizontal, 12).padding(.top, 2).padding(.bottom, 14)
+                .motion(.easeOut(duration: 0.18), value: all.map(\.id))
+                .motion(.easeOut(duration: 0.18), value: collapsed)
             }
-            .padding(.horizontal, 12).padding(.top, 2).padding(.bottom, 14)
-            .motion(.easeOut(duration: 0.18), value: all.map(\.id))
-            .motion(.easeOut(duration: 0.18), value: collapsed)
+            .tracksTabVisibility(locator, in: TabListSpace.name)
+            .tabLocator(locator) {
+                guard let active = model.active else { return }
+                // A tab inside a folded group cannot be scrolled to; the group is opened first.
+                if !active.group.isEmpty, collapsed.contains(active.group) { collapsed.remove(active.group) }
+                animated(.easeInOut(duration: 0.3)) {
+                    if let record = model.essentialRecord(for: active) { proxy.scrollTo(record.id, anchor: .top) }
+                    else { proxy.scrollTo(active.id, anchor: .center) }
+                }
+            }
+        }
+    }
+
+    // Essentials
+
+    @ViewBuilder private var essentialsSection: some View {
+        if !model.isGuest, !model.essentials.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                SidebarSectionLabel("Essentials")
+                EssentialsGrid(separator: false)
+            }
         }
     }
 
@@ -102,7 +128,7 @@ struct SidebarLayoutPanel: View {
         VStack(alignment: .leading, spacing: 8) {
             SidebarSectionLabel("Pinned")
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 4), spacing: 4) {
-                ForEach(pinned) { SidebarPinnedTile(tab: $0, selected: $0.id == model.activeID) }
+                ForEach(pinned) { SidebarPinnedTile(tab: $0, selected: $0.id == model.activeID).trackedWhenSelected($0.id == model.activeID, in: TabListSpace.name) }
                 SidebarPinCurrentTile()
             }
         }
@@ -114,7 +140,7 @@ struct SidebarLayoutPanel: View {
         VStack(alignment: .leading, spacing: 4) {
             SidebarSectionLabel("Open Tabs") { _ = model.newTab() } help: { "New Tab" }
             VStack(spacing: 2) {
-                ForEach(model.stackedVisible(model.treeVisible(open))) { SidebarTabRow(tab: $0, selected: $0.id == model.activeID) }
+                ForEach(model.stackedVisible(model.treeVisible(open))) { SidebarTabRow(tab: $0, selected: $0.id == model.activeID).trackedWhenSelected($0.id == model.activeID, in: TabListSpace.name) }
             }
         }
         // A tab dragged here from another window comes into this one.
@@ -137,7 +163,7 @@ struct SidebarLayoutPanel: View {
                     }
                     if !isCollapsed {
                         VStack(spacing: 2) {
-                            ForEach(members) { SidebarTabRow(tab: $0, selected: $0.id == model.activeID) }
+                            ForEach(members) { SidebarTabRow(tab: $0, selected: $0.id == model.activeID).trackedWhenSelected($0.id == model.activeID, in: TabListSpace.name) }
                         }
                         .padding(.leading, 12)
                         .transition(.opacity.combined(with: .move(edge: .top)))
@@ -198,7 +224,7 @@ struct SidebarWorkspaceRow: View {
                     .foregroundStyle(selected ? Theme.accent : Color.secondary)
                 Text(title).font(.system(size: 13, weight: selected ? .semibold : .regular)).lineLimit(1)
                 Spacer(minLength: 0)
-                Text("\(model.tabs.filter { $0.workspace == name }.count)").font(.system(size: 11)).foregroundStyle(.tertiary)
+                Text("\(model.workspaceTabCount(name))").font(.system(size: 11)).foregroundStyle(.tertiary)
             }
             .foregroundStyle(selected ? Color.primary : Color.primary.opacity(0.75))
             .padding(.horizontal, 9).frame(height: 32)

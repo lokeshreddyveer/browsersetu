@@ -23,7 +23,7 @@ struct ShortcutsSettingsSection: View {
             Button("Reset All to Defaults") { model.shortcuts.resetAll(); message = nil }
                 .disabled(model.shortcuts == ShortcutMap())
             Text("Click a shortcut, then press the keys you want. A shortcut needs ⌘, ⌃ or ⌥ so it never blocks typing. Delete turns one off; Escape cancels.")
-                .font(.caption).foregroundStyle(.secondary)
+                .settingsNote()
         }
         .onDisappear { stopRecording() }
         .motion(.easeOut(duration: 0.18), value: message)
@@ -55,7 +55,10 @@ struct ShortcutsSettingsSection: View {
         stopRecording()
         message = nil
         recording = action
+        let recorderWindow = NSApp.keyWindow
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            // Only keys typed in the window that started recording; typing elsewhere must still reach its field.
+            guard event.window === recorderWindow else { return event }
             MainActor.assumeIsolated { handle(event, for: action) }
             return nil
         }

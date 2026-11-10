@@ -15,33 +15,91 @@ final class WebKitEngine: BrowserEngine {
 
     private let downloadDelegate: WebKitDownloads
     private var privateStore: WKWebsiteDataStore?
+    /// One temporary store per private window (by its session id): its tabs share it, no other window can see it, and it is dropped when the window closes. Never written to disk.
+    private var privateSessionStores: [UUID: WKWebsiteDataStore] = [:]
     private var proxy: (config: ProxyConfig, password: String?)?
     private var webPolicy = WebPolicy()
     let rules = ContentRuleInstaller()
+    private let extraRules = ExtraRuleInstaller()
     private let tabs = NSHashTable<WebKitTab>.weakObjects()
+    #if DEBUG
+    /// Development only: how many tab web views are alive (for measuring restore).
+    var liveTabCount: Int { tabs.allObjects.count }
+    #endif
     /// A `WebKitExtensionManager` on systems that have WebKit extension support; type-erased because it is availability-gated.
     private var extensionManager: AnyObject?
     private var userScripts: [UserScript] = []
+    private var userScriptStorage: UserScriptStorage?
+    /// The scriptlets and procedural cosmetic rules from the filter lists, for every page.
+    private var filterScripts = FilterScripts()
 
     init() {
         downloadDelegate = WebKitDownloads(coordinator: downloads)
-        downloads.resumer = { [weak self] data in
-            guard let self, let view = self.tabs.allObjects.first?.hostView as? WKWebView else { return }
-            self.downloadDelegate.resume(data, in: view)
+        downloads.resumerWithID = { [weak self] data, id in
+            guard let self else { return }
+            guard let view = self.hostView(forTask: id) else {
+                // Normally caught earlier by `sessionGate`, before anything was changed. If the page went away in between, the task is marked recovery-required, not borrowed from elsewhere.
+                self.downloads.sessionUnavailable(id, source: nil, reason: "Open a page of the profile this download came from, then resume it.")
+                return
+            }
+            self.downloadDelegate.resume(data, in: view, taskID: id)
         }
-        // Starts a download again from its address (a scheduled one, or a retry with nothing to resume), using any open page's web view and its cookies.
+        downloads.sessionGate = { [weak self] id, _ in
+            guard let self else { return "The browser is not ready." }
+            guard self.downloadDelegate.store(forTask: id) != nil else { return "its web session was not recorded, so it cannot be resumed safely" }
+            return self.hostView(forTask: id) == nil ? "open a page of the profile it came from first" : nil
+        }
+        // Starts a download again from its address (a scheduled one, or a retry with nothing to resume), through a page of the same profile it came from.
         downloads.starter = { [weak self] url in
-            guard let self, let view = self.tabs.allObjects.first?.hostView as? WKWebView else { return }
+            guard let self else { return }
+            // Which session this start belongs to comes from the task's identity, never from the address: two profiles can be downloading the same address.
+            let id = self.downloads.peekReservedID(for: url)
+            guard let view = self.hostView(forTask: id) else {
+                self.downloads.sessionUnavailable(id, source: url, reason: "\(url.lastPathComponent) was not started: the web session it belongs to is not open, so it is not repeated as an anonymous request.")
+                return
+            }
             self.downloadDelegate.start(url, in: view)
         }
+        // Whether any ordinary page is open at all (a coarse check; the task's own session is checked separately). A private page never counts.
+        downloads.hasHost = { [weak self] in
+            self?.tabs.allObjects.contains { ($0.hostView as? WKWebView)?.configuration.websiteDataStore.isPersistent == true } ?? false
+        }
+    }
+
+    /// The page a download is started through: one that uses the download's own website data store. Another profile's page, another private session, or a private page for an
+    /// ordinary download is never used, and a task whose store is not known gets no page at all.
+    private func hostView(forTask id: UUID?) -> WKWebView? {
+        let candidates = tabs.allObjects.compactMap { tab -> (host: WKWebView, store: DownloadStoreKey)? in
+            guard let view = tab.hostView as? WKWebView else { return nil }
+            return (view, WebKitDownloads.storeKey(of: view))
+        }
+        return DownloadHostSelection.pick(candidates, for: downloadDelegate.store(forTask: id))
     }
 
     func prepare() async {}
 
-    func makeConfiguration(isPrivate: Bool, profile: String, container: String? = nil) -> WKWebViewConfiguration {
+    /// One process pool for every tab, as Safari has. Without it each tab's configuration made a pool of its own: each one registered with the system's power service (which, after
+    /// hundreds, stopped answering and froze the app while it opened a tab), and tabs of one site could not share a web process. Which tab sees which data is the data store's job, not the pool's.
+    private static let sharedProcessPool = WKProcessPool()
+
+    func makeConfiguration(isPrivate: Bool, profile: String, container: String? = nil, privateSession: UUID? = nil) -> WKWebViewConfiguration {
         let config = WKWebViewConfiguration()
-        if isPrivate {
-            if privateStore == nil { privateStore = .nonPersistent() }
+        config.processPool = Self.sharedProcessPool
+        if isPrivate, let privateSession {
+            // A private window's own storage (never the shared one, even if that exists).
+            if privateSessionStores[privateSession] == nil {
+                let store = WKWebsiteDataStore.nonPersistent()
+                // The window's own id is the store's session, so a download from this store is known to belong to this window.
+                WebKitDownloads.sessions.setObject(privateSession as NSUUID, forKey: store)
+                privateSessionStores[privateSession] = store
+            }
+            config.websiteDataStore = privateSessionStores[privateSession]!
+        } else if isPrivate {
+            if privateStore == nil {
+                let store = WKWebsiteDataStore.nonPersistent()
+                WebKitDownloads.sessions.setObject(DownloadStoreKey.sharedPrivateSession as NSUUID, forKey: store)
+                privateStore = store
+            }
             config.websiteDataStore = privateStore!
         } else if container == TabOrganizing.scratchContainer {
             config.websiteDataStore = .nonPersistent()                     // gone with the tab
@@ -53,26 +111,40 @@ final class WebKitEngine: BrowserEngine {
         applyProxy(to: config.websiteDataStore)
         // A web view announces itself without the "Version/… Safari/…" part that Safari adds, and many sites (Google's home page
         // among them) answer such a browser with a stripped-down page. Announce it the way Safari does, with this system's number.
+        #if os(iOS)
+        // An iPhone's text is built whole once the web view exists (see the engine's init); the iPad's and the Mac's desktop form takes the suffix.
+        if UIDevice.current.userInterfaceIdiom != .phone {
+            config.applicationNameForUserAgent = "Version/\(ProcessInfo.processInfo.operatingSystemVersion.majorVersion).0 Safari/605.1.15"
+        }
+        #else
         config.applicationNameForUserAgent = "Version/\(ProcessInfo.processInfo.operatingSystemVersion.majorVersion).0 Safari/605.1.15"
+        #endif
         config.upgradeKnownHostsToHTTPS = true
         config.preferences.isFraudulentWebsiteWarningEnabled = true
         config.defaultWebpagePreferences.allowsContentJavaScript = true
+        #if os(iOS)
+        // On an iPhone, Safari does not fullscreen a page's own container: a video goes full screen in the system's video player (swipe down to close it, picture in picture, AirPlay,
+        // the system scrubber and speed). Turning element fullscreen on made sites draw their own full-screen page with their own controls instead. Left off on an iPhone, the sites ask for
+        // the system player, as they do in Safari. The iPad, like Safari on it, keeps element fullscreen.
+        config.preferences.isElementFullscreenEnabled = UIDevice.current.userInterfaceIdiom != .phone
+        #else
         // The fullscreen button on web video: without this, YouTube and every other player has no working fullscreen.
         config.preferences.isElementFullscreenEnabled = true
-        config.mediaTypesRequiringUserActionForPlayback = [.audio, .video]
+        #endif
+        // The browser's own rule (PageScripts.noAutoplay) decides what may start by itself and honours the switch and the per-site exceptions. WebKit's built-in
+        // rule cannot do either, and left on it refused play() even with the switch off, and refused videos the viewer had asked for a moment after a tap.
+        config.mediaTypesRequiringUserActionForPlayback = []
         #if os(iOS)
         config.allowsPictureInPictureMediaPlayback = true
+        // Like Safari: a video plays inside the page. Without this an iPhone throws every video into the full-screen player the moment it starts.
+        config.allowsInlineMediaPlayback = true
         #endif
         // Registered before the web view exists, so even its first request is filtered.
         rules.register(config.userContentController)
-        if !isPrivate { UserScriptInstaller.addErrorCollector(to: config.userContentController) }
+        extraRules.register(config.userContentController)
         // The user's own scripts, in normal tabs only.
-        if !isPrivate { UserScriptInstaller.install(userScripts, policy: webPolicy, into: config.userContentController) }
-        else {
-            UserScriptInstaller.addScrollbarHider(to: config.userContentController)
-            UserScriptInstaller.addPolicyScripts(webPolicy, to: config.userContentController)
-            UserScriptInstaller.addBrowserScripts(to: config.userContentController, signInWatcher: false)
-        }
+        if !isPrivate { UserScriptInstaller.install(userScripts, policy: webPolicy, storage: userScriptStorage, filter: filterScripts, into: config.userContentController) }
+        else { UserScriptInstaller.installPrivate(webPolicy, filter: filterScripts, into: config.userContentController) }
         // Extensions never run in private tabs.
         if !isPrivate, #available(macOS 15.4, iOS 18.4, *), let manager = extensionManager as? WebKitExtensionManager {
             config.webExtensionController = manager.controller
@@ -90,17 +162,28 @@ final class WebKitEngine: BrowserEngine {
 
     /// iPhone only: tells the tab when its media must wait for a tap (the switch is on and the site is not an exception).
     private func wireMediaGuard(_ tab: WebKitTab) {
-        #if os(iOS)
-        tab.mediaGuardActive = { [weak self, weak tab] in
-            guard let self, let tab, self.webPolicy.blockAutoplay else { return false }
-            let key = FaviconStore.key(forHost: tab.webView.url?.host)
-            return key.map { !self.webPolicy.autoplayExceptions.contains($0) } ?? true
+        tab.glanceTrigger = { [weak self] in self?.webPolicy.glanceTrigger ?? .none }
+        tab.adjustPreferences = { [weak self] url, preferences in
+            guard let self else { return }
+            if #available(macOS 27.0, iOS 27.0, *) { preferences.globalPrivacyControlEnabled = self.webPolicy.globalPrivacyControl }
+            if let key = FaviconStore.key(forHost: url.host), self.webPolicy.lockdownHosts.contains(key) { preferences.isLockdownModeEnabled = true }
         }
-        #endif
     }
 
     func makeTab(isPrivate: Bool, profile: String, container: String?, events: TabEngineEvents) -> TabEngine {
-        let tab = WebKitTab(configuration: makeConfiguration(isPrivate: isPrivate, profile: profile, container: container),
+        makeTab(isPrivate: isPrivate, profile: profile, container: container, privateSession: nil, events: events)
+    }
+
+    func releasePrivateSession(_ id: UUID) { privateSessionStores[id] = nil }
+
+    /// The number of private windows that currently own storage (for tests and diagnostics).
+    var privateSessionCount: Int { privateSessionStores.count }
+
+    /// The storage a private window's tabs use, if it has made any yet (for tests).
+    func privateSessionStore(_ id: UUID) -> WKWebsiteDataStore? { privateSessionStores[id] }
+
+    func makeTab(isPrivate: Bool, profile: String, container: String?, privateSession: UUID?, events: TabEngineEvents) -> TabEngine {
+        let tab = WebKitTab(configuration: makeConfiguration(isPrivate: isPrivate, profile: profile, container: container, privateSession: privateSession),
                             events: events, downloads: downloadDelegate)
         tabs.add(tab)
         wireMediaGuard(tab)
@@ -108,26 +191,44 @@ final class WebKitEngine: BrowserEngine {
     }
 
     func applyProtection(_ snapshot: PolicySnapshot?) async -> InstallReport {
-        await rules.apply(snapshot)
+        let report = await rules.apply(snapshot)
+        // The rules the content blocker cannot express (scriptlets, procedural hiding) are carried out by the browser's own page scripts; they are reinstalled only when they changed.
+        let scripts = FilterScripts.make(from: snapshot?.scriptRules)
+        if scripts != filterScripts {
+            filterScripts = scripts
+            for tab in tabs.allObjects {
+                guard let view = tab.hostView as? WKWebView else { continue }
+                if view.configuration.websiteDataStore.isPersistent { UserScriptInstaller.install(userScripts, policy: webPolicy, storage: userScriptStorage, filter: scripts, into: view.configuration.userContentController) }
+                else { UserScriptInstaller.installPrivate(webPolicy, filter: scripts, into: view.configuration.userContentController) }
+            }
+        }
+        return report
     }
+
+    func setUserScriptStorage(_ storage: UserScriptStorage?) { userScriptStorage = storage }
 
     func setUserScripts(_ scripts: [UserScript]) {
         userScripts = scripts
         for tab in tabs.allObjects {
             guard let view = tab.hostView as? WKWebView, view.configuration.websiteDataStore.isPersistent else { continue }
-            UserScriptInstaller.install(scripts, policy: webPolicy, into: view.configuration.userContentController)
+            UserScriptInstaller.install(scripts, policy: webPolicy, storage: userScriptStorage, filter: filterScripts, into: view.configuration.userContentController)
         }
     }
 
     func setWebPolicy(_ new: WebPolicy) {
         guard new != webPolicy else { return }
         webPolicy = new
+        extraRules.apply(ExtraRules.json(for: new))
         // Open pages keep what they already loaded; the next load of each one follows the new policy.
         for tab in tabs.allObjects {
             guard let view = tab.hostView as? WKWebView else { continue }
-            if view.configuration.websiteDataStore.isPersistent { UserScriptInstaller.install(userScripts, policy: new, into: view.configuration.userContentController) }
+            if view.configuration.websiteDataStore.isPersistent { UserScriptInstaller.install(userScripts, policy: new, storage: userScriptStorage, filter: filterScripts, into: view.configuration.userContentController) }
+            // A private tab follows the same switches (WebRTC, fingerprint noise, autoplay…): leaving it with the old ones would keep a protection the person turned on off for as long as that tab lives.
+            else { UserScriptInstaller.installPrivate(new, filter: filterScripts, into: view.configuration.userContentController) }
         }
     }
+
+    func policyRulesReady() async { await extraRules.settled() }
 
     func privateSessionEnded() {
         privateStore = nil
@@ -137,6 +238,7 @@ final class WebKitEngine: BrowserEngine {
         self.proxy = proxy.map { ($0, password) }
         for tab in tabs.allObjects { if let view = tab.hostView as? WKWebView { applyProxy(to: view.configuration.websiteDataStore) } }
         if let privateStore { applyProxy(to: privateStore) }
+        for store in privateSessionStores.values { applyProxy(to: store) }
     }
 
     /// Fails closed: if the proxy cannot be reached the page does not load, rather than going out directly.
@@ -232,8 +334,15 @@ final class WebKitEngine: BrowserEngine {
 @MainActor
 final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
     let webView: WKWebView
+    /// The agent this tab uses when no site rule says otherwise (the phone's Safari form, or the Mac's phone-site mode). Clearing a site rule returns to it, not to the web view's plain default.
+    private var baseUserAgent: String?
     private weak var events: TabEngineEvents?
     var eventsForLogin: TabEngineEvents? { events }
+    var eventsForMedia: TabEngineEvents? { events }
+    /// Set by the engine: the privacy choices that WebKit takes per navigation (the Global Privacy Control signal, Lockdown Mode for a site).
+    var adjustPreferences: ((URL, WKWebpagePreferences) -> Void)?
+    /// Set by the engine: which click, with a key held, opens a link in Glance instead of following it.
+    var glanceTrigger: () -> GlanceTrigger = { .none }
     /// The link under the pointer, as last reported by the page.
     var hoveredLink: URL?
     /// When the person last clicked, touched or typed in this page, as the page reported it.
@@ -257,6 +366,18 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
         webView = WKWebView(frame: .zero, configuration: configuration)
         #endif
         super.init()
+        #if os(iOS)
+        // On an iPhone Safari writes "… Version/26.0 Mobile/15E148 Safari/604.1". A web view appends the application name AFTER "Mobile/…", so it
+        // could only say "Mobile/15E148 Version/26.0 Safari/605.1.15": the parts out of order and the wrong WebKit number. Sites that judge whether a
+        // visitor is a real browser by comparing its name with its other traits (Cloudflare, Google) challenge that far more often, so the phone
+        // is given Safari's exact form, built from the system's own default text.
+        if UIDevice.current.userInterfaceIdiom == .phone, let base = webView.value(forKey: "userAgent") as? String, base.contains(" Mobile/"), !base.contains("Version/") {
+            let major = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+            let safari = base.replacingOccurrences(of: " Mobile/", with: " Version/\(major).0 Mobile/") + " Safari/604.1"
+            baseUserAgent = safari
+            webView.customUserAgent = safari
+        }
+        #endif
         // Sign-ins the page script reports (see LoginScripts.watcher). The handler holds the tab weakly, so the tab can still go away.
         TabRegistry.tabs.setObject(self, forKey: webView)
         let controller = webView.configuration.userContentController
@@ -266,12 +387,25 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
             controller.add(LoginMessageHandler(), contentWorld: .defaultClient, name: "bsLogin")
             controller.add(LinkHoverHandler(), contentWorld: .defaultClient, name: "bsLink")
             controller.add(GestureHandler(), contentWorld: .defaultClient, name: "bsGesture")
+            // DX-07: the page's media observer (isolated world; its messages are checked before they are believed).
+            MediaPageObserver.install(in: controller) { web, observation in web.flatMap { TabRegistry.tabs.object(forKey: $0) }?.eventsForMedia?.engineMediaObserved(observation) }
         }
         #if os(macOS)
         reporting.applyRestingColor()
         reporting.hoveredLink = { [weak self] in self?.hoveredLink }
         reporting.onLinkAction = { [weak self] action, url in self?.events?.engineLinkAction(url, action) }
-        reporting.onScroll = { [weak self] delta in self?.events?.engineScrolled(deltaY: Double(delta)) }
+        // The web view is passed in, not captured: the closure must not keep the page alive, and the download is started through the page the menu belongs to.
+        reporting.onShowDownloads = { [weak self] in self?.events?.engineShowDownloads() }
+        reporting.onSaveAs = { [weak self, weak reporting] url, chosen in
+            guard let self, let reporting else { return }
+            self.downloads.saveAs(url, in: reporting, chosen: chosen)
+        }
+        reporting.onScroll = { [weak self] delta in
+            self?.events?.engineScrolled(deltaY: Double(delta))
+            self?.reportMacScrollPosition()
+        }
+        reporting.pageMenuEnabled = { [weak self] in self?.events?.enginePageMenuEnabled() ?? false }
+        reporting.onPageAction = { [weak self] action, target in self?.events?.enginePageMenuAction(action, target: target) }
         reporting.gesturesEnabled = { [weak self] in self?.events?.engineMouseGesturesEnabled() ?? false }
         reporting.onGesture = { [weak self] sequence, finished in self?.events?.engineMouseGesture(sequence, finished: finished) }
         reporting.onKey = { [weak self] event in
@@ -291,50 +425,12 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
         #endif
         observe()
         #if os(iOS)
-        installMediaGuard()
         #endif
     }
 
     #if os(iOS)
     // MARK: A second guard against media that starts by itself (iPhone)
 
-    /// Whether this page's media is held to "a tap first" (set by the engine: the switch is on and the site is not one the person allowed).
-    var mediaGuardActive: () -> Bool = { false }
-    private var lastTap = Date.distantPast
-    private var mediaStartedByPerson = false
-    private var mediaTimer: Timer?
-
-    /// The page's own script already refuses play() without a tap, but a site can start media in ways a script cannot see. So, as well, the tab asks WebKit what is playing
-    /// a little under twice a second: playing media that follows a tap (a video you chose) is left alone for as long as it plays; media that starts with no tap behind it is paused.
-    private func installMediaGuard() {
-        let tap = UITapGestureRecognizer(target: self, action: #selector(noteTap))
-        tap.cancelsTouchesInView = false
-        tap.delaysTouchesBegan = false
-        tap.delaysTouchesEnded = false
-        tap.delegate = self
-        webView.addGestureRecognizer(tap)
-        mediaTimer = Timer.scheduledTimer(withTimeInterval: 0.6, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.checkMedia() }
-        }
-    }
-
-    @objc private func noteTap() { lastTap = Date() }
-
-    private func checkMedia() {
-        // Never in the background or while the video is full screen: play pressed on the lock screen, a headphone button or the player's own controls
-        // is the person asking, and pausing it again is what made video feel broken.
-        guard webView.window != nil, UIApplication.shared.applicationState == .active, mediaGuardActive() else { mediaStartedByPerson = false; return }
-        UserTouchClock.shared.install()
-        webView.requestMediaPlaybackState { [weak self] state in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                guard state == .playing else { self.mediaStartedByPerson = false; return }
-                if self.mediaStartedByPerson { return }
-                if Date().timeIntervalSince(max(self.lastTap, UserTouchClock.shared.last)) < 6 { self.mediaStartedByPerson = true }
-                else { self.webView.pauseAllMediaPlayback { } }
-            }
-        }
-    }
     #endif
 
     var hostView: PlatformView { webView }
@@ -368,9 +464,10 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
 
     func setMobileSite(_ on: Bool) {
         #if os(macOS)
-        webView.customUserAgent = on
+        baseUserAgent = on
             ? "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
             : nil
+        webView.customUserAgent = baseUserAgent
         webView.reload()
         #endif
     }
@@ -385,26 +482,19 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
     /// Darkening turns a light page dark by inverting it. A page that is already dark (its own dark mode) must be left alone, or it is
     /// inverted back to light-on-dark mush with invisible text. What is painted behind the page is found the way the eye would: the element
     /// in the middle of the window and each one around it, outward, until one has a solid background.
+    /// Changes dark pages on the page that is open now. The page script is already there if the setting was on when the page loaded; if not, it is put in.
     func setPageDarkening(_ on: Bool) {
-        let script = on ? """
-        if (document.getElementById('bs-dark')) return true;
-        const solid = (e) => {
-          const m = getComputedStyle(e).backgroundColor.match(/[\\d.]+/g) || [];
-          const a = m.length >= 4 ? parseFloat(m[3]) : (m.length >= 3 ? 1 : 0);
-          return a > 0.5 ? [+m[0], +m[1], +m[2]] : null;
-        };
-        let el = document.elementFromPoint(innerWidth / 2, innerHeight / 2), color = null;
-        while (el && !color) { color = solid(el); el = el.parentElement; }
-        color = color || solid(document.documentElement) || [255, 255, 255];
-        const luminance = 0.299 * color[0] + 0.587 * color[1] + 0.114 * color[2];
-        if (luminance < 140) return false;
-        const style = document.createElement('style');
-        style.id = 'bs-dark';
-        style.textContent = 'html{filter:invert(0.9) hue-rotate(180deg) contrast(0.95)!important;background:#fff} img,video,picture,canvas{filter:invert(0.9) hue-rotate(180deg)!important}';
-        document.documentElement.appendChild(style);
-        return true;
-        """ : "const s = document.getElementById('bs-dark'); if (s) s.remove(); return true;"
-        Task { _ = try? await webView.callAsyncJavaScript(script, contentWorld: .defaultClient) }
+        guard let key = FaviconStore.key(forHost: webView.url?.host) else { return }
+        let config = on ? "{ mode: 'chosen', on: ['\(key)'], off: [] }" : "{ mode: 'chosen', on: [], off: ['\(key)'] }"
+        let inject = AdaptiveDarkScript.source(always: false, off: [], on: [key])
+        let script = on
+            ? "if (window.__bsDarkConfig) { window.__bsDarkConfig(\(config)); return true; } return false;"
+            : "if (window.__bsDarkConfig) { window.__bsDarkConfig(\(config)); } return true;"
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let handled = (try? await self.webView.callAsyncJavaScript(script, contentWorld: .page)) as? Bool ?? true
+            if on && !handled { _ = try? await self.webView.callAsyncJavaScript(inject, contentWorld: .page) }
+        }
     }
 
     /// Which look the websites are asked for, apart from the browser's own: nil follows the system.
@@ -412,13 +502,30 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
     func setViewportInsets(top: CGFloat, bottom: CGFloat) {
         #if os(iOS)
         let insets = UIEdgeInsets(top: top, left: 0, bottom: bottom, right: 0)
-        guard webView.scrollView.contentInset.bottom != 0 || insets != lastViewportInsets else { return }
-        lastViewportInsets = insets
-        // Public API (iOS 15 and later): the page lays itself out inside these insets, so its fixed headers and bottom tab bars sit clear of the status bar and the dock.
+        // Giving the page its own insets replaces the room WebKit keeps by itself for the status bar and the home indicator, so a site's sticky or fixed header would stick behind
+        // the clock. When the page runs under those areas, they are added to what the page is told (not to the scrolling room, which the system already adds).
+        let safe = webView.safeAreaInsets
+        let told = UIEdgeInsets(top: top + safe.top, left: 0, bottom: bottom + safe.bottom, right: 0)
+        #if DEBUG
+        debugLog("VIEWPORT in top=\(top) bottom=\(bottom) safe=\(safe.top)/\(safe.bottom) told=\(told.top)/\(told.bottom) last=\(lastViewportInsets.top)/\(lastViewportInsets.bottom)")
+        #endif
+        guard told != lastViewportInsets else { return }
+        lastViewportInsets = told
+        let scroll = webView.scrollView
+        let wasAtTop = scroll.contentOffset.y <= -scroll.adjustedContentInset.top + 1
+        // The page lays itself out inside these insets (public API, iOS 15 and later), so its fixed headers and bottom tab bars sit clear of a bar floating over it, and the
+        // scrolling content gets the same room, so the first and last of the page can be scrolled clear of the bar. Where the page was at its top, it stays at its top.
         UIView.animate(withDuration: 0.25, delay: 0, options: [.curveEaseInOut, .allowUserInteraction]) {
-            self.webView.setMinimumViewportInset(insets, maximumViewportInset: insets)
-            self.webView.scrollView.contentInset.bottom = 0
-            self.webView.scrollView.verticalScrollIndicatorInsets = .zero
+            self.webView.setMinimumViewportInset(told, maximumViewportInset: told)
+            scroll.contentInset.top = top
+            scroll.contentInset.bottom = bottom
+            scroll.verticalScrollIndicatorInsets = insets
+            if wasAtTop, top > 0 { scroll.contentOffset.y = -scroll.adjustedContentInset.top }
+        }
+        // From iOS 26 the edge under a floating bar is softened, as it is in Safari, so the bar's own controls stay legible over the page.
+        if #available(iOS 26, *) {
+            scroll.topEdgeEffect.style = top > 0 ? .soft : .automatic
+            scroll.bottomEdgeEffect.style = bottom > 0 ? .soft : .automatic
         }
         #endif
     }
@@ -456,6 +563,28 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
     func runPageScript(_ script: String, arguments: [String: Any]) {
         Task { _ = try? await webView.callAsyncJavaScript(script, arguments: arguments, contentWorld: .defaultClient) }
     }
+
+    #if os(macOS)
+    private var macScrollY: Double?
+    private var macScrollAsking = false
+    private var macScrollLast = Date.distantPast
+    /// After the page was moved by hand: how far down it is, in screens, so the back-to-top button knows when to offer itself. Asked at most about six times a second,
+    /// and only after the wheel (not for a keyboard or scroll-bar move, which the button does not need).
+    private func reportMacScrollPosition() {
+        let now = Date()
+        guard !macScrollAsking, now.timeIntervalSince(macScrollLast) > 0.16 else { return }
+        macScrollAsking = true; macScrollLast = now
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.macScrollAsking = false }
+            let answer = try? await self.webView.callAsyncJavaScript("return [window.scrollY, window.innerHeight];", contentWorld: .defaultClient) as? [Double]
+            guard let answer, answer.count == 2, answer[1] > 0 else { return }
+            let y = answer[0], previous = self.macScrollY ?? answer[0]
+            self.macScrollY = y
+            self.events?.engineScrollPosition(screens: y / answer[1], deltaY: previous - y)
+        }
+    }
+    #endif
 
     func scrollToEdge(bottom: Bool) {
         #if os(iOS)
@@ -717,24 +846,21 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
         """, arguments: ["idx": index], contentWorld: .defaultClient)
     }
 
-    func controlVideo(index: Int, action: String, value: Double) async {
-        _ = try? await webView.callAsyncJavaScript("""
-        const m = document.querySelectorAll('video, audio')[index]; if (!m) return;
-        if (action === 'play') m.play(); else if (action === 'pause') m.pause();
-        else if (action === 'speed') m.playbackRate = value;
-        else if (action === 'seek') m.currentTime = value;
-        else if (action === 'mute') m.muted = value > 0;
-        else if (action === 'volume') m.volume = Math.max(0, Math.min(1, value));
-        else if (action === 'airplay') { if (m.webkitShowPlaybackTargetPicker) m.webkitShowPlaybackTargetPicker(); }
-        else if (action === 'subtitle') {
-          const list = Array.from(m.textTracks || []).filter(t => t.kind === 'subtitles' || t.kind === 'captions');
-          list.forEach((t, i) => { t.mode = (i === Math.round(value)) ? 'showing' : 'disabled'; });
+    /// The name of the event that lets playback start for a few seconds (see `PageScripts.noAutoplay`): random at each launch, known only to the browser and the page script it installs.
+    static let playbackGrantName = "bs-" + UUID().uuidString.lowercased()
+
+    func controlVideo(id: Int, action: String, value: Double) async -> String? {
+        // A deliberate Play from the browser's own controls is the viewer's doing, so the page's guard against videos starting by themselves is told so first (in this page and its frames).
+        if action == "play" {
+            _ = try? await webView.callAsyncJavaScript("const send = (w, depth) => { try { w.dispatchEvent(new Event(name)); } catch (e) {} if (depth < 3) { for (const f of Array.from(w.frames || [])) { send(f, depth + 1); } } }; send(window, 0);",
+                                                       arguments: ["name": Self.playbackGrantName], contentWorld: .page)
         }
-        else if (action === 'pictureInPicture') {
-          if (m.webkitSetPresentationMode) m.webkitSetPresentationMode(m.webkitPresentationMode === 'picture-in-picture' ? 'inline' : 'picture-in-picture');
-          else if (document.pictureInPictureEnabled) { document.pictureInPictureElement ? document.exitPictureInPicture() : m.requestPictureInPicture(); }
-        } else if (action === 'fullscreen') { if (m.webkitEnterFullscreen) m.webkitEnterFullscreen(); else m.requestFullscreen(); }
-        """, arguments: ["index": index, "action": action, "value": value], contentWorld: .defaultClient)
+        do {
+            let result = try await webView.callAsyncJavaScript(MediaScripts.control, arguments: ["id": id, "action": action, "value": value], contentWorld: .defaultClient)
+            return result as? String
+        } catch {
+            return "The page could not be reached."
+        }
     }
 
     func fillCouponField(_ code: String) async -> Bool {
@@ -749,22 +875,15 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
     }
 
     func mediaElements() async -> [[String: Any]]? {
-        let script = """
-        return Array.from(document.querySelectorAll('video, audio')).slice(0, 8).map(m => ({
-          tag: m.tagName.toLowerCase(), src: m.currentSrc || m.src || '', blob: (m.currentSrc || m.src || '').startsWith('blob:'),
-          currentTime: m.currentTime, duration: isFinite(m.duration) ? m.duration : 0, paused: m.paused, rate: m.playbackRate, readyState: m.readyState, networkState: m.networkState, hasMediaKeys: !!m.mediaKeys,
-          errorCode: m.error ? m.error.code : null, errorMessage: m.error ? (m.error.message || '') : null,
-          volume: m.volume, muted: m.muted,
-          width: m.videoWidth || 0, height: m.videoHeight || 0,
-          dropped: (m.getVideoPlaybackQuality ? m.getVideoPlaybackQuality().droppedVideoFrames : 0), frames: (m.getVideoPlaybackQuality ? m.getVideoPlaybackQuality().totalVideoFrames : 0),
-          sessionTitle: (navigator.mediaSession && navigator.mediaSession.metadata) ? (navigator.mediaSession.metadata.title || '') : '',
-          sessionArtist: (navigator.mediaSession && navigator.mediaSession.metadata) ? (navigator.mediaSession.metadata.artist || '') : '',
-          pageTitle: document.title || '',
-          tracks: Array.from(m.textTracks || []).filter(t => t.kind === 'subtitles' || t.kind === 'captions').map(t => ({ label: t.label || t.language || 'Track', language: t.language || '', mode: t.mode })),
-          canAirPlay: !!m.webkitShowPlaybackTargetPicker
-        }));
-        """
-        return try? await webView.callAsyncJavaScript(script, contentWorld: .defaultClient) as? [[String: Any]]
+        return try? await webView.callAsyncJavaScript(MediaScripts.list(), contentWorld: .defaultClient) as? [[String: Any]]
+    }
+
+    func mediaData(_ script: String, id: Int) async -> [String: Any]? {
+        try? await webView.callAsyncJavaScript(script, arguments: ["id": id], contentWorld: .defaultClient) as? [String: Any]
+    }
+
+    func blockedMediaFrames() async -> Int {
+        ((try? await webView.callAsyncJavaScript(MediaScripts.blockedFrames, contentWorld: .defaultClient)) as? NSNumber)?.intValue ?? 0
     }
 
     func selectedText() async -> String? {
@@ -773,7 +892,7 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
         return text.isEmpty ? nil : String(text.prefix(2000))
     }
 
-    func setUserAgent(_ value: String?) { webView.customUserAgent = value }
+    func setUserAgent(_ value: String?) { webView.customUserAgent = value ?? baseUserAgent }
 
     func connectionCertificate() async -> Data? {
         guard webView.url?.scheme == "https", let trust = webView.serverTrust, let chain = SecTrustCopyCertificateChain(trust) as? [SecCertificate], let leaf = chain.first else { return nil }
@@ -914,6 +1033,23 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
         }
     }
 
+    func setSponsorSpans(videoID: String, json: String) async {
+        // The identifier and the segments go in as data, never joined into code.
+        _ = try? await webView.callAsyncJavaScript("if (window.__bsSponsor) { window.__bsSponsor.set(id, JSON.parse(list)); }", arguments: ["id": videoID, "list": json], contentWorld: .defaultClient)
+    }
+
+    func sponsorStats() async -> String? {
+        (try? await webView.callAsyncJavaScript(SponsorBlockScript.stats, contentWorld: .defaultClient)) as? String
+    }
+
+    func webAppMetadata() async -> String? {
+        (try? await webView.callAsyncJavaScript(WebApps.read, contentWorld: .defaultClient)) as? String
+    }
+
+    func consentOutcome(rerun: Bool) async -> String? {
+        (try? await webView.callAsyncJavaScript(rerun ? CookieBanners.rerun : CookieBanners.read, contentWorld: .defaultClient)) as? String
+    }
+
     func pageDiagnostics() async -> [String: Any]? {
         let script = """
         const nav = performance.getEntriesByType('navigation')[0];
@@ -969,6 +1105,25 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
         webView.findInteraction?.presentFindNavigator(showingReplace: false)
         #endif
     }
+
+    /// The links on the page that are likely downloads, read once when asked. See LinkPageExtractor.
+    func collectLinks() async -> LinkPageSnapshot {
+        let result = await LinkPageExtractor.collect(from: webView)
+        return LinkPageSnapshot(candidates: LinkPageExtractor.downloadCandidates(result), truncated: result.truncated)
+    }
+
+    /// The pictures of a gallery page, read once when asked. See GalleryExtractor.
+    func collectImages() async -> LinkPageSnapshot { await GalleryExtractor.collect(from: webView) }
+
+    func scanPageLinks() async -> PageLinkScan {
+        let r = await LinkPageExtractor.collect(from: webView)
+        return PageLinkScan(links: r.links.map { ($0.href, $0.marked) }, truncated: r.truncated)
+    }
+
+    /// The media on the page, read once when asked. See MediaPageExtractor.
+    func discoverMedia() async -> MediaPageSnapshot { await MediaPageExtractor.collect(from: webView) }
+    /// DX-07: a single-page app changed route; the page's observer looks at its players again.
+    func rescanMedia() { Task { _ = try? await webView.callAsyncJavaScript("if (window.__bsMedia) window.__bsMedia.rescan();", contentWorld: .defaultClient) } }
 
     /// Finds the main article and returns its text blocks. Runs in the browser's own isolated world and only reads the page.
     func readableContent() async -> ReadableArticle? {
@@ -1078,8 +1233,6 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
     func close() {
         observers.removeAll()
         #if os(iOS)
-        mediaTimer?.invalidate()
-        mediaTimer = nil
         #endif
     }
 
@@ -1133,6 +1286,8 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
         track(\.canGoForward) { e, wv in e.engineLoadingChanged(isLoading: wv.isLoading, canGoBack: wv.canGoBack, canGoForward: wv.canGoForward) }
         track(\.estimatedProgress) { e, wv in e.engineProgress(wv.estimatedProgress) }
         track(\.hasOnlySecureContent) { e, wv in e.engineSecurityChanged(wv.hasOnlySecureContent) }
+        track(\.cameraCaptureState) { e, wv in e.engineCaptureChanged(camera: wv.cameraCaptureState != .none, microphone: wv.microphoneCaptureState != .none) }
+        track(\.microphoneCaptureState) { e, wv in e.engineCaptureChanged(camera: wv.cameraCaptureState != .none, microphone: wv.microphoneCaptureState != .none) }
         track(\.themeColor) { e, wv in e.engineThemeColorChanged(PageTint(wv.themeColor)) }
         #if os(iOS)
         if #available(iOS 26.0, *) {
@@ -1157,9 +1312,34 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
         guard let last = lastScrollY, scrollView.isDragging || scrollView.isDecelerating else { return }
         let top = -scrollView.adjustedContentInset.top
         let bottom = scrollView.contentSize.height - scrollView.bounds.height + scrollView.adjustedContentInset.bottom
-        if y <= top + 1 { events?.engineScrolled(deltaY: 100); return }
+        let screens = Double((y - top) / max(scrollView.bounds.height, 1))
+        if y <= top + 1 { events?.engineScrolled(deltaY: 100); events?.engineScrollPosition(screens: 0, deltaY: 100); return }
         guard y < bottom else { return }
         events?.engineScrolled(deltaY: Double(last - y))
+        events?.engineScrollPosition(screens: screens, deltaY: Double(last - y))
+    }
+    #endif
+
+    #if os(iOS)
+    /// Touch and hold on a link: Open in New Tab first (and in the background, or a private tab), then Glance where it applies, then the system's own choices (Copy, Share…).
+    /// Without this the system's list has no way to open a link in a new tab.
+    func webView(_ webView: WKWebView, contextMenuConfigurationForElement elementInfo: WKContextMenuElementInfo, completionHandler: @escaping (UIContextMenuConfiguration?) -> Void) {
+        guard let link = elementInfo.linkURL, ["http", "https"].contains(link.scheme?.lowercased() ?? "") else { completionHandler(nil); return }
+        let inPrivate = webView.configuration.websiteDataStore.isPersistent == false
+        completionHandler(UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] suggested in
+            var mine: [UIMenuElement] = [
+                UIAction(title: "Open in New Tab", image: UIImage(systemName: "plus.square.on.square")) { _ in self?.events?.engineLinkAction(link, .newTab) },
+                UIAction(title: "Open in Background", image: UIImage(systemName: "square.stack")) { _ in self?.events?.engineLinkAction(link, .backgroundTab) },
+            ]
+            if self?.events?.enginePageMenuEnabled() == true {
+                var target = PageMenuTarget(); target.link = link
+                mine.append(UIAction(title: "Copy Link Without Tracking", image: UIImage(systemName: "link")) { _ in self?.events?.enginePageMenuAction(.copyCleanLink, target: target) })
+            }
+            // From a private tab a new tab is already private; the extra choice is only for a normal one.
+            if !inPrivate { mine.append(UIAction(title: "Open in Private Tab", image: UIImage(systemName: "hand.raised")) { _ in self?.events?.engineLinkAction(link, .privateTab) }) }
+            if GlanceRules.isEligible(link) { mine.append(UIAction(title: "Open in Glance", image: UIImage(systemName: "rectangle.on.rectangle.angled")) { _ in self?.events?.engineLinkAction(link, .glance) }) }
+            return UIMenu(children: mine + suggested)
+        })
     }
     #endif
 
@@ -1170,6 +1350,7 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
         let policy = await decidePolicy(for: navigationAction, in: webView)
         if navigationAction.targetFrame?.isMainFrame ?? true, let url = navigationAction.request.url, let events {
             preferences.allowsContentJavaScript = events.engineScriptsAllowed(for: url)
+            adjustPreferences?(url, preferences)
         }
         return (policy, preferences)
     }
@@ -1177,11 +1358,31 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
     private func decidePolicy(for navigationAction: WKNavigationAction, in webView: WKWebView) async -> WKNavigationActionPolicy {
         guard let target = navigationAction.request.url, let events else { return .cancel }
         let main = navigationAction.targetFrame?.isMainFrame ?? true
+        // A magnet or eD2k link is the browser's to handle: a click opens the matching preview (nothing is contacted by that), anything else just does nothing. It is never handed to
+        // another application, and the page does not navigate. Asked exactly once per navigation: this callback returns here whatever the answer.
+        if let scheme = target.scheme?.lowercased(), scheme == "magnet" || scheme == "ed2k" || RemoteScheme(urlScheme: scheme) != nil || MetalinkLink.isMetalink(target) {
+            // A link counts as clicked only if WebKit says so AND the person really did something in this page a moment ago (a script's own click() is reported as a click too).
+            let clicked = navigationAction.navigationType == .linkActivated && main && Date().timeIntervalSince(lastGesture) < 2
+            if events.engineCustomLink(target, linkActivated: clicked) { return .cancel }
+        }
         // A sign-in form is read here, while the page is still showing it, only when the browser asked and only for a submit or a script-made navigation.
         if main, webView.url != nil, navigationAction.navigationType == .formSubmitted || navigationAction.navigationType == .other,
            events.engineWantsLoginCapture(), let found = LoginRules.capture(await captureLoginBeforeNavigation()) {
             events.engineLoginSubmitted(origin: found.origin, user: found.user, password: found.password)
         }
+        #if os(macOS)
+        // Option-click (or Control-click, as chosen) on an ordinary link opens it in Glance. Only that exact click on a link: every other link, and every
+        // script-made navigation, goes on as before.
+        if navigationAction.navigationType == .linkActivated, let scheme = target.scheme?.lowercased(), scheme == "http" || scheme == "https" {
+            // Only the four modifier keys count: Caps Lock, the Fn key or the number pad being down must not turn the click into an ordinary one.
+            let flags = navigationAction.modifierFlags.intersection([.shift, .control, .option, .command])
+            let wanted: NSEvent.ModifierFlags? = { switch glanceTrigger() { case .option: .option; case .control: .control; case .none: nil } }()
+            if let wanted, flags == wanted {
+                events.engineLinkAction(target, .glance)
+                return .cancel
+            }
+        }
+        #endif
         #if os(iOS)
         // A link to a site that has an installed app, followed from another site: ask before the system hands it to the app.
         if main, navigationAction.navigationType == .linkActivated, let scheme = target.scheme?.lowercased(), scheme == "http" || scheme == "https",
@@ -1244,6 +1445,13 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse) async -> WKNavigationResponsePolicy {
+        // An error status with a body of exactly zero bytes would leave a blank page: the browser says what happened. Anything the site actually sent (its own 404 page) is
+        // shown as it is, and an unknown length (chunked) counts as something sent.
+        if navigationResponse.isForMainFrame, let http = navigationResponse.response as? HTTPURLResponse, http.statusCode >= 400, http.expectedContentLength == 0,
+           BrowserErrorClassifier.classify(httpStatus: http.statusCode, bodyIsEmpty: true) != nil {
+            events?.engineHTTPFailure(url: http.url, status: http.statusCode)
+            return .cancel
+        }
         if let http = navigationResponse.response as? HTTPURLResponse,
            let disposition = http.value(forHTTPHeaderField: "Content-Disposition"),
            disposition.lowercased().hasPrefix("attachment") {
@@ -1285,22 +1493,29 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
     }
 
     func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
-        download.delegate = downloads
+        downloads.adopt(download)
     }
 
     func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
-        download.delegate = downloads
+        BrowserActivity.shared.navigationEnded()          // the page load turned into a download
+        downloads.adopt(download)
     }
 
     func webView(_ webView: WKWebView, didReceiveServerRedirectForProvisionalNavigation navigation: WKNavigation!) {
         if let sites = redirectWatch.hop(to: webView.url?.host) { events?.engineSuspiciousRedirect(sites: sites) }
     }
 
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        BrowserActivity.shared.navigationStarted()          // only that a load began: no address, no tab, no content
+    }
+
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         redirectWatch.reset()
+        events?.engineMediaNavigated()
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        BrowserActivity.shared.navigationEnded()
         #if os(macOS)
         refreshEditableFocus()
         #endif
@@ -1393,6 +1608,8 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
 
     private func paintBehindPage(_ webView: WKWebView) {
         let script = """
+        // A page that Dark Pages has made dark rests on its dark colour, not the white it was authored with.
+        if (document.documentElement.hasAttribute('data-bsd-on')) { return [18, 18, 18]; }
         const solid = (e) => {
           const m = getComputedStyle(e).backgroundColor.match(/[\\d.]+/g) || [];
           const a = m.length >= 4 ? parseFloat(m[3]) : (m.length >= 3 ? 1 : 0);
@@ -1421,37 +1638,33 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
     #endif
 
     /// Reads the page's icon links. The script runs in the browser's own isolated world, so the page cannot see or change it, and it
-    /// only reads: nothing is written to the page.
+    /// only reads: nothing is written to the page. What it finds is handed on as typed candidates, ranked later by `IconCandidateRanker`.
+    /// The address of the page is captured now: if the tab has moved to another site by the time the script answers, the answer is dropped, so one site's
+    /// icon can never be stored under another.
     private func readIconLinks(in webView: WKWebView) {
+        guard let page = webView.url, let pageKey = IconKey(url: page) else { return }
         let script = """
         return Array.from(document.querySelectorAll('link[rel]'))
           .filter(l => /(^|\\s)(icon|apple-touch-icon|apple-touch-icon-precomposed)(\\s|$)/i.test(l.rel) && l.href)
-          .map(l => ({ href: l.href, rel: l.rel.toLowerCase(), sizes: l.sizes ? l.sizes.value : '' }));
+          .slice(0, 24)
+          .map(l => ({ href: l.href, rel: l.rel.toLowerCase(), sizes: l.sizes ? l.sizes.value : '', type: l.type || '', media: l.media || '' }));
         """
         Task { @MainActor [weak self, weak webView] in
-            guard let webView, let result = try? await webView.callAsyncJavaScript(script, contentWorld: .defaultClient) as? [[String: Any]] else {
-                self?.events?.engineIconsFound([]); return
-            }
-            // A large touch icon is a clean square; otherwise the largest declared size; otherwise the order given.
-            func area(_ sizes: String) -> Int {
-                let parts = sizes.split(separator: " ").first?.lowercased().split(separator: "x").compactMap { Int($0) } ?? []
-                return parts.count == 2 ? parts[0] * parts[1] : 0
-            }
-            let ranked = result.sorted {
-                let a = ($0["rel"] as? String ?? "").contains("apple-touch") ? 1 : 0, b = ($1["rel"] as? String ?? "").contains("apple-touch") ? 1 : 0
-                if a != b { return a > b }
-                return area($0["sizes"] as? String ?? "") > area($1["sizes"] as? String ?? "")
-            }
-            self?.events?.engineIconsFound(ranked.compactMap { ($0["href"] as? String).flatMap(URL.init(string:)) })
+            guard let webView else { return }
+            let rows = (try? await webView.callAsyncJavaScript(script, contentWorld: .defaultClient) as? [[String: Any]]) ?? []
+            guard IconKey(url: webView.url) == pageKey else { return }
+            self?.events?.engineIconsFound(IconCandidateRanker.candidates(fromLinks: rows, pageURL: page), page: page)
         }
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        BrowserActivity.shared.navigationEnded()
         stopRefreshing()
         report(error)
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        BrowserActivity.shared.navigationEnded()
         stopRefreshing()
         report(error)
     }
@@ -1463,7 +1676,7 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
     private func report(_ error: Error) {
         let ns = error as NSError
         guard ns.code != NSURLErrorCancelled, ns.domain != "WebKitErrorDomain" || ns.code != 102 else { return }
-        events?.engineLoadFailed(url: ns.userInfo[NSURLErrorFailingURLErrorKey] as? URL, description: ns.localizedDescription)
+        events?.engineLoadFailed(url: ns.userInfo[NSURLErrorFailingURLErrorKey] as? URL, domain: ns.domain, code: ns.code, description: ns.localizedDescription)
     }
 
     // MARK: UI delegate
@@ -1472,6 +1685,11 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
                  for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         let target = navigationAction.request.url
         let clicked = navigationAction.navigationType == .linkActivated || navigationAction.navigationType == .formSubmitted
+        // A magnet or eD2k link that opens elsewhere (target=_blank) opens its preview, not an empty tab.
+        if let target, let scheme = target.scheme?.lowercased(), scheme == "magnet" || scheme == "ed2k" || RemoteScheme(urlScheme: scheme) != nil || MetalinkLink.isMetalink(target) {
+            _ = events?.engineCustomLink(target, linkActivated: clicked && Date().timeIntervalSince(lastGesture) < 2)
+            return nil
+        }
         // A link that opens elsewhere (target=_blank) is a click by definition: it opens as an ordinary tab.
         if clicked, let target { events?.engineOpenInNewTab(url: target, userInitiated: true); return nil }
         // A script's window.open: allowed right after a real click or key press (or on a site the person allowed), and then given a page joined to its opener.
@@ -1504,8 +1722,8 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
                                  placeholder: defaultText ?? "")
     }
 
-    func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin,
-                 initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType) async -> WKPermissionDecision {
+    func webView(_ webView: WKWebView, decideMediaCapturePermissionsFor origin: WKSecurityOrigin,
+                 initiatedBy frame: WKFrameInfo, type: WKMediaCaptureType) async -> WKPermissionDecision {
         let originString = "\(origin.protocol)://\(origin.host)" + (origin.port != 0 ? ":\(origin.port)" : "")
         let kinds: [PermissionType]
         switch type {
@@ -1536,22 +1754,102 @@ final class WebKitDownloads: NSObject, WKDownloadDelegate {
     private let coordinator: DownloadCoordinator
     private var ids: [ObjectIdentifier: UUID] = [:]
     private var observers: [ObjectIdentifier: NSKeyValueObservation] = [:]
+    /// What each live download was when WebKit handed it over (its store, its method, a chosen destination). The web view is only weakly held by WebKit and is gone once
+    /// its tab closes, so nothing about the download may be read from it later.
+    private var contexts: [ObjectIdentifier: BrowserDownloadContext] = [:]
+    /// Downloads WebKit ended (failed or cancelled) before they were given a destination.
+    private var endedEarly = Set<ObjectIdentifier>()
+    private var deciding = Set<ObjectIdentifier>()
+    /// The store each task was started through, so a retry, a resume or a scheduled start goes out through a page of the same store.
+    private var taskStores: [UUID: DownloadStoreKey] = [:]
+    /// Each live download is held until its end is handled, so the identifier used as its key can never be reused by a different download.
+    private var retained: [ObjectIdentifier: WKDownload] = [:]
+
+    /// One token per private (non-persistent) store, for as long as that store lives: the shared private store and every "gone with the tab" store are separate sessions.
+    static let sessions = NSMapTable<WKWebsiteDataStore, NSUUID>(keyOptions: .weakMemory, valueOptions: .strongMemory)
 
     init(coordinator: DownloadCoordinator) {
         self.coordinator = coordinator
     }
 
+    static func storeKey(of webView: WKWebView?) -> DownloadStoreKey {
+        // No web view means nothing is known about the session: a key that matches no page.
+        guard let store = webView?.configuration.websiteDataStore else { return DownloadStoreKey(identifier: nil, isPersistent: false, session: UUID()) }
+        if store.isPersistent { return DownloadStoreKey(identifier: store.identifier, isPersistent: true) }
+        let token = sessions.object(forKey: store) ?? { let t = NSUUID(); sessions.setObject(t, forKey: store); return t }()
+        return DownloadStoreKey(identifier: nil, isPersistent: false, session: token as UUID)
+    }
+
+    /// Takes a download WebKit has just made (from a navigation, a response, Save As, a retry or a resume) and records what it is. Called exactly once per download.
+    func adopt(_ download: WKDownload, saveAs: SaveAsDestination.Choice? = nil) {
+        download.delegate = self
+        let key = ObjectIdentifier(download)
+        guard contexts[key] == nil else { return }
+        contexts[key] = BrowserDownloadContext(store: Self.storeKey(of: download.webView), request: download.originalRequest, saveAs: saveAs)
+        retained[key] = download
+    }
+
+    /// The store a task must be started through again: what was recorded in this run, or else the name of the profile's store kept with the task. nil means it is not known,
+    /// and then no page is used. (A private session is never kept, so a private task is only known while the app that started it is running.)
+    func store(forTask id: UUID?) -> DownloadStoreKey? {
+        guard let id else { return nil }
+        if let known = taskStores[id] { return known }
+        return DownloadStoreKey(persisted: coordinator.ledger.record(id)?.engineMetadata[DownloadStoreKey.metadataKey])
+    }
+
+    /// Records which store a task belongs to: in memory, and (for a profile's own store only) as a plain name kept with the task. No cookie, header or body is stored.
+    func remember(_ id: UUID, _ store: DownloadStoreKey) {
+        if taskStores.count >= 4096 { let live = Set(ids.values); taskStores = taskStores.filter { live.contains($0.key) } }
+        taskStores[id] = store
+        // Who owns a private download: stamped on the (never written down) record, so every list can decide who may see it.
+        if !store.isPersistent, let session = store.session, coordinator.ledger.record(id) != nil { coordinator.ledger.update(id) { $0.privateSession = session } }
+        if let value = store.persistedValue, coordinator.ledger.record(id) != nil {
+            coordinator.ledger.update(id) { $0.engineMetadata[DownloadStoreKey.metadataKey] = value }
+        }
+    }
+
+    var liveContextCount: Int { contexts.count + retained.count + ids.count + endedEarly.count + deciding.count }
+
     nonisolated func download(_ download: WKDownload, decideDestinationUsing response: URLResponse,
                               suggestedFilename: String) async -> URL? {
         // Waits for a free place (or is put off until later, or cancelled while waiting); WebKit fetches nothing until a destination is chosen.
         let source = download.originalRequest?.url
-        guard await coordinator.admit(filename: suggestedFilename, source: source) else { download.cancel { _ in }; return nil }
+        // A resumed download already has its task and its destination: it is not admitted, named or queued again.
+        if let existing = await MainActor.run(body: { coordinator.destination(of: ids[ObjectIdentifier(download)]) }) { return existing }
+        let context = await MainActor.run { () -> BrowserDownloadContext in
+            adopt(download)
+            deciding.insert(ObjectIdentifier(download))
+            return contexts[ObjectIdentifier(download)]!
+        }
+        let privateDownload = context.isPrivate
+        // A private, POST, credentialed or chosen-place download is never put off "for later": a later start would be a plain GET through whatever page is open.
+        let ticket = await coordinator.admitTicket(filename: suggestedFilename, source: source, isPrivate: privateDownload,
+                                                   allowSchedule: !privateDownload && context.isReplayableByAddress && context.saveAs == nil)
+        let key = ObjectIdentifier(download)
+        await MainActor.run { remember(ticket.id, context.store) }
+        guard ticket.admitted else { download.cancel { _ in }; await MainActor.run { forget(key) }; return nil }
+        // WebKit ended the download while it waited for a place: the place is given back, and nothing is started for a download that no longer exists.
+        func ended() async -> Bool {
+            await MainActor.run {
+                guard endedEarly.contains(key) else { return false }
+                coordinator.abandonAdmitted(ticket.id); forget(key); return true
+            }
+        }
+        if await ended() { return nil }
+        // "Skip" for a file that is already there: nothing is fetched, and the list says why. A place the person chose in a save panel was already answered there.
+        if context.saveAs == nil, await coordinator.askAboutDuplicate(suggestedName: suggestedFilename, sourceHost: source?.host, source: source, isPrivate: privateDownload, taskID: ticket.id) { download.cancel { _ in }; await MainActor.run { forget(key) }; return nil }
+        if await ended() { return nil }
         // A big file from a server that can send it in pieces is fetched in six at once, which is several times faster where a site slows each connection.
-        if await takeOverInPieces(download, response: response, source: source, suggestedFilename: suggestedFilename) { return nil }
+        if context.saveAs == nil, await takeOverInPieces(download, response: response, source: source, suggestedFilename: suggestedFilename, taskID: ticket.id, context: context) { await MainActor.run { forget(key) }; return nil }
+        if await ended() { return nil }
         return await MainActor.run {
-            let started = coordinator.begin(suggestedName: suggestedFilename, sourceHost: download.originalRequest?.url?.host, cancel: { download.cancel { _ in } }, suspend: { done in download.cancel { data in done(data) } })
-            let key = ObjectIdentifier(download)
+            let started = coordinator.begin(suggestedName: suggestedFilename, sourceHost: download.originalRequest?.url?.host, sourceURL: download.originalRequest?.url, isPrivate: privateDownload, taskID: ticket.id, protocolID: .webKit,
+                                            saveAs: context.saveAs, staged: true,
+                                            // Cancelling or pausing from here does not always bring a callback back from WebKit, so what was kept for this download is let go here too (idempotent).
+                                            cancel: { [weak self] in download.cancel { _ in }; Task { @MainActor in self?.forget(key) } },
+                                            suspend: { [weak self] done in download.cancel { data in done(data); Task { @MainActor in self?.forget(key) } } })
             ids[key] = started.id
+            deciding.remove(key)
             observers[key] = download.progress.observe(\.fractionCompleted) { [weak self] p, _ in
                 let f = p.fractionCompleted
                 let done = p.completedUnitCount, total = p.totalUnitCount
@@ -1562,8 +1860,12 @@ final class WebKitDownloads: NSObject, WKDownloadDelegate {
     }
 
     /// Checks, without cookies, that the server really sends this file in pieces, then fetches it that way. False means WebKit carries on as usual.
-    nonisolated private func takeOverInPieces(_ download: WKDownload, response: URLResponse, source: URL?, suggestedFilename: String) async -> Bool {
-        guard await MainActor.run(body: { coordinator.segmentedEnabled }), let http = response as? HTTPURLResponse, let source,
+    nonisolated private func takeOverInPieces(_ download: WKDownload, response: URLResponse, source: URL?, suggestedFilename: String, taskID: UUID, context: BrowserDownloadContext) async -> Bool {
+        // Fetching in pieces is done by the app itself, outside the page's web view: never for a private download (its session must stay in its own store, and its tab may be gone),
+        // never while a proxy is on (the pieces would go out directly and show the real address), and only for the https address the pieces will really be asked for.
+        guard source?.scheme?.lowercased() == "https" else { return false }
+        guard await MainActor.run(body: { coordinator.segmentedEnabled && !ProxyState.active && !context.isPrivate && !(download.originalRequest?.url.map { coordinator.noPieces.contains($0.absoluteString) } ?? false) }),
+              let http = response as? HTTPURLResponse, let source,
               PiecePlan.eligible(response: http, request: download.originalRequest) else { return false }
         let total = http.expectedContentLength
         let agent = await MainActor.run { download.webView?.customUserAgent }
@@ -1572,9 +1874,9 @@ final class WebKitDownloads: NSObject, WKDownloadDelegate {
         final class Current: @unchecked Sendable { var downloader: PieceDownloader?; var cancelled = false }
         let current = Current()
         await MainActor.run {
-            let started = coordinator.begin(suggestedName: suggestedFilename, sourceHost: source.host, cancel: { current.cancelled = true; current.downloader?.cancel() })
+            let started = coordinator.begin(suggestedName: suggestedFilename, sourceHost: source.host, sourceURL: source, taskID: taskID, protocolID: .httpPieces, staged: true, cancel: { current.cancelled = true; current.downloader?.cancel() })
             coordinator.note("Fetching \(started.destination.lastPathComponent) in pieces")
-            Task { @MainActor [coordinator] in
+            Task { @MainActor [coordinator, self] in
                 do {
                     // Six connections; a server that refuses that many gets three, and then one, so a limit never loses the download.
                     var lastError: Error = PieceDownloadError.refused
@@ -1590,13 +1892,20 @@ final class WebKitDownloads: NSObject, WKDownloadDelegate {
                         } catch PieceDownloadError.refused { lastError = PieceDownloadError.refused; coordinator.note("Server refused \(pieces) connections") }
                     }
                     if !finishedOK { throw current.cancelled ? CancellationError() : lastError }
+                    DownloadQuarantine.apply(to: started.destination, sourceOrigin: HTTPRequestPolicy.origin(of: source))      // this path used to leave the assembled file unmarked
                     coordinator.finish(started.id, source: source)
                     coordinator.downloadSucceeded(source: source)
                 } catch {
-                    coordinator.discard(started.id)
-                    if !(error is CancellationError) {
-                        coordinator.note("Pieces failed (\(error)); trying the normal download")
-                        coordinator.planRetry(for: source, error: error, resumeData: nil, id: started.id)
+                    if error is CancellationError { coordinator.discard(started.id); return }
+                    if error is PieceDownloadError {
+                        // The server did not keep to what it promised about pieces: the same file is fetched again the ordinary way (through the page, with its own sign-in).
+                        coordinator.discard(started.id)
+                        let fresh = UUID()
+                        self.remember(fresh, context.store)
+                        coordinator.fallBackToPlainDownload(source, newTaskID: fresh)
+                    } else {
+                        let again = coordinator.planRetry(for: source, error: error, resumeData: nil, id: started.id)
+                        coordinator.fail(started.id, source: source, error: error, willRetry: again)
                     }
                 }
             }
@@ -1608,6 +1917,7 @@ final class WebKitDownloads: NSObject, WKDownloadDelegate {
         Task { @MainActor in
             let key = ObjectIdentifier(download)
             if let id = ids[key] { coordinator.finish(id, source: download.originalRequest?.url); coordinator.downloadSucceeded(source: download.originalRequest?.url) }
+            if deciding.contains(key) { endedEarly.insert(key); return }
             forget(key)
         }
     }
@@ -1615,30 +1925,63 @@ final class WebKitDownloads: NSObject, WKDownloadDelegate {
     nonisolated func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
         Task { @MainActor in
             let key = ObjectIdentifier(download)
+            // What the download was is read from what was recorded when it began, never from its web view: that is gone once the tab closes.
+            let context = contexts[key]
+            let replayable = context?.isReplayableByAddress ?? false
             if let id = ids[key] {
                 // With resume data (and a server that allows it) the download can carry on; otherwise it is dropped as before.
                 let source = download.originalRequest?.url
+                // A failure that a retry can fix (the connection dropped, say) is tried again a little later, a few times. A POST or a request with its own credentials is not
+                // repeated from its address.
+                let again = coordinator.planRetry(for: source, error: error, resumeData: resumeData, id: id, replayableByAddress: replayable)
                 if let resumeData, !resumeData.isEmpty { coordinator.interrupt(id, resumeData: resumeData, source: source) }
-                else { coordinator.discard(id) }
-                // A failure that a retry can fix (the connection dropped, say) is tried again a little later, a few times.
-                coordinator.planRetry(for: source, error: error, resumeData: resumeData, id: id)
+                else { coordinator.fail(id, source: source, error: error, willRetry: again, replayableByAddress: replayable) }
+            } else if (error as NSError).code != NSURLErrorCancelled {
+                // A download that was never given a place to write (a resumed one the server no longer has, say) used to end without a word.
+                let source = download.originalRequest?.url
+                coordinator.fail(nil, source: source, error: error, willRetry: false, isPrivate: context?.isPrivate ?? true, replayableByAddress: replayable)
             }
+            // A download still waiting for its destination is told it ended when it asks again; any other is forgotten now.
+            if deciding.contains(key) { endedEarly.insert(key); return }
             forget(key)
         }
     }
 
     func start(_ url: URL, in webView: WKWebView) {
-        webView.startDownload(using: URLRequest(url: url)) { [weak self] download in download.delegate = self }
+        webView.startDownload(using: URLRequest(url: url)) { [weak self] download in self?.adopt(download) }
+    }
+
+    /// Save Link As / Save Image As: fetched by the page's own web view (so its session and sign-in apply), to the place the person chose. The destination is made free first,
+    /// so WebKit is never handed a file that exists.
+    func saveAs(_ url: URL, in webView: WKWebView, chosen: SaveAsDestination.Choice) {
+        webView.startDownload(using: URLRequest(url: url)) { [weak self] download in self?.adopt(download, saveAs: chosen) }
     }
 
     /// Carries on a stopped download from its resume data, using any open page's web view.
-    func resume(_ data: Data, in webView: WKWebView) {
-        webView.resumeDownload(fromResumeData: data) { [weak self] download in download.delegate = self }
+    func resume(_ data: Data, in webView: WKWebView, taskID: UUID? = nil) {
+        webView.resumeDownload(fromResumeData: data) { [weak self] download in
+            guard let self else { return }
+            self.adopt(download)
+            // The resumed download keeps its task's identity, so what it reports (progress, completion, failure) reaches the same record.
+            guard let taskID else { return }
+            let key = ObjectIdentifier(download)
+            ids[key] = taskID
+            observers[key] = download.progress.observe(\.fractionCompleted) { [weak self] p, _ in
+                let f = p.fractionCompleted, done = p.completedUnitCount, total = p.totalUnitCount
+                Task { @MainActor in self?.coordinator.update(taskID, fraction: f, completed: done, total: total) }
+            }
+            coordinator.reattach(taskID, cancel: { download.cancel { _ in } }, suspend: { done in download.cancel { data in done(data) } })
+        }
     }
 
     private func forget(_ key: ObjectIdentifier) {
+        // taskStores (keyed by task, never by address) outlives the download on purpose: a retry or a resume that comes later still has to go out through the same store.
         ids[key] = nil
         observers[key] = nil
+        contexts[key] = nil
+        retained[key] = nil
+        endedEarly.remove(key)
+        deciding.remove(key)
     }
 }
 
@@ -1689,16 +2032,24 @@ final class ScrollReportingWebView: WKWebView {
     // The page's right-click menu on a link: WebKit's own choices, with the ones a tabbed browser is expected to have added after "Open Link".
     var hoveredLink: () -> URL? = { nil }
     var onLinkAction: ((LinkAction, URL) -> Void)?
+    var onSaveAs: ((URL, SaveAsDestination.Choice) -> Void)?
+    var onShowDownloads: (() -> Void)?
     private var menuPoint: CGPoint = .zero
+
+    var pageMenuEnabled: () -> Bool = { false }
+    var onPageAction: ((PageMenuAction, PageMenuTarget) -> Void)?
 
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
         super.willOpenMenu(menu, with: event)
         func raw(_ item: NSMenuItem) -> String { item.identifier?.rawValue ?? "" }
+        menuPoint = gesturePoint(event)
+        addPageChoices(to: menu, raw: raw)
+        addSaveAsChoices(to: menu, raw: raw)
         let at = menu.items.firstIndex { raw($0).contains("OpenLink") && !raw($0).contains("Window") && !raw($0).contains("InNew") }
             ?? menu.items.firstIndex { $0.title == "Open Link" }
         guard let at else { return }
-        menuPoint = gesturePoint(event)
         let choices: [(String, String, LinkAction)] = [
+            ("Open Link in Glance", "rectangle.on.rectangle.angled", .glance),
             ("Open Link in New Tab", "plus.square.on.square", .newTab),
             ("Open Link in Background Tab", "square.stack", .backgroundTab),
             ("Open Link in Split View", "rectangle.split.2x1", .split),
@@ -1711,6 +2062,100 @@ final class ScrollReportingWebView: WKWebView {
             item.image = NSImage(systemSymbolName: choice.1, accessibilityDescription: nil)
             item.representedObject = choice.2
             menu.insertItem(item, at: at + 1 + offset)
+        }
+    }
+
+    /// "Save Link As…" and "Save Image As…", added right after WebKit's own "Download Linked File" / "Download Image" (which already go through the one download manager). They are
+    /// offered only where WebKit itself found something to download, and checked again against what is really under the pointer when chosen.
+    private func addSaveAsChoices(to menu: NSMenu, raw: (NSMenuItem) -> String) {
+        let ids = menu.items.map(raw)
+        var made: [BrowserMenuDownloads.Insertion: NSMenuItem] = [:]
+        func make(_ title: String, _ symbol: String, _ kind: String, at position: Int, rank: Int) {
+            let item = NSMenuItem(title: title, action: kind == "show" ? #selector(runShowDownloads) : #selector(runSaveAs(_:)), keyEquivalent: "")
+            item.target = self
+            item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+            if kind != "show" { item.representedObject = kind }
+            made[BrowserMenuDownloads.Insertion(position: position, rank: rank, kind: kind)] = item
+        }
+        if let i = ids.firstIndex(where: { $0.contains("DownloadLinkedFile") }) { make("Save Link As…", "square.and.arrow.down", "link", at: i + 1, rank: 0) }
+        if let i = ids.firstIndex(where: { $0.contains("DownloadImage") }) { make("Save Image As…", "photo.badge.arrow.down", "image", at: i + 1, rank: 0) }
+        guard let last = made.keys.map(\.position).max() else { return }
+        make("Show Downloads", "arrow.down.circle", "show", at: last, rank: 1)
+        for slot in BrowserMenuDownloads.insertionOrder(Array(made.keys)) {
+            if let item = made[slot] { menu.insertItem(item, at: min(slot.position, menu.items.count)) }
+        }
+    }
+
+    /// Opens the Downloads window of the window this page belongs to (through its tab's owner, the same path as the toolbar and the shortcut), not of whichever window is in front.
+    @objc private func runShowDownloads() { onShowDownloads?() }
+
+    @objc private func runSaveAs(_ sender: NSMenuItem) {
+        guard let kind = sender.representedObject as? String else { return }
+        let point = menuPoint
+        Task { @MainActor in
+            let target = await menuTarget(at: point)
+            let wanted = kind == "image" ? target.image : (target.link ?? hoveredLink())
+            // Checked again here: only an ordinary web address is saved through the page.
+            guard BrowserDownloadRouting.route(.saveFromPage(wanted ?? URL(fileURLWithPath: "/"))) == .webKitSession, let url = wanted else { NSSound.beep(); return }
+            let suggested = DownloadFilename.derive(contentDisposition: nil, url: url).name
+            let panel = NSSavePanel()
+            panel.nameFieldStringValue = suggested
+            panel.canCreateDirectories = true
+            panel.directoryURL = DownloadCoordinator.directory
+            panel.message = "Save “\(url.host ?? "this page")” item"
+            guard panel.runModal() == .OK, let chosen = panel.url else { return }
+            onSaveAs?(url, SaveAsDestination.resolve(chosen))
+        }
+    }
+
+    /// The browser's own choices for what was clicked (a selection, an image, a video, the page itself), kept to a few, before "Inspect Element" if the menu has it.
+    private func addPageChoices(to menu: NSMenu, raw: (NSMenuItem) -> String) {
+        guard pageMenuEnabled() else { return }
+        let ids = menu.items.map(raw) + menu.items.map { $0.title }
+        let ours = PageMenuChoices.choices(for: ids, repositoryPage: url.map { ProviderRoute.recognise($0) != nil } ?? false, downloadTools: url.map { $0.scheme == "http" || $0.scheme == "https" } ?? false)
+        guard !ours.isEmpty else { return }
+        var at = menu.items.firstIndex { raw($0).contains("Inspect") || $0.title.hasPrefix("Inspect") } ?? menu.items.count
+        if at > 0, !menu.items[at - 1].isSeparatorItem { menu.insertItem(.separator(), at: at); at += 1 }
+        for choice in ours {
+            menu.insertItem(menuItem(for: choice), at: at)
+            at += 1
+        }
+    }
+
+    /// One choice as a menu item; one with `children` is a submenu of them.
+    private func menuItem(for choice: PageMenuChoices.Choice) -> NSMenuItem {
+        let item = NSMenuItem(title: choice.title, action: choice.children.isEmpty ? #selector(runPageChoice(_:)) : nil, keyEquivalent: "")
+        item.image = NSImage(systemSymbolName: choice.symbol, accessibilityDescription: nil)
+        if choice.children.isEmpty {
+            item.target = self
+            item.representedObject = choice.action
+        } else {
+            let submenu = NSMenu(title: choice.title)
+            for child in choice.children { submenu.addItem(menuItem(for: child)) }
+            item.submenu = submenu
+        }
+        return item
+    }
+
+    /// What is under the point that was right-clicked, asked of the page when a choice is made: a link, a picture, the selected text.
+    private func menuTarget(at point: CGPoint) async -> PageMenuTarget {
+        let script = """
+        const e = document.elementFromPoint(x, y);
+        const a = e && e.closest ? e.closest('a[href]') : null;
+        const i = e && e.tagName === 'IMG' ? (e.currentSrc || e.src) : null;
+        return { link: a ? a.href : null, image: i, selection: String(window.getSelection ? window.getSelection() : '') };
+        """
+        let answer = try? await callAsyncJavaScript(script, arguments: ["x": point.x, "y": point.y], contentWorld: .defaultClient) as? [String: Any]
+        return PageMenuTarget(answer)
+    }
+
+    @objc private func runPageChoice(_ sender: NSMenuItem) {
+        guard let action = sender.representedObject as? PageMenuAction else { return }
+        let point = menuPoint
+        Task { @MainActor in
+            var target = await menuTarget(at: point)
+            if target.link == nil { target.link = hoveredLink() }
+            onPageAction?(action, target)
         }
     }
 
@@ -1861,38 +2306,6 @@ extension WebKitTab: UIGestureRecognizerDelegate {
 #endif
 
 
-#if os(iOS)
-/// When the person last touched the screen anywhere in the app, including the system's full-screen video player, which is a window of its own.
-@MainActor
-final class UserTouchClock: NSObject, UIGestureRecognizerDelegate {
-    static let shared = UserTouchClock()
-    private(set) var last = Date.distantPast
-    private var observed = Set<ObjectIdentifier>()
-    private var installed = false
-
-    func install() {
-        guard !installed else { attachAll(); return }
-        installed = true
-        NotificationCenter.default.addObserver(forName: UIWindow.didBecomeVisibleNotification, object: nil, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.attachAll() } }
-        attachAll()
-    }
-
-    private func attachAll() {
-        for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
-            for window in scene.windows where observed.insert(ObjectIdentifier(window)).inserted {
-                let tap = UITapGestureRecognizer(target: self, action: #selector(touched))
-                tap.cancelsTouchesInView = false; tap.delaysTouchesBegan = false; tap.delaysTouchesEnded = false
-                tap.delegate = self
-                window.addGestureRecognizer(tap)
-            }
-        }
-    }
-
-    @objc private func touched() { last = Date() }
-
-    func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
-}
-#endif
 
 
 // MARK: - Page actions for AI tools the person has allowed
@@ -1992,5 +2405,36 @@ extension WebKitTab {
     func agentScroll(down: Bool) async {
         _ = try? await webView.callAsyncJavaScript("window.scrollBy({ top: (down ? 1 : -1) * Math.round(window.innerHeight * 0.85), behavior: 'instant' });",
                                                    arguments: ["down": down], contentWorld: .defaultClient)
+    }
+}
+
+
+/// The pictures of a gallery page: for each picture the full-size file its link points to if there is one, else the largest version it offers. Only reads the page, once, when asked.
+enum GalleryExtractor {
+    static let limit = 500
+    static let script = """
+        const limit = 500, out = [], seen = new Set();
+        const isImg = u => /\\.(jpe?g|png|gif|webp|avif|heic|tiff?|bmp|svg)(\\?|#|$)/i.test(u);
+        let truncated = false;
+        function add(u) { try { const a = new URL(u, document.baseURI); if (a.protocol !== 'http:' && a.protocol !== 'https:') return; a.hash = ''; const s = a.href; if (seen.has(s)) return; if (out.length >= limit) { truncated = true; return; } seen.add(s); out.push(s); } catch (e) {} }
+        for (const img of Array.from(document.images)) {
+          if (img.closest('[aria-hidden="true"]')) continue;
+          const w = img.naturalWidth || 0, h = img.naturalHeight || 0;
+          if (w && h && (w < 160 || h < 160)) continue;          // icons, avatars and spacers are not gallery pictures
+          const link = img.closest('a[href]');
+          if (link && isImg(link.href)) { add(link.href); continue; }
+          let best = img.currentSrc || img.src, bw = 0;
+          if (!best || best.startsWith('data:')) best = img.getAttribute('data-src') || img.getAttribute('data-lazy-src') || img.getAttribute('data-original') || best;
+          for (const part of (img.getAttribute('srcset') || '').split(/,\\s+/)) { const p = part.trim().split(/\\s+/); const d = parseFloat(p[1]) || 0; if (p[0] && d >= bw) { bw = d; best = p[0]; } }
+          if (best) add(best);
+        }
+        return { urls: out, truncated: truncated };
+        """
+
+    @MainActor
+    static func collect(from webView: WKWebView) async -> LinkPageSnapshot {
+        let result = try? await webView.callAsyncJavaScript(script, contentWorld: .defaultClient) as? [String: Any]
+        let urls = (result?["urls"] as? [String]) ?? []
+        return LinkPageSnapshot(candidates: Array(urls.prefix(limit)), truncated: (result?["truncated"] as? Bool) ?? false)
     }
 }

@@ -141,7 +141,7 @@ final class AgentBridge: ObservableObject, AgentHost {
 
     /// Shares a tab, or stops sharing it (whether the person shared it or a tool opened it).
     func toggleShare(_ tab: TabController) {
-        if tab.isPrivate { return }
+        if !tab.privacy.canShareWithAutomation { return }
         if isShared(tab), let h = handle(for: tab) {
             sharedTabs.remove(h); ownedTabs.remove(h)
             note("Unshared", tab.displayTitle, .done)
@@ -167,11 +167,11 @@ final class AgentBridge: ObservableObject, AgentHost {
     /// The window that opens new tabs for a tool.
     private var model: BrowserModel? {
         let all = BrowserModel.activeModels.allObjects
-        return all.first(where: { !$0.isSecondary && !$0.isGuest }) ?? all.first(where: { !$0.isGuest })
+        return all.first(where: { !$0.isSecondary && $0.isOfferedToAutomation }) ?? all.first(where: { $0.isOfferedToAutomation })
     }
 
-    /// Every window, because a tab may be shared in any of them.
-    private var allModels: [BrowserModel] { BrowserModel.activeModels.allObjects.filter { !$0.isGuest } }
+    /// Every window, because a tab may be shared in any of them. Guest and private windows are never offered to the AI-tool connection.
+    private var allModels: [BrowserModel] { BrowserModel.activeModels.allObjects.filter { $0.isOfferedToAutomation } }
 
     private func note(_ tool: String, _ detail: String, _ outcome: AgentLogEntry.Outcome) {
         log.append(AgentLogEntry(tool: tool, detail: String(detail.prefix(160)), outcome: outcome))
@@ -209,9 +209,14 @@ final class AgentBridge: ObservableObject, AgentHost {
 
     /// A tab the person shared (or one a tool opened), never a private one.
     private func sharedTab(_ arguments: [String: Any]) -> (tab: TabController, window: BrowserModel)? {
-        guard let id = number(arguments["tab_id"]), let found = handles[id]?.tab, !found.isPrivate, isShared(found),
+        guard let id = number(arguments["tab_id"]), let found = handles[id]?.tab, found.privacy.canShareWithAutomation, isShared(found),
               let window = allModels.first(where: { $0.tabs.contains(where: { $0 === found }) }) else { return nil }
         return (found, window)
+    }
+
+    /// True when two readings of an element describe the same control.
+    private static func sameElement(_ a: AgentPolicy.Element, _ b: AgentPolicy.Element) -> Bool {
+        a.tag == b.tag && a.text == b.text && a.href == b.href && a.label == b.label
     }
 
     private func perform(_ name: String, _ args: [String: Any], _ model: BrowserModel, _ started: Int) async -> AgentToolResult {
@@ -221,8 +226,10 @@ final class AgentBridge: ObservableObject, AgentHost {
 
         switch name {
         case "list_tabs":
-            let rows = allModels.flatMap { $0.tabs }.filter { !$0.isPrivate && isShared($0) && !$0.isBlank }.compactMap { tab -> String? in
+            let rows = allModels.flatMap { $0.tabs }.filter { $0.privacy.canShareWithAutomation && isShared($0) && !$0.isBlank }.compactMap { tab -> String? in
                 guard let h = handle(for: tab) else { return nil }
+                // A shared tab that has moved to a website the person has not allowed shows no title or address.
+                guard let origin = AgentPolicy.origin(of: tab.url), readableOrigins.contains(origin) || allowedOrigins.contains(origin) else { return "[\(h)] (on a website that has not been allowed yet; read_page asks the person)" }
                 return "[\(h)] \(AgentPolicy.prepare(pageText: tab.displayTitle, limit: 120)) — \(AgentPolicy.safeURL(tab.url?.absoluteString ?? ""))"
             }
             note(name, "\(rows.count) tab(s)", .done)
@@ -254,6 +261,7 @@ final class AgentBridge: ObservableObject, AgentHost {
             guard let (target, _) = sharedTab(args) else { return fail(missing, .refused) }
             guard let index = number(args["element"]) else { return fail("element must be a number from read_page.") }
             guard let host = target.url?.host?.lowercased(), await allowOrigin(target.url, wanting: "click and type on") else { return fail("The person did not allow this website.", .denied) }
+            let origin = AgentPolicy.origin(of: target.url)
             guard let info = await target.engine.agentInspect(index) else { return fail("That element is no longer on the page. Call read_page again.") }
             let element = Self.element(from: info)
             switch AgentPolicy.click(element, pageHost: host, trustLinks: AISwitches.shared.linksWithoutAsking) {
@@ -268,7 +276,9 @@ final class AgentBridge: ObservableObject, AgentHost {
                 guard await allowOrigin(destination, wanting: "follow a link to") else { return fail("The person did not allow \(destination.host ?? "that website").", .denied) }
             }
             // The last check before the page is changed.
-            guard live(started), target.url?.host?.lowercased() == host else { return fail(stopped, .refused) }
+            guard live(started), AgentPolicy.origin(of: target.url) == origin else { return fail(stopped, .refused) }
+            // The page may have changed while the person was deciding: the same element must still be the one they approved.
+            guard let again = await target.engine.agentInspect(index), Self.sameElement(Self.element(from: again), element) else { return fail("The page changed while the question was open. Call read_page again.", .refused) }
             guard await target.engine.agentClick(index) else { return fail("The click did not work. Call read_page again.") }
             note(name, "Clicked [\(index)] “\(element.text.isEmpty ? element.label : element.text)” on \(host)", .done)
             return AgentToolResult(text: "Clicked. Call read_page again to see the result.")
@@ -278,6 +288,7 @@ final class AgentBridge: ObservableObject, AgentHost {
             guard let index = number(args["element"]), let text = args["text"] as? String else { return fail("element and text are required.") }
             let enter = (args["press_enter"] as? Bool) ?? false
             guard let host = target.url?.host?.lowercased(), await allowOrigin(target.url, wanting: "click and type on") else { return fail("The person did not allow this website.", .denied) }
+            let origin = AgentPolicy.origin(of: target.url)
             guard let info = await target.engine.agentInspect(index) else { return fail("That element is no longer on the page. Call read_page again.") }
             let element = Self.element(from: info)
             switch AgentPolicy.type(element, text: text, pageHost: host) {
@@ -292,7 +303,8 @@ final class AgentBridge: ObservableObject, AgentHost {
                 note(name, "Asked before pressing Return in [\(index)] on \(host)", .asked)
                 guard await confirm(question) else { return fail("The person said no.", .denied) }
             }
-            guard live(started), target.url?.host?.lowercased() == host else { return fail(stopped, .refused) }
+            guard live(started), AgentPolicy.origin(of: target.url) == origin else { return fail(stopped, .refused) }
+            guard let again = await target.engine.agentInspect(index), Self.sameElement(Self.element(from: again), element) else { return fail("The page changed while the question was open. Call read_page again.", .refused) }
             guard await target.engine.agentType(index, text: text, pressEnter: enter) else { return fail("Typing did not work. Call read_page again.") }
             // What was typed is not written to the log, only how much.
             note(name, "Typed \(text.count) character(s) into [\(index)] on \(host)\(enter ? ", then Return" : "")", .done)

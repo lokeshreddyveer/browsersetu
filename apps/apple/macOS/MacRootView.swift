@@ -17,6 +17,12 @@ private struct LayoutSignature: Equatable {
     var visible: Bool
     var rail: Bool
     var position: SidebarPosition
+    // Full screen, the Custom options and the auto-hide choices also move things; without them in here those changes popped into place.
+    var fullScreen: Bool
+    var tabLayout: TabLayout
+    var singleToolbar: Bool
+    var autoHides: Bool
+    var sidebarAutoHide: Bool
 }
 
 struct MacRootView: View {
@@ -28,11 +34,17 @@ struct MacRootView: View {
     private var onLeft: Bool { model.sidebarPosition == .left }
     private var pinned: Bool { model.sidebarVisible && !model.focusMode }
     private var peekEnabled: Bool {
-        !model.focusMode && (model.sidebarRail || !model.sidebarVisible) &&
-            (model.sidebarAutoHide || model.effectiveTabLayout == .sidebar)
+        !model.focusMode && !model.floatingAddressVisible && (model.sidebarRail || !model.sidebarVisible) &&
+            (LayoutRules.sidebarAutoHides(preset: model.layoutPreset, sidebarAutoHide: model.sidebarAutoHide) || model.effectiveTabLayout == .sidebar)
     }
-    private var topInset: CGFloat { model.singleToolbar ? 46 : (columnBar ? 40 : 36) }
-    private var toolbarInset: CGFloat { model.windowFullScreen ? 10 : 84 }
+    private var topInset: CGFloat { (model.singleToolbar || floatingLayout) ? LayoutMetrics.sidebarTopBarless : (columnBar ? LayoutMetrics.sidebarTopColumnBar : LayoutMetrics.sidebarTopWithBar) }
+    /// The width of the address field in the standard top bar: what the bar itself reports, so the dropdown always matches it (the bar sits in a narrower column beside a pinned
+    /// sidebar, and with a different leading inset there). Before the bar has reported, the same rule applied to the window.
+    private func suggestionFieldWidth(window: CGFloat) -> CGFloat {
+        if model.topBarFieldWidth > 0 { return model.topBarFieldWidth }
+        return ToolbarPriority(fitting: window, leadingInset: toolbarInset, extras: model.toolbarExtrasCount, visible: model.toolbarVisibility).fieldWidth(window: window, leadingInset: toolbarInset)
+    }
+    private var toolbarInset: CGFloat { LayoutMetrics.toolbarLeadingInset(fullScreen: model.windowFullScreen) }
     private var topBarVisible: Bool { !model.focusMode && !model.singleToolbar && !model.autoHidesToolbar && !model.topBarHidden }
     /// The Floating layout: no bar, just the pill and the search button over the page.
     private var floatingLayout: Bool { model.topBarHidden && !model.focusMode }
@@ -51,7 +63,7 @@ struct MacRootView: View {
     private var foldedAway: Bool { model.chromeCollapsed && model.canCollapseChrome }
     /// While reading in the Floating layout the pill slides up out of the way (the Search pill stays).
     private var pillScrolledAway: Bool { floatingLayout && model.canFoldPill && model.chromeCollapsed }
-    private var barHeight: CGFloat { model.singleRow ? InlineBar.height : 40 + (model.effectiveTabLayout == .compact ? (model.density == .compact ? 28 : 32) : model.density.stripHeight) }
+    private var barHeight: CGFloat { model.singleRow ? InlineBar.height : LayoutMetrics.toolbarHeight + (model.stripHiddenForSingleTab ? 0 : model.density.stripHeight) }
     private var cardLeading: CGFloat { pinned && onLeft ? 0 : WindowInset.gap }
     private var cardTrailing: CGFloat { pinned && !onLeft ? 0 : WindowInset.gap }
 
@@ -70,9 +82,12 @@ struct MacRootView: View {
                         Color.clear
                             .frame(height: foldedAway ? 0 : barHeight)
                             .transaction { $0.animation = nil }
+                            // The one change of room that is animated: the strip leaving or returning as the tab count changes.
+                            .animation(.easeOut(duration: 0.2), value: model.stripHiddenForSingleTab)
                             .overlay(alignment: .top) {
                                 VStack(spacing: 0) { TopBar(leadingInset: toolbarInset); tabRow }
                                     .background { if let tab = model.active { ToolbarTintLayer(tab: tab) } }
+                                    .overlay { PrivateWindowTintLayer() }
                                     .frame(height: barHeight, alignment: .top)
                                     .offset(y: foldedAway ? -barHeight : 0)
                                     .opacity(foldedAway ? 0 : 1)
@@ -96,11 +111,12 @@ struct MacRootView: View {
                                                edgeWidth: model.sidebarRail ? CGFloat(sidebarRailWidth) : peekZoneWidth,
                                                panelWidth: CGFloat(model.sidebarWidth) + WindowInset.gap + 8, peek: peek)
                                 .frame(width: 0, height: 0)
-                            if peek.revealed { PeekSidebar(peek: peek, topInset: floatingLayout ? 46 : topInset) }
+                            if peek.revealed { PeekSidebar(peek: peek, topInset: topInset) }
                         }
                     }
                 }
-                if !model.focusMode && model.autoHidesToolbar && !model.floatingAddressVisible && !model.paletteVisible {
+                // The Floating layout has no toolbar to reveal (the pill is its address bar): a second one sliding in under the pill is the clash this stops.
+                if !model.focusMode && model.autoHidesToolbar && !floatingLayout && !model.floatingAddressVisible && !model.paletteVisible {
                     EdgeHoverZone { toolbarPeek.edge($0) }.frame(height: 6)
                     if toolbarPeek.revealed {
                         VStack(spacing: 0) {
@@ -115,17 +131,20 @@ struct MacRootView: View {
                 if (topBarVisible || toolbarPeek.revealed) && !model.floatingAddressVisible {
                     SuggestionsOverlay(address: model.addressBar)
                         .frame(width: model.singleRow ? max(model.inlineField.width, 440)
-                               : ToolbarPriority(fitting: geometry.size.width, leadingInset: toolbarInset, extras: model.toolbarExtrasCount).fieldWidth(window: geometry.size.width, leadingInset: toolbarInset))
+                               : suggestionFieldWidth(window: geometry.size.width))
                         .frame(maxWidth: .infinity, alignment: model.singleRow ? .leading : .center)
                         .padding(.leading, model.singleRow ? min(model.inlineField.x, max(8, geometry.size.width - 448)) : 0)
-                        .padding(.top, model.singleRow ? InlineBar.height : 40)
+                        .padding(.top, model.singleRow ? InlineBar.height : LayoutMetrics.toolbarHeight)
+                        // With vertical tabs and a separate toolbar the field is centred in the column beside the sidebar, not in the whole window.
+                        .padding(.leading, columnBar && pinned && onLeft ? CGFloat(model.sidebarWidth) : 0)
+                        .padding(.trailing, columnBar && pinned && !onLeft ? CGFloat(model.sidebarWidth) : 0)
                 }
                 if model.singleToolbar && !model.focusMode && !foldedAway {
                     // No top bar: a strip above the page still drags the window.
-                    WindowDragStrip().frame(height: 10).frame(maxHeight: .infinity, alignment: .top)
+                    WindowDragStrip().frame(height: WindowInset.dragStrip).frame(maxHeight: .infinity, alignment: .top)
                 }
                 if foldedAway || floatingLayout {
-                    WindowDragStrip().frame(height: 12).frame(maxHeight: .infinity, alignment: .top)
+                    WindowDragStrip().frame(height: WindowInset.dragStrip).frame(maxHeight: .infinity, alignment: .top)
                     if floatingLayout && model.pillCollapsed {
                         PillHandle()
                             .padding(.top, 4)
@@ -135,14 +154,17 @@ struct MacRootView: View {
                     } else if !pillScrolledAway {
                         if floatingLayout && model.floatingAddressVisible {
                             // The address pill itself becomes the search field, in the same place; there is no second pill.
-                            FloatingSearchPill(onRight: false, expandedWidth: max(260, min(480, geometry.size.width - 260)))
+                            FloatingSearchPill(onRight: false, expandedWidth: max(260, min(480, geometry.size.width - 260 - (pinned ? CGFloat(model.sidebarWidth) : 0))))
                                 .padding(.top, WindowInset.pillTop - 1)
+                                .padding(.leading, pinned && onLeft ? CGFloat(model.sidebarWidth) : 0).padding(.trailing, pinned && !onLeft ? CGFloat(model.sidebarWidth) : 0)
                                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                                 .transition(.opacity)
                                 .zIndex(6)
                         } else {
                             FloatingPill()
                                 .padding(.top, WindowInset.pillTop)
+                                // Centred over the page, not over the whole window: a docked sidebar would otherwise sit under it.
+                                .padding(.leading, pinned && onLeft ? CGFloat(model.sidebarWidth) : 0).padding(.trailing, pinned && !onLeft ? CGFloat(model.sidebarWidth) : 0)
                                 .frame(maxHeight: .infinity, alignment: .top)
                                 .transition(.move(edge: .top).combined(with: .opacity))
                                 .zIndex(4)
@@ -185,7 +207,8 @@ struct MacRootView: View {
                     FloatingAddressBar().zIndex(5).transition(.opacity)
                 }
                 // Whenever something essential would only appear at a window edge, a small handle on screen leads to all of it.
-                if !model.focusMode, model.layoutState(width: geometry.size.width).needsHandle {
+                // Not while the toolbar it leads to is already slid down (the handle sat on the middle of its address field) or the address bar is open.
+                if !model.focusMode, !toolbarPeek.revealed, !model.floatingAddressVisible, model.layoutState(width: geometry.size.width).needsHandle {
                     LayoutHandle().padding(.top, 3).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).zIndex(3).transition(.opacity)
                 }
             }
@@ -193,6 +216,7 @@ struct MacRootView: View {
             .onChange(of: geometry.size.width) { _, width in model.windowWidth = width }
         }
         .ignoresSafeArea(.container, edges: .top)
+        .downloadFlight(model.downloads)
         // Behind the title bar too: a background does not reach into the safe area by itself, and the strip above the toolbar showed the system's grey instead of the theme.
         .background(WindowBackdrop().ignoresSafeArea())
         .background(WindowObserver { model.windowFullScreen = $0 })
@@ -213,19 +237,24 @@ struct MacRootView: View {
                 model.showSettingsTab()
                 return true
             }
+            #if DEBUG
+            // Debug only (`-UIOpenSettings downloads`, for UI tests): opens Settings on that pane at launch, so a test of a Settings pane does not press ⌘, and click through the sidebar first.
+            if let name = UserDefaults.standard.string(forKey: "UIOpenSettings"), let panel = SettingsPanel(rawValue: name) {
+                DispatchQueue.main.async { SettingsRouter.open(panel) }
+            }
+            #endif
         }
         .modifier(SystemTranslation())
-        // Downloads show their progress on the Dock icon.
-        .onReceive(model.downloads.$active) { active in
-            if active.isEmpty { NSApp.dockTile.badgeLabel = nil }
-            else {
-                let average = active.values.map(\.fraction).reduce(0, +) / Double(active.count)
-                NSApp.dockTile.badgeLabel = "\(Int((average * 100).rounded()))%"
-            }
+        // The Dock icon says how many downloads are running (or their combined progress when every size is known), and shows "!" for a problem. One calculation shared with the toolbar.
+        .onReceive(model.downloads.$active.combineLatest(model.downloads.$failures, model.downloads.$waiting).receive(on: DispatchQueue.main)) { _, _, _ in
+            NSApp.dockTile.badgeLabel = DownloadIndicators.make(model.downloads).badge
         }
         // Layout changes (a preset, the sidebar pinned, collapsed to icons, moved) glide instead of jumping.
         .motion(.spring(response: 0.4, dampingFraction: 0.88), value: LayoutSignature(preset: model.layoutPreset, visible: model.sidebarVisible,
-                                                                                    rail: model.sidebarRail, position: model.sidebarPosition))
+                                                                                    rail: model.sidebarRail, position: model.sidebarPosition,
+                                                                                    fullScreen: model.windowFullScreen, tabLayout: model.effectiveTabLayout,
+                                                                                    singleToolbar: model.singleToolbar, autoHides: model.autoHidesToolbar,
+                                                                                    sidebarAutoHide: model.sidebarAutoHide))
         .motion(.easeOut(duration: 0.2), value: model.focusMode)
         .environment(\.holdBrowserChrome, { hold in peek.hold(hold); toolbarPeek.hold(hold) })
         .sheet(item: $model.sheet) { SheetContainer(sheet: $0) }
@@ -244,8 +273,8 @@ struct MacRootView: View {
         .onChange(of: model.floatingAddressVisible) { _, visible in
             if visible { toolbarPeek.reset(); peek.reset() }
         }
-        .onReceive(model.addressBar.$isEditing.removeDuplicates()) { toolbarPeek.editing($0) }
-        .onReceive(NotificationCenter.default.publisher(for: NSMenu.didBeginTrackingNotification)) { _ in
+        // Typing in a field that is in a peeked panel keeps the panel open, the sidebar's as well as the toolbar's, whatever the pointer does.
+        .onReceive(model.addressBar.$isEditing.removeDuplicates()) { toolbarPeek.editing($0); peek.editing($0) }        .onReceive(NotificationCenter.default.publisher(for: NSMenu.didBeginTrackingNotification)) { _ in
             peek.menu(true); toolbarPeek.menu(true)
         }
         .onReceive(NotificationCenter.default.publisher(for: NSMenu.didEndTrackingNotification)) { _ in
@@ -265,7 +294,7 @@ struct MacRootView: View {
 
     @ViewBuilder private var tabRow: some View {
         switch model.effectiveTabLayout {
-        case .separate: HorizontalTabStrip().contextMenu { ToolbarContextMenu() }
+        case .separate: if !model.stripHiddenForSingleTab { HorizontalTabStrip().contextMenu { ToolbarContextMenu() } }
         case .compact: CompactTabStrip().contextMenu { ToolbarContextMenu() }
         case .sidebar: EmptyView()
         }
@@ -292,6 +321,10 @@ struct MainColumn: View {
                         if let tab = model.active {
                             ContentPanels(active: tab)
                                 .overlay(alignment: .top) { LoadingBar(tab: tab).id(tab.id) }
+                                // The way back to the top of a long page, for a few seconds after moving back toward it.
+                                .overlay(alignment: .bottomLeading) {
+                                    if model.backToTopVisible, !model.overviewVisible { MacBackToTopPill().padding(.leading, 16).padding(.bottom, 16) }
+                                }
                                 // A card at the foot of the page, clear of every toolbar layout.
                                 .overlay(alignment: .bottom) { WebStoreBanner().padding(.bottom, 16).motion(.easeOut(duration: 0.2), value: model.storePageExtensionID) }
                         } else {
@@ -312,25 +345,20 @@ struct MainColumn: View {
             if let floating = model.floatingPanel {
                 FloatingPanelView(sheet: floating).transition(.opacity).zIndex(5)
             }
+            GlanceLayer(glance: model.glance).zIndex(6)
+            FloatingPlayerLayer().zIndex(7)
             if model.overviewVisible { TabOverview().transition(.opacity.combined(with: .scale(scale: 0.98))).zIndex(3) }
             if model.showSetup { SetupAssistantView().transition(.opacity).zIndex(10) }
+            if model.privateChoicePending { PrivateChoiceCard().transition(.opacity).zIndex(11) }
             if model.paletteVisible { CommandPalette().transition(.opacity).zIndex(4) }
         }
         .motion(.easeOut(duration: 0.16), value: model.overviewVisible)
+        .motion(.easeOut(duration: 0.16), value: model.privateChoicePending)
         .motion(.spring(response: 0.34, dampingFraction: 0.88), value: model.floatingPanel)
         .motion(.spring(response: 0.32, dampingFraction: 0.9), value: model.findVisible)
         .motion(.easeOut(duration: 0.14), value: model.activeID)
         .motion(.easeOut(duration: 0.12), value: model.paletteVisible)
         .motion(.easeOut(duration: 0.12), value: model.floatingAddressVisible)
-    }
-
-    /// Horizontal presentation only. Vertical tabs live in the sidebar, so nothing is drawn twice.
-    @ViewBuilder private var tabRow: some View {
-        switch model.effectiveTabLayout {
-        case .separate: HorizontalTabStrip().contextMenu { ToolbarContextMenu() }
-        case .compact: CompactTabStrip().contextMenu { ToolbarContextMenu() }
-        case .sidebar: EmptyView()
-        }
     }
 }
 
@@ -340,16 +368,7 @@ struct FloatingAddressBar: View {
     @State private var engineMenuOpen = false
     @State private var closeTask: DispatchWorkItem?
 
-    /// In the Floating layout the panel opens where the Search button is, so it feels like the button itself opened up. Elsewhere
-    /// it opens at the top centre.
-    private var anchored: Bool { model.topBarHidden && !model.focusMode }
-    private var onRight: Bool { model.sidebarPosition == .left }
-
-    private var sidePadding: (leading: CGFloat, trailing: CGFloat) {
-        guard anchored else { return (20, 20) }
-        return onRight ? (0, WindowInset.pillTop + 2) : (model.windowFullScreen ? 10 : 84, 0)
-    }
-
+    /// Opens at the top centre. (The Floating layout has no separate panel: its pill turns into the search field in place.)
     var body: some View {
         // One glass panel: the field on top, the suggestions under it, the keys at the bottom. No dimmed backdrop (it would swallow
         // scrolling): clicking the page ends the editing, and that closes the panel.
@@ -368,10 +387,10 @@ struct FloatingAddressBar: View {
         .background(Obsidian.fill.opacity(0.97), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Obsidian.edge, lineWidth: 0.6))
         .shadow(color: .black.opacity(0.4), radius: 36, y: 20)
-        .frame(maxWidth: anchored ? 440 : 620)
-        .padding(.leading, sidePadding.leading).padding(.trailing, sidePadding.trailing)
-        .padding(.top, anchored ? WindowInset.pillTop - 1 : 90)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: anchored ? (onRight ? .topTrailing : .topLeading) : .top)
+        .frame(maxWidth: 620)
+        .padding(.horizontal, 20)
+        .padding(.top, 90)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .motion(.spring(response: 0.32, dampingFraction: 0.88), value: model.addressBar.suggestions.count)
         // Done as soon as editing ends: Return, Escape, or clicking away. A short wait first: choosing a search engine from the menu
         // briefly takes the focus off the field, and that must not close the panel.
@@ -393,10 +412,6 @@ struct FloatingAddressBar: View {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("floating-address-bar")
     }
-}
-
-struct Hairline: View {
-    var body: some View { Rectangle().fill(Color.primary.opacity(0.09)).frame(height: 0.5) }
 }
 
 /// In focus mode the toolbar is gone; this slim band keeps the connection state visible and gives the way back.
@@ -614,6 +629,7 @@ struct PageArea: View {
             else if let panel = tab.panelSheet { PanelTabView(sheet: panel, tab: tab).chromeFill().transition(.opacity) }
             else if tab.isBlank { StartPageView(isPrivate: tab.isPrivate).contextMenu { if !tab.isPrivate { StartPageContextMenu() } } }
         }
+        .tabErrorOverlay(tab)
         .overlay(alignment: .bottomTrailing) { if model.workbench.showSizeHUD { SizeHUD() } }
         .overlay(alignment: .topLeading) {
             if model.isGuest {
@@ -621,6 +637,7 @@ struct PageArea: View {
                     .padding(.horizontal, 10).padding(.vertical, 5).background(Capsule().fill(Color.indigo.opacity(0.85))).padding(10).allowsHitTesting(false)
                     .accessibilityLabel("Guest window. Nothing is remembered.")
             }
+            if model.isPrivateWindow { PrivateWindowBadge().transition(.opacity) }
         }
         .overlay(alignment: .top) {
             if let hint = model.gestureHint {
@@ -770,7 +787,7 @@ struct WebPanelView: View {
             }
             .padding(.horizontal, 12).frame(height: 38)
             Divider()
-            EngineViewHost(view: tab.hostView)
+            EngineViewHost(view: tab.hostView).tabErrorOverlay(tab, compact: true)
         }
         .frame(width: 380)
         .themedBar(fallback: .regularMaterial)
@@ -788,26 +805,39 @@ struct FloatingPanelView: View {
     @EnvironmentObject var model: BrowserModel
     let sheet: Sheet
     @State private var shown = false
+    /// Where the card has been dragged to (Downloads only), kept for as long as it is open, and the part of a drag still in progress.
+    @State private var placed = CGSize.zero
+    @State private var live = CGSize.zero
+
+    /// A drag ends where it is let go, but never so far that the card could be lost off the edge of the window.
+    private func settleMove() {
+        let limit = CGSize(width: 420, height: 240)
+        placed = CGSize(width: min(max(placed.width + live.width, -limit.width), limit.width), height: min(max(placed.height + live.height, -limit.height), limit.height))
+        live = .zero
+    }
 
     var body: some View {
         ZStack {
             Color.black.opacity(shown ? 0.38 : 0).ignoresSafeArea().contentShape(Rectangle())
                 .onTapGesture { close() }
             VStack(spacing: 0) {
-                HStack(spacing: 8) {
-                    Spacer()
-                    pill("sidebar.right", "Dock beside the page") {
-                        animated(.easeOut(duration: 0.2)) { model.panelMode = .dock; model.floatingPanel = nil; model.sheet = sheet }
+                // Downloads has a header of its own (title, search, controls, and the Close button at its end), so it has no empty strip above it.
+                if sheet != .downloads {
+                    HStack(spacing: 8) {
+                        Spacer()
+                        pill("sidebar.right", "Dock beside the page") {
+                            animated(.easeOut(duration: 0.2)) { model.panelMode = .dock; model.floatingPanel = nil; model.sheet = sheet }
+                        }
+                        pill("xmark", "Close") { close() }.keyboardShortcut(.cancelAction)
                     }
-                    pill("xmark", "Close") { close() }.keyboardShortcut(.cancelAction)
+                    .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 2)
                 }
-                .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 2)
                 NavigationStack {
                     Group {
                         switch sheet {
                         case .bookmarks: BookmarksPanel()
                         case .history: HistoryPanel()
-                        case .downloads: DownloadsPanel(coordinator: model.downloads)
+                        case .downloads: DownloadsDashboard()
                         default: EmptyView()
                         }
                     }
@@ -816,15 +846,20 @@ struct FloatingPanelView: View {
                 .settlesBeforeShowing()
             }
             .themedSurface()
-            .frame(width: 580).frame(maxHeight: 600)
-            .fixedSize(horizontal: false, vertical: true)
+            // Downloads is a table and needs room; the other panels keep their narrow card.
+            .frame(width: sheet == .downloads ? nil : 580).frame(maxWidth: sheet == .downloads ? 1000 : nil)
+            .frame(height: sheet == .downloads ? 580 : nil).frame(maxHeight: 600)
+            .fixedSize(horizontal: false, vertical: sheet != .downloads)
             .environment(\.panelFitsContent, true)
+            .environment(\.panelClose, sheet == .downloads ? { close() } : nil)
+            .environment(\.panelMover, sheet == .downloads ? PanelMover(move: { live = $0 }, end: { settleMove() }) : nil)
             .themedFill(in: RoundedRectangle(cornerRadius: 22, style: .continuous), fallback: .regularMaterial)
             .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.5))
             .shadow(color: .black.opacity(0.4), radius: 40, y: 18)
             .scaleEffect(shown ? 1 : 0.96).opacity(shown ? 1 : 0)
             .padding(.vertical, 56).padding(.horizontal, 24)
+            .offset(x: placed.width + live.width, y: placed.height + live.height)
         }
         .onAppear { animated(.spring(response: 0.34, dampingFraction: 0.88)) { shown = true } }
     }
@@ -848,29 +883,32 @@ struct PanelTabView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Spacer()
-                PanelPill(symbol: "sidebar.right", label: "Open beside the page from now on") {
-                    animated(.easeOut(duration: 0.2)) { model.panelMode = .dock; model.closeTab(id: tab.id, force: true); model.sheet = sheet }
+            if sheet != .downloads {
+                HStack(spacing: 8) {
+                    Spacer()
+                    PanelPill(symbol: "sidebar.right", label: "Open beside the page from now on") {
+                        animated(.easeOut(duration: 0.2)) { model.panelMode = .dock; model.closeTab(id: tab.id, force: true); model.sheet = sheet }
+                    }
+                    PanelPill(symbol: "xmark", label: "Close") { model.closeTab(id: tab.id, force: true) }.keyboardShortcut(.cancelAction)
                 }
-                PanelPill(symbol: "xmark", label: "Close") { model.closeTab(id: tab.id, force: true) }.keyboardShortcut(.cancelAction)
+                .padding(.horizontal, 20).padding(.top, 14)
             }
-            .padding(.horizontal, 20).padding(.top, 14)
             NavigationStack {
                 Group {
                     switch sheet {
                     case .bookmarks: BookmarksPanel()
                     case .history: HistoryPanel()
-                    case .downloads: DownloadsPanel(coordinator: model.downloads)
+                    case .downloads: DownloadsDashboard()
                     default: EmptyView()
                     }
                 }
                 .tint(Theme.accent)
             }
             .settlesBeforeShowing()
-            .frame(maxWidth: 760)
+            .frame(maxWidth: sheet == .downloads ? 1200 : 760)
             .frame(maxWidth: .infinity)
         }
+        .environment(\.panelClose, sheet == .downloads ? { model.closeTab(id: tab.id, force: true) } : nil)
         .themedSurface()
     }
 }

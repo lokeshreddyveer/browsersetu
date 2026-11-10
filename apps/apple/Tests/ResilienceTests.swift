@@ -1,30 +1,7 @@
 import XCTest
 @testable import Browser_Setu
 
-final class NetworkProblemTests: XCTestCase {
-    func testFailuresAreNamedInPlainWords() {
-        XCTAssertEqual(NetworkProblem(description: "The Internet connection appears to be offline."), .offline)
-        XCTAssertEqual(NetworkProblem(description: "The request timed out."), .timedOut)
-        XCTAssertEqual(NetworkProblem(description: "A server with the specified hostname could not be found."), .siteNotFound)
-        XCTAssertEqual(NetworkProblem(description: "Could not connect to the server."), .cannotConnect)
-        XCTAssertEqual(NetworkProblem(description: "The network connection was lost."), .connectionLost)
-        XCTAssertEqual(NetworkProblem(description: "The certificate for this server is invalid."), .certificate)
-        XCTAssertEqual(NetworkProblem(description: "Something unexpected"), .other)
-    }
-
-    func testOnlyConnectionProblemsRetryByThemselves() {
-        XCTAssertTrue(NetworkProblem.offline.retriesAutomatically)
-        XCTAssertTrue(NetworkProblem.connectionLost.retriesAutomatically)
-        XCTAssertFalse(NetworkProblem.certificate.retriesAutomatically, "an untrusted site must never be tried again on its own")
-        XCTAssertFalse(NetworkProblem.siteNotFound.retriesAutomatically)
-    }
-
-    func testEveryProblemHasAdviceAndATitle() {
-        for p in [NetworkProblem.offline, .timedOut, .siteNotFound, .cannotConnect, .connectionLost, .certificate, .blocked, .other] {
-            XCTAssertFalse(p.title.isEmpty); XCTAssertFalse(p.advice.isEmpty)
-        }
-    }
-}
+// (The old word-matching network classifier and its tests were replaced by BrowserErrorTests, which decide from error codes and are checked against real WebKit failures.)
 
 @MainActor
 final class PermissionExpiryTests: XCTestCase {

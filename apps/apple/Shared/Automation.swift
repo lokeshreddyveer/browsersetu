@@ -6,8 +6,12 @@ enum URLAction: Equatable {
     case search(String)
     case command(String)
     case workflow(String)
+    /// Show a workspace, by id or name: `browsersetu://space?name=Development` (or `id=`), or `--space` on the command line.
+    case space(String)
+    /// A message for the person from the command line (a mistake in the arguments). Never made from a link.
+    case report(String)
 
-    /// `browsersetu://open?url=…&private=1`, `…://search?q=…`, `…://command?id=…`, `…://workflow?name=…`. Anything else is refused.
+    /// `browsersetu://open?url=…&private=1`, `…://search?q=…`, `…://command?id=…`, `…://workflow?name=…`, `…://space?name=…`. Anything else is refused.
     static func parse(_ url: URL) -> URLAction? {
         guard url.scheme?.lowercased() == "browsersetu", let name = url.host?.lowercased() else { return nil }
         let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
@@ -19,6 +23,7 @@ enum URLAction: Equatable {
         case "search": return value("q").map { .search(String($0.prefix(500))) }
         case "command": return value("id").map { .command($0) }
         case "workflow": return value("name").map { .workflow($0) }
+        case "space": return (value("id") ?? value("name")).map { .space(String($0.prefix(120))) }
         default: return nil
         }
     }

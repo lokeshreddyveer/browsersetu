@@ -10,7 +10,8 @@ be read (a release's evidence must say what built it); --allow-missing-tools wri
 import json, re, subprocess, sys, pathlib, datetime, platform
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-args = [a for a in sys.argv[1:] if not a.startswith("--")]
+_skip = sys.argv.index("--version") + 1 if "--version" in sys.argv else -1
+args = [a for i, a in enumerate(sys.argv[1:], 1) if not a.startswith("--") and i != _skip]
 ALLOW_MISSING = "--allow-missing-tools" in sys.argv
 OUT = pathlib.Path(args[0]) if args else ROOT / "dist"
 OUT.mkdir(parents=True, exist_ok=True)

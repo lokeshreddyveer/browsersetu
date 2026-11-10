@@ -36,7 +36,7 @@ struct WorkbenchView: View {
                 case .search: WorkbenchSearch()
                 case .automate: WorkbenchAutomate(bench: model.workbench)
                 case .developer: WorkbenchDeveloper(bench: model.workbench)
-                case .utilities: DevUtilitiesView()
+                case .utilities: ToolsPanel()
                 case .network: NetworkToolsView()
                 case .files: WorkbenchFiles(bench: model.workbench)
                 case .extensions: WorkbenchExtensions(bench: model.workbench)
@@ -61,9 +61,9 @@ private struct WorkbenchSearch: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        List {
+        PanelList {
             Section {
-                TextField("Search tabs, bookmarks, history, downloads, reading list, closed tabs, sessions, notes, commands", text: $query)
+                FormTextField("Search tabs, bookmarks, history, downloads, reading list, closed tabs, sessions, notes, commands", text: $query)
                     .textFieldStyle(.roundedBorder).focused($focused)
                     .onSubmit { if let first = results.first { model.workbench.open(first) } }
             }
@@ -106,7 +106,7 @@ private struct WorkbenchAutomate: View {
     init(bench: Workbench) { _bench = ObservedObject(wrappedValue: bench) }
 
     var body: some View {
-        List {
+        PanelList {
             Section {
                 Toggle("Vim keys", isOn: $bench.vimEnabled)
                 Text("When no text field has the keyboard, letters move around the page and the browser. Escape clears a half-typed key.").font(.caption).foregroundStyle(.secondary)
@@ -116,7 +116,7 @@ private struct WorkbenchAutomate: View {
                     }
                     HStack {
                         Picker("Action", selection: $keyAction) { ForEach(VimAction.allCases) { Text($0.title).tag($0) } }
-                        TextField("keys", text: $keyText).frame(width: 70)
+                        FormTextField("keys", text: $keyText).frame(width: 70)
                         Button("Set") {
                             var map = bench.keymap
                             if let old = map.sequence(for: keyAction) { map.bindings[old] = nil }
@@ -137,11 +137,11 @@ private struct WorkbenchAutomate: View {
                         Button("Remove", role: .destructive) { bench.setWorkflows(bench.workflows.filter { $0.id != flow.id }) }
                     }
                 }
-                TextField("Workflow name", text: $name)
+                FormTextField("Workflow name", text: $name)
                 ForEach(steps) { step in Text("\(step.kind.title): \(step.value)").font(.callout) }
                 HStack {
                     Picker("Step", selection: $kind) { ForEach(WorkflowStep.Kind.allCases, id: \.self) { Text($0.title).tag($0) } }
-                    TextField(kind == .wait ? "seconds" : (kind == .command ? "command id" : "address or words"), text: $value)
+                    FormTextField(kind == .wait ? "seconds" : (kind == .command ? "command id" : "address or words"), text: $value)
                     Button("Add Step") {
                         let step = WorkflowStep(kind: kind, value: value)
                         if step.isValid, steps.count < Workflow.maxSteps { steps.append(step); value = "" } else { model.notice = "That step is not valid." }
@@ -206,7 +206,7 @@ private struct WorkbenchDeveloper: View {
     init(bench: Workbench) { _bench = ObservedObject(wrappedValue: bench) }
 
     var body: some View {
-        List {
+        PanelList {
             Section {
                 HStack {
                     Button(busy ? "Reading…" : "Read This Page") { busy = true; Task { await bench.inspectPage(); busy = false } }.disabled(busy)
@@ -293,6 +293,7 @@ private struct WorkbenchFiles: View {
     @State private var folder = ""
     @State private var annotating: URL?
     @State private var choosingDocument = false
+    @State private var choosingRuleFolder = false
 
     init(bench: Workbench) { _bench = ObservedObject(wrappedValue: bench) }
 
@@ -306,28 +307,33 @@ private struct WorkbenchFiles: View {
                 defer { if scoped { url.stopAccessingSecurityScopedResource() } }
                 if (try? FileManager.default.copyItem(at: url, to: copy)) != nil { model.openDocument(copy) } else { model.notice = "That file could not be opened." }
             }
+            .fileImporter(isPresented: $choosingRuleFolder, allowedContentTypes: [.folder]) { result in
+                guard case .success(let url) = result else { return }
+                if !bench.addExternalDownloadRule(host: host, kind: kind, folder: url) { model.notice = "That folder could not be saved for a rule." } else { host = "" }
+            }
             .onChange(of: bench.openDocumentRequested) { _, wanted in if wanted { bench.openDocumentRequested = false; choosingDocument = true } }
             .sheet(item: $annotating) { url in PDFEditorView(source: url).environmentObject(model) }
     }
 
     private var filesList: some View {
-        List {
+        PanelList {
             Section("Download rules") {
                 ForEach(bench.downloadRules) { rule in
                     HStack {
                         Text("\(rule.kind.title) from \(rule.host.isEmpty ? "any site" : rule.host)")
-                        Spacer(); Text("→ \(rule.folder)").foregroundStyle(.secondary)
+                        Spacer(); Text("→ \(rule.bookmarkName ?? rule.folder)").foregroundStyle(.secondary)
                         Button("Remove", role: .destructive) { bench.setDownloadRules(bench.downloadRules.filter { $0.id != rule.id }) }
                     }
                 }
                 HStack {
                     Picker("Kind", selection: $kind) { ForEach(DownloadRule.Kind.allCases, id: \.self) { Text($0.title).tag($0) } }
-                    TextField("site (optional)", text: $host)
-                    TextField("folder", text: $folder)
+                    FormTextField("site (optional)", text: $host)
+                    FormTextField("folder", text: $folder)
                     Button("Add") { if bench.addDownloadRule(host: host, kind: kind, folder: folder) { host = ""; folder = "" } else { model.notice = "Use a plain folder name, with no slashes." } }
                         .disabled(folder.isEmpty)
+                    Button("Other Folder…") { choosingRuleFolder = true }
                 }
-                Text("A rule with a site beats one without. Files go in a folder inside Downloads.").font(.caption).foregroundStyle(.secondary)
+                Text("A rule with a site beats one without. Files go in a folder inside Downloads, or in another folder you choose with Other Folder… (if it can no longer be opened, the file goes to Downloads and the list says why).").font(.caption).foregroundStyle(.secondary)
             }
             Section("Documents") {
                 Button("Open a Document…") { choosingDocument = true }
@@ -364,7 +370,7 @@ private struct WorkbenchExtensions: View {
 
     var body: some View {
         let center = model.extensionCenter
-        List {
+        PanelList {
             Section("Conflicts") {
                 let found = bench.conflicts()
                 if found.isEmpty { Text("No clashes found between the extensions that are on.").foregroundStyle(.secondary) }
@@ -442,7 +448,7 @@ private struct WorkbenchHealth: View {
     init(bench: Workbench) { _bench = ObservedObject(wrappedValue: bench) }
 
     var body: some View {
-        List {
+        PanelList {
             ReliabilitySection()
             Section("Tabs and memory") {
                 LabeledContent("Open tabs", value: "\(h.tabs) (\(h.sleeping) asleep, \(h.privateTabs) private)")
@@ -488,7 +494,7 @@ private struct SiteRuleAdder: View {
 
     var body: some View {
         HStack {
-            TextField("site, such as example.com", text: $host)
+            FormTextField("site, such as example.com", text: $host)
             Picker("Where", selection: $kind) { ForEach(Kind.allCases) { Text($0.rawValue).tag($0) } }.labelsHidden()
             if kind != .privateTab {
                 Picker("Which", selection: $name) { Text("Choose…").tag(""); ForEach(names, id: \.self) { Text($0).tag($0) } }.labelsHidden()

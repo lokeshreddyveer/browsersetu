@@ -10,6 +10,11 @@ struct Workspace: Codable, Identifiable, Equatable {
     var accent: String? = nil
     /// The window arrangement last used in this workspace, restored when it is opened again.
     var layout: LayoutSnapshot? = nil
+    /// Optional colour theme: a faint wash in the sidebar, the icon tile, and the accent while this workspace is open (see WorkspaceGradients.swift).
+    var gradient: WorkspaceGradient? = nil
+    /// A hidden identity that a rename does not change. Older saved workspaces have none; one is given at the next start (see `ensureWorkspaceIDs`). Things that must
+    /// find a workspace again after it was renamed (a command line, a shortcut) can keep this.
+    var uid: String? = nil
     var id: String { name }
 
     static let iconChoices = ["person", "briefcase", "hammer", "book", "gamecontroller", "cart", "airplane", "heart", "star", "leaf", "music.note", "graduationcap"]
@@ -32,9 +37,9 @@ enum AccentChoice: String, CaseIterable, Identifiable {
 }
 
 enum StartBackground: String, CaseIterable, Identifiable {
-    case gradient, plain, color, blend, image
+    case gradient, plain, color, blend, image, preset
     var id: String { rawValue }
-    var title: String { self == .image ? "Picture" : rawValue.capitalized }
+    var title: String { self == .image ? "Picture" : (self == .preset ? "Presets" : rawValue.capitalized) }
 }
 
 enum SplitOrientation: String, CaseIterable, Identifiable {

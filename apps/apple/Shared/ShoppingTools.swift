@@ -100,7 +100,7 @@ struct ShoppingView: View {
                 ContentUnavailableView("Nothing to Compare", systemImage: "scalemass", description: Text("Open a product page and add it. Add the same product from other shops to see them side by side."))
             } else {
                 let cheapest = model.comparedProducts.compactMap(\.price).min()
-                List {
+                PanelList {
                     ForEach(model.comparedProducts.sorted { ($0.price ?? .infinity) < ($1.price ?? .infinity) }) { item in
                         HStack {
                             VStack(alignment: .leading, spacing: 1) {
@@ -125,12 +125,12 @@ struct ShoppingView: View {
         let host = displayHost(model.active?.url)
         return VStack(spacing: 0) {
             HStack {
-                TextField("Coupon code you already have", text: $code)
+                FormTextField("Coupon code you already have", text: $code)
                 Button("Save for \(host)") { model.coupons.append(SavedCoupon(host: host, code: code.trimmingCharacters(in: .whitespaces))); code = "" }
                     .disabled(code.trimmingCharacters(in: .whitespaces).isEmpty || model.active?.url == nil)
             }
             .padding(10)
-            List {
+            PanelList {
                 ForEach(model.coupons.filter { $0.host == host || host.isEmpty }) { coupon in
                     HStack {
                         Text(coupon.code).font(.system(.body, design: .monospaced))
@@ -147,8 +147,8 @@ struct ShoppingView: View {
     private var subscriptions: some View {
         VStack(spacing: 0) {
             HStack {
-                TextField("Name", text: $newName)
-                TextField("Amount", text: $newAmount).frame(width: 70)
+                FormTextField("Name", text: $newName)
+                FormTextField("Amount", text: $newAmount).frame(width: 70)
                 Picker("", selection: $newPeriod) { ForEach(Subscription.Period.allCases) { Text($0.rawValue.capitalized).tag($0) } }.labelsHidden().frame(width: 100)
                 DatePicker("", selection: $newDate, displayedComponents: .date).labelsHidden()
                 Button("Add") {
@@ -159,7 +159,7 @@ struct ShoppingView: View {
                 }
             }
             .padding(10)
-            List {
+            PanelList {
                 ForEach(model.subscriptions.sorted { $0.nextCharge() < $1.nextCharge() }) { sub in
                     HStack {
                         VStack(alignment: .leading, spacing: 1) {

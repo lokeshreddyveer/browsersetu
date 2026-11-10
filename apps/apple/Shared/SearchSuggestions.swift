@@ -6,6 +6,12 @@ import Foundation
 enum SearchSuggestions {
     /// The address that returns suggestions for each built-in engine, or nil for an engine without one (and for custom engines).
     static func endpoint(forSearchTemplate template: String) -> String? {
+        // A SearXNG instance the person chose and asked for suggestions from: that instance, and only that one.
+        if let active = SearXNG.activeTemplate, template == active, let endpoint = SearXNG.activeSuggestionEndpoint { return endpoint }
+        return builtInEndpoint(forSearchTemplate: template)
+    }
+
+    private static func builtInEndpoint(forSearchTemplate template: String) -> String? {
         switch SearchEngines.preset(for: template)?.id {
         case "brave": "https://search.brave.com/api/suggest?q={}&rich=false"
         case "duckduckgo": "https://duckduckgo.com/ac/?q={}&type=list"

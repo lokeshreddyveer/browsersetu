@@ -35,7 +35,8 @@ enum TOTP {
         return String(format: "%0\(digits)d", Int(binary % divisor))
     }
 
-    static func secondsLeft(at date: Date = Date(), period: Double = 30) -> Int { Int(period - date.timeIntervalSince1970.truncatingRemainder(dividingBy: period)) }
+    /// 1 through `period`: the last fraction of a second still counts as one second left, never zero.
+    static func secondsLeft(at date: Date = Date(), period: Double = 30) -> Int { Int((period - date.timeIntervalSince1970.truncatingRemainder(dividingBy: period)).rounded(.up)) }
 
     /// The secret out of what a person pastes: the bare secret, or an otpauth:// link as a QR code reader gives it.
     static func secret(from text: String) -> String? {
@@ -139,7 +140,10 @@ extension BrowserModel {
 
     /// A picture-perfect copy of the whole page as a PDF, opened in the editor so it can be drawn on, highlighted, redacted or signed.
     func annotatePageScreenshot() async {
-        guard let tab = active, !tab.isBlank, let data = await tab.engine.pagePDF(), !data.isEmpty else { notice = "This page could not be captured."; return }
+        guard let tab = active, !tab.isBlank else { return }
+        // This writes a file, so a tab that leaves no trace uses the picture editor instead, which holds the capture in memory until the person saves or shares it.
+        guard tab.privacy.canWriteFilesWithoutAsking else { await startScreenshot(fullPage: true); return }
+        guard let data = await tab.engine.pagePDF(), !data.isEmpty else { notice = "This page could not be captured."; return }
         let folder = DownloadCoordinator.directory.appendingPathComponent("Page Screenshots", isDirectory: true)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let name = String(tab.displayTitle.replacingOccurrences(of: "[/\\\\:\\n\\r]+", with: "-", options: .regularExpression).prefix(60))
@@ -173,7 +177,7 @@ struct VaultView: View {
     @State private var now = Date()
 
     var body: some View {
-        List {
+        PanelList {
             if !unlocked {
                 Section {
                     Button("Unlock the Vault") { Task { if await model.requireAuthentication("Open your codes and secure notes") { load() } } }
@@ -193,7 +197,7 @@ struct VaultView: View {
                             Button(role: .destructive) { codes.removeAll { $0.id == entry.id }; persist() } label: { Image(systemName: "trash").accessibilityLabel("Delete") }.buttonStyle(.borderless)
                         }
                     }
-                    TextField("Name (the site or account)", text: $label).textFieldStyle(.roundedBorder)
+                    FormTextField("Name (the site or account)", text: $label).textFieldStyle(.roundedBorder)
                     SecureField("Secret key, or the otpauth:// link", text: $secret).textFieldStyle(.roundedBorder)
                     if let problem { Text(problem).font(.caption).foregroundStyle(.red) }
                     Button("Add Code") {
@@ -209,7 +213,7 @@ struct VaultView: View {
                             Button(role: .destructive) { notes.removeAll { $0.id == note.id }; persist() } label: { Image(systemName: "trash").accessibilityLabel("Delete") }.buttonStyle(.borderless)
                         }
                     }
-                    TextField("Title", text: $noteTitle).textFieldStyle(.roundedBorder)
+                    FormTextField("Title", text: $noteTitle).textFieldStyle(.roundedBorder)
                     TextEditor(text: $noteBody).frame(height: 80).overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.primary.opacity(0.15)))
                     Button("Save Note") {
                         notes.insert(SecureNote(title: String(noteTitle.prefix(80)), body: String(noteBody.prefix(5000))), at: 0)
@@ -248,12 +252,12 @@ struct TasksView: View {
     @State private var text = ""
     @State private var forThisSite = true
 
-    private var site: String { forThisSite ? (model.active?.url?.host.flatMap { FaviconStore.key(forHost: $0) } ?? "") : "" }
+    private var site: String { forThisSite && model.active?.leavesNoTrace != true ? (model.active?.url?.host.flatMap { FaviconStore.key(forHost: $0) } ?? "") : "" }      // a private tab's site is never written down
 
     var body: some View {
-        List {
+        PanelList {
             Section {
-                TextField("A task", text: $text).textFieldStyle(.roundedBorder).onSubmit(add)
+                FormTextField("A task", text: $text).textFieldStyle(.roundedBorder).onSubmit(add)
                 if model.active?.url?.host != nil { Toggle("Tie it to \(FaviconStore.key(forHost: model.active?.url?.host) ?? "this site")", isOn: $forThisSite) }
                 Button("Add Task", action: add).disabled(text.isEmpty)
             }

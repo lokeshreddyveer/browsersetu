@@ -40,6 +40,9 @@ final class AddressBarController: ObservableObject {
 
     private var local: [Suggestion] = []
     private var remote: [Suggestion] = []
+    /// The result the device is confident the person wants (see SuggestionRanking); it sits right under the typed text, ahead of the engine's suggestions.
+    private var topHit: Suggestion?
+    private var fixedCount = 1
     /// Which sources the address bar draws on, in the order chosen in Settings.
     private var sources: [AddressSource] = AddressSource.defaults
     private var remoteTask: Task<Void, Never>?
@@ -68,7 +71,7 @@ final class AddressBarController: ObservableObject {
         if let hit = SearchShortcuts.resolve(query, custom: model.customSearchShortcuts) {
             // "g something", "yt something": the keyword picks the search engine for this one search.
             result.append(Suggestion(kind: .search, title: "Search for “\(hit.query)”", subtitle: "Search with \(hit.name)", target: hit.url))
-        } else if let resolved = resolveInput(input: query, searchTemplate: model.searchTemplate) {
+        } else if let resolved = resolveInput(input: query, searchTemplate: model.activeSearchTemplate) {
             switch resolved {
             case .url(let url): result.append(Suggestion(kind: .go, title: "Go to \(query)", subtitle: url, target: url))
             case .search(let url): result.append(Suggestion(kind: .search, title: "Search for “\(query)”", subtitle: "", target: url))
@@ -80,7 +83,7 @@ final class AddressBarController: ObservableObject {
                 copyToPasteboard(answer.text); model?.notice = "Copied " + answer.text
             })
         }
-        for tab in model.tabs where !tab.isBlank && tab.id != model.activeID {
+        for tab in model.tabs where !tab.isBlank && tab.id != model.activeID && !model.isHiddenTab(tab) && (!model.separatesPrivate || tab.isPrivate == model.privateMode) {
             let url = tab.url?.absoluteString ?? ""
             if tab.title.localizedCaseInsensitiveContains(query) || url.localizedCaseInsensitiveContains(query) {
                 result.append(Suggestion(kind: .openTab, title: tab.displayTitle, subtitle: "Switch to tab", target: url, tabID: tab.id))
@@ -92,8 +95,10 @@ final class AddressBarController: ObservableObject {
             seen.insert(b.url)
             result.append(Suggestion(kind: .bookmark, title: b.title.isEmpty ? b.url : b.title, subtitle: b.url, target: b.url))
         }
+        var historyInfo: [String: HistoryItem] = [:]
         if !model.activeIsPrivate {
             for h in ((try? model.core.searchHistory(query: query, limit: 8)) ?? []) where !seen.contains(h.url) {
+                historyInfo[h.url] = h
                 result.append(Suggestion(kind: .history, title: h.title.isEmpty ? h.url : h.title, subtitle: h.url, target: h.url))
                 if result.count >= 9 { break }
             }
@@ -117,7 +122,7 @@ final class AddressBarController: ObservableObject {
         if isCommandQuery || commandText.count >= 3 {
             let wanted = commandText.lowercased()
             let commands = model.paletteItems(query: commandText).filter { item in
-                !item.id.hasPrefix("tab-") && !item.id.hasPrefix("bm-") && !item.title.contains("://") && (isCommandQuery || item.title.lowercased().contains(wanted))
+                !item.id.hasPrefix("tab-") && !item.id.hasPrefix("bm-") && !item.id.hasPrefix("hist-") && !item.title.contains("://") && (isCommandQuery || item.title.lowercased().contains(wanted))
             }
             if isCommandQuery { result.removeAll() }
             for item in commands.prefix(isCommandQuery ? 8 : 2) {
@@ -125,13 +130,18 @@ final class AddressBarController: ObservableObject {
             }
         }
         sources = model.addressSources
-        result = AddressSource.arrange(result, order: sources)
+        // What the device has learned decides the order inside each kind, and a strong match is lifted to the top.
+        let ranked = rankedByLearning(result, query: query, model: model, history: historyInfo)
+        topHit = ranked.top
+        fixedCount = ranked.fixed
+        result = promoted(AddressSource.arrange(ranked.list, order: sources))
         local = result
         suggestions = result
         selection = nil
         // Only a site already in your history or bookmarks has its name looked up ahead of the click, never what you are typing (that would tell the
         // network a half-typed word). The system keeps the answer, so the page starts a moment sooner.
-        if !model.proxyEnabled, let first = result.first(where: { $0.kind == .history || $0.kind == .bookmark }), let host = URL(string: first.target)?.host {
+        // Never in a private tab: nothing about your history is looked up from there.
+        if !model.proxyEnabled, !model.activeIsPrivate, let first = result.first(where: { $0.kind == .history || $0.kind == .bookmark }), let host = URL(string: first.target)?.host {
             DNSWarmUp.warm(host)
         }
         startRemote(query: query, model: model)
@@ -140,12 +150,71 @@ final class AddressBarController: ObservableObject {
     /// The engine's suggestions go right after the first row ("Go to…" or "Search for…"), ahead of the local ones.
     private func merged() -> [Suggestion] {
         guard !remote.isEmpty, sources.contains(.suggestions) else { return local }
-        return AddressSource.arrange(local + remote, order: sources)
+        return promoted(AddressSource.arrange(local + remote, order: sources))
+    }
+
+    /// The top hit moved to just after the fixed rows (the typed text's own "Go to"/"Search for" and a quick answer).
+    private func promoted(_ list: [Suggestion]) -> [Suggestion] {
+        guard let top = topHit, let from = list.firstIndex(where: { $0.id == top.id }) else { return list }
+        var copy = list
+        let hit = copy.remove(at: from)
+        copy.insert(hit, at: min(fixedCount, copy.count))
+        return copy
+    }
+
+    /// Scores the results that are about a destination (open tabs, bookmarks, history, pages, commands) and orders them, best first; identical destinations
+    /// become one row. The rows made from the typed text itself stay as they were, in front. Not for private tabs or guest windows.
+    private func rankedByLearning(_ list: [Suggestion], query: String, model: BrowserModel, history: [String: HistoryItem]) -> (list: [Suggestion], top: Suggestion?, fixed: Int) {
+        let isFixed: (Suggestion) -> Bool = { s in
+            s.kind == .go || s.kind == .search || s.kind == .suggestion || (s.kind == .command && s.target.hasPrefix("quick-answer-"))
+                // "pasta recipe last week": the time words match no title, so these rows keep the place the recall gave them.
+                || (s.kind == .history && s.subtitle.hasPrefix("From "))
+        }
+        let fixed = list.filter(isFixed)
+        guard model.learnSuggestions, !model.activeIsPrivate, !model.isGuest else { return (list, nil, fixed.count) }
+        let rest = list.filter { !isFixed($0) }
+        let learning = model.suggestionLearning
+        let essentialKeys = Set(model.essentials.compactMap { URL(string: $0.url) }.map { SuggestionPrivacy.key(for: $0) })
+        var bestSuggestion: [String: (source: Int, suggestion: Suggestion)] = [:]
+        var candidates: [RankCandidate] = []
+        for (index, s) in rest.enumerated() {
+            let key: String
+            let source: RankCandidate.Source
+            switch s.kind {
+            case .command: key = "cmd:" + s.target; source = .command
+            case .openTab: key = URL(string: s.target).map(SuggestionPrivacy.key(for:)) ?? s.target.lowercased(); source = .openTab
+            case .bookmark: key = URL(string: s.target).map(SuggestionPrivacy.key(for:)) ?? s.target.lowercased(); source = .bookmark
+            case .page: key = URL(string: s.target).map(SuggestionPrivacy.key(for:)) ?? s.target.lowercased(); source = .page
+            default: key = URL(string: s.target).map(SuggestionPrivacy.key(for:)) ?? s.target.lowercased(); source = .history
+            }
+            let info = history[s.target]
+            candidates.append(RankCandidate(key: key, source: source, title: s.title, url: s.kind == .command ? "" : s.target,
+                                            visitCount: Int(info?.visitCount ?? 0), lastVisit: info.flatMap { Self.date(fromHistory: $0.lastVisit) },
+                                            isBookmark: s.kind == .bookmark, isEssential: essentialKeys.contains(key), isOpenTab: s.kind == .openTab, order: index))
+            if (bestSuggestion[key]?.source ?? -1) < source.rawValue { bestSuggestion[key] = (source.rawValue, s) }
+        }
+        let workspace = model.activeWorkspace
+        let scored = SuggestionRanking.rank(candidates, query: query) { learning.signals(for: $0.key, query: query, workspace: workspace) }
+        var ordered: [Suggestion] = []
+        var top: Suggestion?
+        for item in scored {
+            guard let s = bestSuggestion[item.candidate.key]?.suggestion else { continue }
+            ordered.append(s)
+            // A command is never lifted above the destinations; a page, tab, bookmark or history entry is, when it is clearly the one.
+            if top == nil, s.kind != .command, SuggestionRanking.isTopHit(item) { top = s }
+        }
+        return (fixed + ordered, top, fixed.count)
+    }
+
+    /// The core stores the time of a visit as seconds since 1970 (a value too large for that is milliseconds).
+    private static func date(fromHistory value: Int64) -> Date? {
+        guard value > 0 else { return nil }
+        return Date(timeIntervalSince1970: value > 100_000_000_000 ? Double(value) / 1000 : Double(value))
     }
 
     private func startRemote(query: String, model: BrowserModel) {
         // While a proxy is on, nothing typed is sent to a search engine: that request would not use the proxy.
-        guard model.searchSuggestionsEnabled, !ProxyState.active, !model.activeIsPrivate, SearchSuggestions.shouldAsk(for: query),
+        guard model.searchSuggestionsEnabled, model.addressSources.contains(.suggestions), !ProxyState.active, !model.activeIsPrivate, SearchSuggestions.shouldAsk(for: query),
               let endpoint = SearchSuggestions.endpoint(forSearchTemplate: model.searchTemplate) else { return }
         let template = model.searchTemplate
         remoteTask = Task { [weak self] in

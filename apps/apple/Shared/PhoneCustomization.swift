@@ -287,6 +287,19 @@ enum OverviewSort: String, CaseIterable, Identifiable {
     }
 }
 
+/// What one website is told about dark pages.
+enum DarkSiteChoice: String, CaseIterable, Identifiable {
+    case automatic, dark, never
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .automatic: "Automatic"
+        case .dark: "Always dark"
+        case .never: "Never"
+        }
+    }
+}
+
 /// When pages are shown dark.
 enum DarkPages: String, CaseIterable, Identifiable {
     case off, chosen, always

@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(iOS)
+import WidgetKit
+#endif
 
 extension BrowserModel {
     // MARK: Look-alike addresses
@@ -45,9 +48,16 @@ extension BrowserModel {
         windows.closedWindows = []
         await clearBrowsingData()
         clipboardHistory = []
+        checkpoints = []
+        saveCheckpoints()
         feedItems = []
         clearSiteTime()
         SharedStore.eraseAll()
+        // The widgets' copy is gone, and the memory of what was last written must go with it: otherwise the next write is skipped as "unchanged" and the widgets stay empty.
+        lastPublished = nil
+        #if os(iOS)
+        WidgetCenter.shared.reloadAllTimelines()
+        #endif
         if visibleTabs.isEmpty { newTab() }
         notice = "Everything was cleared."
     }
@@ -122,7 +132,7 @@ struct DigestView: View {
     }
 
     var body: some View {
-        List {
+        PanelList {
             Section {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(greeting).font(.title2.weight(.bold))
@@ -191,7 +201,7 @@ struct FocusScheduleSection: View {
             ForEach($model.focusRules) { $rule in
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        TextField("Name", text: $rule.name).textFieldStyle(.plain).font(.headline)
+                        FormTextField("Name", text: $rule.name).textFieldStyle(.plain).font(.headline)
                         Toggle("", isOn: $rule.enabled).labelsHidden()
                     }
                     HStack(spacing: 4) {

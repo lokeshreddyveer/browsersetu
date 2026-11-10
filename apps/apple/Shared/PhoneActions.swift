@@ -6,7 +6,7 @@ extension PhoneAction {
         switch self {
         case .bookmark: model.activeBookmarked
         case .desktopSite: tab.desktopSite
-        case .darkPages: model.isDarkSite(tab.url?.host)
+        case .darkPages: model.shouldDarken(host: tab.url?.host)
         case .javaScript: !tab.javaScriptOn      // "on" means the tool is in use: JavaScript switched off
         default: false
         }
@@ -67,7 +67,7 @@ extension PhoneAction {
         case .screenshot: Task { await model.takeScreenshot(fullPage: false) }
         case .fullScreenshot: Task { await model.takeScreenshot(fullPage: true) }
         case .desktopSite: tab.toggleDesktopSite()
-        case .darkPages: model.setDarkSite(tab.url?.host, !model.isDarkSite(tab.url?.host)); tab.applyDarkPages()
+        case .darkPages: model.toggleDark(host: tab.url?.host)
         case .javaScript: tab.toggleJavaScript()
         case .translate: model.translateActivePage()
         case .scrollBottom: tab.scrollToEdge(bottom: true)

@@ -9,6 +9,9 @@ struct IPadSidebar: View {
             WorkspaceMenu().padding(.horizontal, 12).padding(.top, 12)
             GroupChips().padding(.horizontal, 12).padding(.vertical, 8)
             List {
+                if !model.essentials.isEmpty, !model.isGuest, !(model.separatesPrivate && model.privateMode) {
+                    EssentialsGrid(tileHeight: 48, minimumTile: 52).listRowSeparator(.hidden)
+                }
                 ForEach(model.visibleTabs) { tab in
                     IPadTabRow(tab: tab, selected: tab.id == model.activeID)
                         .contentShape(Rectangle())

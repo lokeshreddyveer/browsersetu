@@ -122,14 +122,18 @@ enum AddressFill {
           const t = ((el.name || '') + ' ' + (el.id || '')).toLowerCase();
           if (/e-?mail/.test(t)) return 'email';
           if (/zip|postal|post.?code/.test(t)) return 'postal-code';
-          if (/phone|mobile|tel/.test(t)) return 'tel';
+          // Whole words only: "hotel" and "intel" contain "tel" and must not be given the phone number.
+          if (/(^|[^a-z])(phone|mobile|tel)([^a-z]|$)/.test(t)) return 'tel';
           return null;
         };
         for (const el of document.querySelectorAll('input, textarea, select')) {
           if (el.disabled || el.readOnly || el.type === 'hidden' || el.type === 'password' || el.type === 'checkbox' || el.type === 'radio') continue;
-          const rect = el.getBoundingClientRect(); if (rect.width === 0 || rect.height === 0) continue;
+          // A box a person cannot see (clear, tiny or hidden) is never filled: a page could plant one to collect the name and address when Fill is tapped.
+          const rect = el.getBoundingClientRect(); if (rect.width < 4 || rect.height < 4) continue;
+          const look = getComputedStyle(el); if (look.visibility === 'hidden' || look.display === 'none' || parseFloat(look.opacity) < 0.1) continue;
           const key = guess(el); if (!key || !values[key]) continue;
           if (el.tagName !== 'SELECT' && (el.value || '') !== '') continue;
+          if (el.tagName === 'SELECT' && el.selectedIndex > 0) continue;      // a choice already made in a list is kept, as in a text box
           if (el.tagName === 'SELECT') {
             const option = Array.from(el.options).find(o => o.value.toLowerCase() === values[key].toLowerCase() || o.text.toLowerCase() === values[key].toLowerCase());
             if (!option) continue; el.value = option.value;

@@ -30,7 +30,7 @@ enum TabLayout: String, CaseIterable, Identifiable {
     }
 }
 
-enum AddressBarPosition: String, CaseIterable, Identifiable {
+enum AddressBarPosition: String, Codable, CaseIterable, Identifiable {
     case top, bottom
     var id: String { rawValue }
     var title: String { rawValue.capitalized }
@@ -41,6 +41,8 @@ enum ToolbarItemID: String, CaseIterable, Identifiable {
     case sidebar, backForward, reload, share, bookmark, newTab, tabOverview, downloads
     /// Added later, for the Mac's top bar and One Row layouts (the iPhone has its own dock).
     case workspaces, profile, splitView, history, library, find, palette
+    /// DX-09 placement: shows when the page has media, opens the media picker.
+    case media
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -59,6 +61,7 @@ enum ToolbarItemID: String, CaseIterable, Identifiable {
         case .library: "Bookmarks"
         case .find: "Find in page"
         case .palette: "Command palette"
+        case .media: "Media on this page"
         }
     }
     var symbol: String {
@@ -78,6 +81,7 @@ enum ToolbarItemID: String, CaseIterable, Identifiable {
         case .library: "book"
         case .find: "magnifyingglass"
         case .palette: "command"
+        case .media: "play.rectangle.on.rectangle"
         }
     }
     /// What can be switched on here. The new items belong to the Mac.
@@ -85,7 +89,7 @@ enum ToolbarItemID: String, CaseIterable, Identifiable {
         #if os(macOS)
         allCases
         #else
-        allCases.filter { ![.workspaces, .profile, .splitView, .history, .library, .find, .palette].contains($0) }
+        allCases.filter { ![.workspaces, .profile, .splitView, .history, .library, .find, .palette, .media].contains($0) }
         #endif
     }
     /// Back/forward/reload, bookmark and downloads sit in the bar; everything else is in the More menu and the keyboard.
@@ -94,7 +98,7 @@ enum ToolbarItemID: String, CaseIterable, Identifiable {
         // A phone has no menu bar or keyboard to fall back on, so the tab overview and new tab stay on the toolbar.
         [.sidebar, .backForward, .reload, .share, .bookmark, .newTab, .tabOverview]
         #else
-        [.sidebar, .backForward, .reload, .bookmark, .downloads, .workspaces, .splitView]
+        [.sidebar, .backForward, .reload, .bookmark, .downloads, .media, .workspaces, .splitView]
         #endif
     }()
 }
@@ -147,11 +151,153 @@ enum LayoutPreset: String, CaseIterable, Identifiable {
     var summary: String {
         switch self {
         case .classic: "Horizontal tabs, standard toolbar"
-        case .sidebar: "Vertical tabs; the address bar and navigation live in the sidebar"
+        case .sidebar: "Vertical tabs; the address bar and navigation live in the sidebar, docked or sliding in from the edge"
         case .minimal: "Compact tabs, no sidebar"
-        case .floating: "No top bar. A pill shows the site, a search button opens the address bar, and tabs slide in from the edge"
-        case .inline: "Everything on one line: tabs as icons beside the address field"
+        case .floating: "No top bar. A pill shows the site; click it, or press ⌘L, to type an address. Tabs slide in from the edge"
+        case .inline: "Everything on one line: the tabs beside the address field and the buttons"
         case .custom: "Choose each option yourself"
+        }
+    }
+}
+
+/// How the iPhone's controls are arranged: a few independent choices. A preset is a named spec; Custom is one the person put together. (The iPad has its sidebar, the
+/// Mac has `LayoutPreset`.) Everything the phone draws, folds or hides is decided from this one value, so two address bars cannot exist at once by accident.
+struct PhoneLayoutSpec: Codable, Equatable {
+    /// What the controls look like.
+    enum Style: String, Codable, CaseIterable, Identifiable {
+        /// A floating glass bar over the page (back, address, tabs, menu) that can fold into pills.
+        case floating
+        /// A bar fixed to the top or the bottom edge, address field above its buttons.
+        case attached
+        /// No bar at all: only two small pills over the page.
+        case pills
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .floating: "Floating bar"
+            case .attached: "Attached bar"
+            case .pills: "Pills only"
+            }
+        }
+    }
+
+    /// What the controls do while a page is read.
+    enum Reading: String, Codable, CaseIterable, Identifiable {
+        case alwaysShown, foldsAndReturns, foldsAndStays, alwaysFolded
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .alwaysShown: "Always shown"
+            case .foldsAndReturns: "Fold as I scroll, return when I scroll back"
+            case .foldsAndStays: "Fold as I scroll, open only when I tap"
+            case .alwaysFolded: "Always folded"
+            }
+        }
+    }
+
+    var style: Style
+    /// Where the address bar sits (top or bottom) in the attached style. The floating style and pills keep it at the bottom.
+    var address: AddressBarPosition
+    var reading: Reading
+    /// While folded: a round pill on the left that opens the tabs as a vertical list. When the screen has been still a moment, a "+" floats above it (new tab), and a reload button floats above the address pill.
+    var tabsPill: Bool
+    var newTabPill: Bool
+    /// The attached bar as ONE slim row (back, the address, tabs, menu), folding to a small capsule with just the site, as Safari's compact bar does. Off: the address above a row of buttons.
+    var compactBar = false
+    /// The buttons (+, tabs, reload) pop out of the one folded address pill along an arc, instead of the tabs having a pill of their own on the other side.
+    var fanOut = false
+
+    /// Pills only means folded, whatever else was chosen.
+    var effectiveReading: Reading { style == .pills ? .alwaysFolded : reading }
+    /// The floating dock (or just pills) replaces the bars.
+    var usesDock: Bool { style == .floating || style == .pills }
+    /// Anything but always shown folds at some point.
+    var folds: Bool { effectiveReading != .alwaysShown }
+    /// Once folded, only the person's own action opens the controls again (not scrolling back, not a page loading, not a tab change).
+    var sticky: Bool { effectiveReading == .foldsAndStays || effectiveReading == .alwaysFolded }
+    /// Folded from the start, and kept folded.
+    var staysFolded: Bool { effectiveReading == .alwaysFolded }
+    /// Where the address bar is when bars are used (the legacy bar code).
+    var barAddress: AddressBarPosition { address }
+    /// Where the folded pill of the bar styles sits.
+    var foldedPillAtBottom: Bool { barAddress == .bottom }
+
+    static let bottomBar = PhoneLayoutSpec(style: .attached, address: .bottom, reading: .foldsAndReturns, tabsPill: false, newTabPill: false)
+    static let topBar = PhoneLayoutSpec(style: .attached, address: .top, reading: .foldsAndReturns, tabsPill: false, newTabPill: false)
+    static let immersive = PhoneLayoutSpec(style: .pills, address: .bottom, reading: .alwaysFolded, tabsPill: true, newTabPill: true, fanOut: true)
+    static let compactBottom = PhoneLayoutSpec(style: .attached, address: .bottom, reading: .foldsAndReturns, tabsPill: false, newTabPill: false, compactBar: true)
+    static let compactTop = PhoneLayoutSpec(style: .attached, address: .top, reading: .foldsAndReturns, tabsPill: false, newTabPill: false, compactBar: true)
+}
+
+extension PhoneLayoutSpec {
+    private enum CodingKeys: String, CodingKey { case style, address, reading, tabsPill, newTabPill, compactBar, fanOut }
+
+    /// A custom layout saved by an earlier version has no `compactBar`: it reads as off, so it looks as it did.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(style: try c.decode(Style.self, forKey: .style), address: try c.decode(AddressBarPosition.self, forKey: .address), reading: try c.decode(Reading.self, forKey: .reading),
+                  tabsPill: try c.decode(Bool.self, forKey: .tabsPill), newTabPill: try c.decode(Bool.self, forKey: .newTabPill),
+                  compactBar: try c.decodeIfPresent(Bool.self, forKey: .compactBar) ?? false, fanOut: try c.decodeIfPresent(Bool.self, forKey: .fanOut) ?? false)
+    }
+}
+
+enum PhoneTabsView: String, CaseIterable, Identifiable {
+    /// `vertical` is the floating list (its saved name is kept so a choice made earlier still reads); `sidebar` is real vertical tabs, a column beside the page.
+    case grid, vertical, sidebar
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .grid: "Grid of pages"
+        case .vertical: "Floating tabs"
+        case .sidebar: "Vertical tabs"
+        }
+    }
+}
+
+/// The iPhone's ready-made layouts, and Custom.
+enum PhonePreset: String, CaseIterable, Identifiable {
+    case bottomBar, topBar, compactBottom, compactTop, immersive, custom
+    var id: String { rawValue }
+
+    /// What an earlier version saved ("dock", "reading") still reads as the layout it became.
+    init?(stored: String) {
+        switch stored {
+        // The Floating layout is gone: a phone that had it (or its older name) gets the Bottom Bar.
+        case "dock", "floating": self = .bottomBar
+        case "reading": self = .immersive
+        default: self.init(rawValue: stored)
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .bottomBar: "Bottom Bar"
+        case .topBar: "Top Bar"
+        case .compactBottom: "Compact Bottom"
+        case .compactTop: "Compact Top"
+        case .immersive: "Immersive"
+        case .custom: "Custom"
+        }
+    }
+    var summary: String {
+        switch self {
+        case .bottomBar: "Like Safari: the address and the buttons in one bar along the bottom. While you read it shrinks to a slim strip with just the site, and returns when you scroll back"
+        case .topBar: "Like Safari: the address and the buttons in one bar along the top. While you read it shrinks to a slim strip with just the site, and returns when you scroll back"
+        case .compactBottom: "One slim row along the bottom: back, the address, your tabs and the menu. While you read it shrinks to a small capsule with just the site, and returns when you scroll back"
+        case .compactTop: "One slim row along the top: back, the address, your tabs and the menu. While you read it shrinks to a small capsule with just the site, and returns when you scroll back"
+        case .immersive: "The page fills the screen. Only one small pill, for the address, while you scroll. Stop for a moment and the + (new tab), reload and your tabs fan out of it along an arc, and fold back in when you scroll"
+        case .custom: "Choose the style, where the address bar goes, what happens as you read, and which pills show"
+        }
+    }
+    /// The layout this preset is; nil for Custom (its spec is the person's own).
+    var spec: PhoneLayoutSpec? {
+        switch self {
+        case .bottomBar: .bottomBar
+        case .topBar: .topBar
+        case .compactBottom: .compactBottom
+        case .compactTop: .compactTop
+        case .immersive: .immersive
+        case .custom: nil
         }
     }
 }

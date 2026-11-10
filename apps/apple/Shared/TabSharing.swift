@@ -24,7 +24,7 @@ struct ShareTabsView: View {
     @State private var videoLink: URL?
 
     private var shared: [(title: String, url: URL)] {
-        let source = includeAll ? model.tabs.filter { !$0.isPrivate } : (model.active.map { [$0] } ?? [])
+        let source = includeAll ? model.tabs.filter { !$0.isPrivate } : (model.active.map { [$0] } ?? []).filter { !$0.isPrivate }
         return source.compactMap { tab in tab.url.map { (tab.title, $0) } }
     }
 

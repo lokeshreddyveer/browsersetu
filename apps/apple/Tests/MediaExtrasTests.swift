@@ -30,14 +30,14 @@ final class MediaExtrasTests: XCTestCase {
                                   "volume": 0.5, "muted": true, "width": 1920, "height": 1080, "dropped": 2, "frames": 3200,
                                   "sessionTitle": "Song", "sessionArtist": "Band", "pageTitle": "Page",
                                   "tracks": [["label": "English", "mode": "showing"], ["label": "French", "mode": "disabled"]], "canAirPlay": true]
-        let v = DetectedVideo(index: 0, raw: raw)
+        let v = DetectedVideo(raw: raw)
         XCTAssertEqual(v.qualityText, "1920 × 1080 · 2 of 3200 frames dropped")
         XCTAssertEqual(v.nowPlaying, "Song · Band")
         XCTAssertEqual(v.tracks.map(\.label), ["English", "French"])
         XCTAssertEqual(v.tracks.map(\.showing), [true, false])
         XCTAssertTrue(v.muted)
         XCTAssertTrue(v.canAirPlay)
-        XCTAssertNil(DetectedVideo(index: 1, raw: ["tag": "audio"]).qualityText)
-        XCTAssertEqual(DetectedVideo(index: 1, raw: ["tag": "audio", "pageTitle": "Only page"]).nowPlaying, "Only page")
+        XCTAssertNil(DetectedVideo(raw: ["tag": "audio"]).qualityText)
+        XCTAssertEqual(DetectedVideo(raw: ["tag": "audio", "pageTitle": "Only page"]).nowPlaying, "Only page")
     }
 }

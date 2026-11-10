@@ -22,6 +22,13 @@ NOTARY_PROFILE="${NOTARY_PROFILE:-BrowserSetu-NOTARY}"
 if ! xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1 && xcrun notarytool history --keychain-profile StreamSetu-NOTARY >/dev/null 2>&1; then
   NOTARY_PROFILE=StreamSetu-NOTARY
 fi
+# With a provisioning profile given, the certificate is the Developer ID one the profile was made for (a team can have several); otherwise the first one found.
+if [ -z "${SIGN_IDENTITY:-}" ] && [ -n "${DEVELOPERID_PROFILE:-}" ] && [ -f "$DEVELOPERID_PROFILE" ]; then
+  PROFILE_CERTS="$(security cms -D -i "$DEVELOPERID_PROFILE" 2>/dev/null | python3 -c 'import sys,plistlib,hashlib; print(" ".join(hashlib.sha1(c).hexdigest().upper() for c in plistlib.loads(sys.stdin.buffer.read()).get("DeveloperCertificates", [])))' 2>/dev/null || true)"
+  for h in $(security find-identity -v -p codesigning | grep "Developer ID Application" | awk '{print $2}'); do
+    case " $PROFILE_CERTS " in *" $h "*) SIGN_IDENTITY="$h"; break ;; esac
+  done
+fi
 SIGN_IDENTITY="${SIGN_IDENTITY:-$(security find-identity -v -p codesigning | grep "Developer ID Application" | head -1 | awk '{print $2}')}"
 
 fail() { echo "✘ $*" >&2; exit 1; }
@@ -31,6 +38,32 @@ TEAM_ID=$(echo "$IDENTITY_NAME" | sed -n 's/.*(\([A-Z0-9]\{10\}\))$/\1/p')
 [ -n "$TEAM_ID" ] || fail "could not read the team ID from '$IDENTITY_NAME'."
 xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1 \
   || fail "notary profile '$NOTARY_PROFILE' is not set up. Run the one-time setup at the top of this script."
+# The app carries the iCloud key-value entitlement (restricted), so it needs a Developer ID provisioning profile for com.browsersetu.mac:
+# a Mac profile of the "Developer ID" distribution type (applies to all devices), made for this team and certificate, with iCloud key-value storage enabled.
+# A development profile (limited to registered devices) is refused here on purpose.
+#   DEVELOPERID_PROFILE  path to that .provisionprofile
+PROFILE_PLIST=""
+if [ "${1:-}" != "--check" ] || [ -n "${DEVELOPERID_PROFILE:-}" ]; then
+  [ -n "${DEVELOPERID_PROFILE:-}" ] && [ -f "$DEVELOPERID_PROFILE" ] || fail "set DEVELOPERID_PROFILE to the Developer ID provisioning profile for com.browsersetu.mac (Apple Developer > Certificates, IDs & Profiles > Profiles > + > Developer ID > Mac)."
+  PROFILE_PLIST="$(mktemp)"; trap 'rm -f "$PROFILE_PLIST"' EXIT
+  security cms -D -i "$DEVELOPERID_PROFILE" > "$PROFILE_PLIST" 2>/dev/null || fail "could not read $DEVELOPERID_PROFILE."
+  CERT_SHA1="$SIGN_IDENTITY" python3 - "$PROFILE_PLIST" "$TEAM_ID" <<'PY' || exit 1
+import sys, plistlib, hashlib, os, datetime
+d = plistlib.load(open(sys.argv[1], "rb")); team = sys.argv[2]; e = d.get("Entitlements", {}); bad = []
+if "OSX" not in d.get("Platform", []): bad.append("it is not a Mac profile")
+if not d.get("ProvisionsAllDevices"): bad.append("it is limited to registered devices (a development profile); a Developer ID profile applies to all devices")
+if d.get("ExpirationDate") and d["ExpirationDate"] < datetime.datetime.utcnow(): bad.append("it has expired")
+if e.get("com.apple.application-identifier") != team + ".com.browsersetu.mac": bad.append("its application identifier is %r, not %s.com.browsersetu.mac" % (e.get("com.apple.application-identifier"), team))
+if e.get("com.apple.developer.team-identifier") != team: bad.append("its team does not match the signing certificate's team")
+kvs = e.get("com.apple.developer.ubiquity-kvstore-identifier")
+if not kvs: bad.append("it does not include iCloud key-value storage")
+elif kvs != team + ".*" and kvs != team + ".com.browsersetu.sync": bad.append("its key-value identifier %r does not cover %s.com.browsersetu.sync" % (kvs, team))
+sha = os.environ.get("CERT_SHA1", "").upper()
+if sha and sha not in [hashlib.sha1(c).hexdigest().upper() for c in d.get("DeveloperCertificates", [])]: bad.append("it was not made for the signing certificate in use")
+if bad:
+    print("✘ the provisioning profile is not usable: " + "; ".join(bad), file=sys.stderr); sys.exit(1)
+PY
+fi
 echo "▸ Signing as: $IDENTITY_NAME"
 echo "▸ Notary profile: $NOTARY_PROFILE"
 
@@ -66,11 +99,26 @@ if [ -d "$SP" ]; then
   for part in "$SP/XPCServices/Installer.xpc" "$SP/XPCServices/Downloader.xpc" "$SP/Autoupdate" "$SP/Updater.app" "$APP/Contents/Frameworks/Sparkle.framework"; do
     [ -e "$part" ] && codesign --force --timestamp --options runtime --sign "$SIGN_IDENTITY" "$part"
   done
-  codesign --force --timestamp --options runtime --sign "$SIGN_IDENTITY" --entitlements "$DERIVED/Build/Intermediates.noindex/BrowserSetu.build/Release/BrowserSetuMacDirect.build/Browser Setu Direct.app.xcent" "$APP"
+  # The profile goes in before the final signature, and its two identifier entitlements are added to the ones the build made, so the signature and the profile agree.
+  cp "$DEVELOPERID_PROFILE" "$APP/Contents/embedded.provisionprofile"
+  FINAL_ENTS="$(mktemp)"
+  python3 - "$DERIVED/Build/Intermediates.noindex/BrowserSetu.build/Release/BrowserSetuMacDirect.build/Browser Setu Direct.app.xcent" "$PROFILE_PLIST" "$FINAL_ENTS" <<'PY'
+import sys, plistlib
+ents = plistlib.load(open(sys.argv[1], "rb")); e = plistlib.load(open(sys.argv[2], "rb"))["Entitlements"]
+for k in ("com.apple.application-identifier", "com.apple.developer.team-identifier"): ents[k] = e[k]
+plistlib.dump(ents, open(sys.argv[3], "wb"))
+PY
+  codesign --force --timestamp --options runtime --sign "$SIGN_IDENTITY" --entitlements "$FINAL_ENTS" "$APP"
+  rm -f "$FINAL_ENTS"
 fi
 codesign --verify --deep --strict --verbose=2 "$APP" 2>&1 | tail -2
-SANDBOX="$(codesign -d --entitlements - --xml "$APP" 2>/dev/null | python3 -c 'import sys,plistlib; d=sys.stdin.buffer.read(); print(str(plistlib.loads(d[d.index(b"<?xml"):]).get("com.apple.security.app-sandbox", "missing")).lower())' 2>/dev/null || echo missing)"
-[ "$SANDBOX" = "true" ] || fail "the app's sandbox entitlement is '$SANDBOX', not true; refusing to release it."
+# The downloadable build is deliberately not sandboxed (apps/apple/project.yml, BrowserSetuMacDirect); it relies on the Hardened Runtime and notarization instead.
+# What must hold for it: Hardened Runtime on, no sandbox entitlement, and, because it carries the iCloud key-value entitlement (a restricted entitlement), a Developer ID
+# provisioning profile embedded in the app. Without that profile macOS refuses to launch the app.
+ENTS="$(codesign -d --entitlements - --xml "$APP" 2>/dev/null | python3 -c 'import sys,plistlib; d=sys.stdin.buffer.read(); e=plistlib.loads(d[d.index(b"<?xml"):]); print("sandbox=" + str(e.get("com.apple.security.app-sandbox", False)).lower() + " kvs=" + str("com.apple.developer.ubiquity-kvstore-identifier" in e).lower())' 2>/dev/null || echo "unreadable")"
+case "$ENTS" in *"sandbox=false"*) ;; *) fail "the app's entitlements read '$ENTS'; the downloadable build must not be sandboxed. Refusing to release it." ;; esac
+codesign -dvv "$APP" 2>&1 | grep -q "flags=.*runtime" || fail "the Hardened Runtime flag is missing; notarization would refuse it."
+case "$ENTS" in *"kvs=true"*) [ -f "$APP/Contents/embedded.provisionprofile" ] || fail "the app carries the iCloud key-value entitlement but has no embedded Developer ID provisioning profile, so macOS would not launch it. Create a Developer ID profile for com.browsersetu.mac with iCloud key-value storage and embed it (see apps/apple/project.yml)." ;; esac
 
 echo "▸ Notarizing the app (this waits for Apple)"
 ZIP="$DIST/$APP_NAME.zip"
@@ -91,6 +139,7 @@ xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
 xcrun stapler staple "$DMG"
 xcrun stapler validate "$DMG"
 spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG" 2>&1 | tail -2
-python3 scripts/generate-sbom.py "$DIST" >/dev/null && echo "▸ SBOM and build metadata written to $DIST"
+python3 scripts/generate-sbom.py "$DIST" --version "$VERSION" >/dev/null
+echo "▸ SBOM and build metadata written to $DIST"
 echo "✔ $DMG is signed, notarized and stapled"
 shasum -a 256 "$DMG"

@@ -97,7 +97,17 @@ impl Store {
         // Reject newer/foreign files before anything (even the journal mode) can modify them.
         Self::check_version(&conn)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
-        Self::init(conn)
+        let store = Self::init(conn)?;
+        store.trim_history();
+        Ok(store)
+    }
+
+    /// Keeps the history from growing for ever: once a profile holds more than 100 000 pages, the least recently visited ones are dropped. Runs when a profile opens.
+    fn trim_history(&self) {
+        let _ = self.conn.execute(
+            "DELETE FROM history WHERE rowid IN (SELECT rowid FROM history ORDER BY last_visit DESC LIMIT -1 OFFSET 100000)",
+            [],
+        );
     }
 
     pub fn open_in_memory() -> Result<Self> {
@@ -139,6 +149,12 @@ impl Store {
     // --- history ---
 
     pub fn record_visit(&self, url: &str, title: &str, now: i64) -> Result<()> {
+        // A page controls its own address and title: neither may grow the history without limit.
+        if url.len() > 2048 {
+            return Ok(());
+        }
+        let title: String = title.chars().take(300).collect();
+        let title = title.as_str();
         self.conn.execute(
             "INSERT INTO history (url, title, last_visit) VALUES (?1, ?2, ?3)
              ON CONFLICT(url) DO UPDATE SET
@@ -150,7 +166,7 @@ impl Store {
         Ok(())
     }
 
-    /// Adds pages from another browser's history in one transaction. A page already here keeps the later of the two dates, gains the imported visits, and keeps its
+    /// Adds pages from another browser's history in one transaction. A page already here keeps the later of the two dates and the larger of the two visit counts (so importing the same file twice changes nothing), and keeps its
     /// own title when the imported one is empty. Returns how many rows were written.
     pub fn import_visits(&mut self, visits: &[(String, String, i64, i64)]) -> Result<u32> {
         let tx = self.conn.transaction()?;
@@ -161,7 +177,7 @@ impl Store {
                  ON CONFLICT(url) DO UPDATE SET
                    title = CASE WHEN excluded.title <> '' AND title = '' THEN excluded.title ELSE title END,
                    last_visit = MAX(last_visit, excluded.last_visit),
-                   visit_count = visit_count + excluded.visit_count",
+                   visit_count = MAX(visit_count, excluded.visit_count)",
             )?;
             for (url, title, when, count) in visits {
                 stmt.execute(params![url, title, when, count])?;
@@ -420,11 +436,15 @@ mod tests {
         let a = s.search_history("alpha", 10).unwrap();
         assert_eq!(
             (a[0].last_visit, a[0].visit_count, a[0].title.as_str()),
-            (100, 4, "Alpha")
+            (100, 3, "Alpha")
         );
         let b = s.search_history("beta", 10).unwrap();
         assert_eq!((b[0].last_visit, b[0].visit_count), (70, 2));
         assert_eq!(s.recent_history(10).unwrap().len(), 3);
+        // Importing the same file again must not inflate anything.
+        s.import_visits(&[("https://a.com".into(), "Other title".into(), 50, 3), ("https://b.com".into(), "Beta".into(), 70, 2)]).unwrap();
+        assert_eq!(s.search_history("alpha", 10).unwrap()[0].visit_count, 3);
+        assert_eq!(s.search_history("beta", 10).unwrap()[0].visit_count, 2);
     }
 
     #[test]

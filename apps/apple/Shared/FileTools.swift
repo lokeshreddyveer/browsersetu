@@ -5,17 +5,18 @@ extension BrowserModel {
     /// Saves the page in front as a PDF in Downloads, or says why it could not.
     func savePageAsPDF() async {
         guard let tab = active, !tab.isBlank else { return }
-        guard !tab.isPrivate else { notice = "Pages from private tabs are not saved to disk."; return }
+        guard tab.privacy.canWriteFilesWithoutAsking else { notice = "Nothing from a tab that leaves no trace is saved without you choosing where. Use Share or Print from the page menu."; return }
         guard let data = await tab.engine.pagePDF(), !data.isEmpty else { notice = "This page could not be saved as a PDF."; return }
-        save(data, name: fileName(for: tab) + ".pdf", folder: nil, message: "Saved the page as a PDF")
+        save(data, name: fileName(for: tab) + ".pdf", folder: nil, source: tab.url, message: "Saved the page as a PDF")
     }
 
     /// Takes a picture of the page: what is on screen, or the whole page from top to bottom. Saved to Downloads › Screenshots.
     func takeScreenshot(fullPage: Bool) async {
         guard let tab = active, !tab.isBlank else { return }
-        guard !tab.isPrivate else { notice = "Pictures of private tabs are not saved to disk."; return }
+        // A tab that leaves no trace never has a picture written for it unasked: the picture opens in the editor, held in memory, and goes to a file only if the person saves or shares it there.
+        guard tab.privacy.canWriteFilesWithoutAsking else { await startScreenshot(fullPage: fullPage); return }
         guard let data = await tab.engine.screenshot(fullPage: fullPage), !data.isEmpty else { notice = "A picture of this page could not be taken."; return }
-        save(data, name: fileName(for: tab) + (fullPage ? " (full page)" : "") + ".png", folder: "Screenshots",
+        save(data, name: fileName(for: tab) + (fullPage ? " (full page)" : "") + ".png", folder: "Screenshots", source: tab.url,
              message: fullPage ? "Saved a full-page screenshot" : "Saved a screenshot")
     }
 
@@ -26,14 +27,15 @@ extension BrowserModel {
         return name.isEmpty ? (displayHost(tab.url).isEmpty ? "Page" : displayHost(tab.url)) : name
     }
 
-    private func save(_ data: Data, name: String, folder: String?, message: String) {
+    /// `source` is the page that was captured: the person may have moved to another tab (a private one, say) while the picture was being made.
+    private func save(_ data: Data, name: String, folder: String?, source: URL?, message: String) {
         var directory = DownloadCoordinator.directory
         if let folder { directory = directory.appendingPathComponent(folder, isDirectory: true) }
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let target = DownloadCoordinator.uniqueURL(in: directory, name: name)
             try data.write(to: target, options: .atomic)
-            try? core.recordDownload(url: active?.url?.absoluteString ?? "", filename: target.lastPathComponent)
+            try? core.recordDownload(url: source?.absoluteString ?? "", filename: target.lastPathComponent)
             notice = "\(message): \(target.lastPathComponent)."
         } catch {
             notice = "That could not be saved. \(error.localizedDescription)"
@@ -52,6 +54,9 @@ struct DownloadFileActions: View {
             Button { preview = url } label: { Image(systemName: "eye") }.help("Preview")
             if url.pathExtension.lowercased() == "pdf" { Button { model.editPDF(at: url) } label: { Image(systemName: "pencil.and.signature") }.help("Edit or sign this PDF") }
             ShareLink(item: url) { Image(systemName: "square.and.arrow.up") }.help("Share")
+            #if os(iOS)
+            if DownloadedFiles.canOpen(url) { Button { DownloadedFiles.open(url) } label: { Image(systemName: "plus.rectangle.on.folder") }.accessibilityLabel("Add to Wallet, Contacts or Calendar") }
+            #endif
             Menu {
                 Button("Copy SHA-256") { checksum { copyToPasteboard($0); model.notice = "SHA-256 copied." } }
                 Button("Verify Checksum…") { verify() }
@@ -107,6 +112,10 @@ extension BrowserModel {
 
     /// Any file you choose: a PDF opens in the editor, anything else in Apple's own previewer (Word, Excel, Pages, Numbers, Keynote, PowerPoint, text, pictures and more).
     func openDocument(_ url: URL) {
-        if url.pathExtension.lowercased() == "pdf" { editPDF(at: url) } else { previewURL = url }
+        switch url.pathExtension.lowercased() {
+        case "pdf": editPDF(at: url)
+        case "torrent": openLinkPreview(.previewLocalTorrent(url))          // the torrent preview (nothing is contacted or started by looking at it), not the document previewer
+        default: previewURL = url
+        }
     }
 }

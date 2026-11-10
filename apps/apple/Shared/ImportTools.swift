@@ -35,10 +35,11 @@ enum CSV {
         return rows
     }
 
-    /// One field written so a spreadsheet or another browser reads it back unchanged. A field that begins like a formula is made harmless.
-    static func field(_ value: String) -> String {
+    /// One field written so a spreadsheet or another browser reads it back unchanged. A text field that begins like a formula is made harmless; a credential is
+    /// not (`guardFormula: false`): another password manager reads the file literally, and the apostrophe would turn "-Xk3..." into a different password.
+    static func field(_ value: String, guardFormula: Bool = true) -> String {
         var v = value
-        if let first = v.unicodeScalars.first, "=+-@\t\r".unicodeScalars.contains(first) { v = "'" + v }
+        if guardFormula, let first = v.unicodeScalars.first, "=+-@\t\r".unicodeScalars.contains(first) { v = "'" + v }
         guard v.contains(where: { $0 == "," || $0 == "\"" || $0 == "\n" || $0 == "\r" }) || v.hasPrefix(" ") || v.hasSuffix(" ") else { return v }
         return "\"" + v.replacingOccurrences(of: "\"", with: "\"\"") + "\""
     }
@@ -87,7 +88,7 @@ enum PasswordImport {
         var lines = ["name,url,username,password,note"]
         for l in logins.sorted(by: { ($0.origin, $0.user) < ($1.origin, $1.user) }) {
             let host = URL(string: l.origin)?.host ?? l.origin
-            lines.append([host, l.origin, l.user, l.password, ""].map(CSV.field).joined(separator: ","))
+            lines.append([CSV.field(host), CSV.field(l.origin), CSV.field(l.user, guardFormula: false), CSV.field(l.password, guardFormula: false), ""].joined(separator: ","))
         }
         return lines.joined(separator: "\n") + "\n"
     }
@@ -139,8 +140,10 @@ enum HistoryImport {
             guard let url = (item["url"] ?? item["URL"] ?? item["destination_url"]) as? String else { continue }
             let title = ((item["title"] ?? item["Title"]) as? String) ?? ""
             let seconds = Self.seconds(from: item)
-            let visits = (item["visit_count"] as? Int64) ?? Int64((item["visit_count"] as? Int) ?? (item["visitCount"] as? Int) ?? 1)
-            if var existing = merged[url] { existing.count += max(1, visits); existing.seconds = max(existing.seconds, seconds); if existing.title.isEmpty { existing.title = title }; merged[url] = existing }
+            // Taken from a file that anyone could have made: kept within sensible bounds so no addition can overflow (the core clamps to 10 000 as well).
+            let rawVisits = (item["visit_count"] as? Int64) ?? Int64((item["visit_count"] as? Int) ?? (item["visitCount"] as? Int) ?? 1)
+            let visits = min(max(rawVisits, 1), 10_000)
+            if var existing = merged[url] { existing.count = min(existing.count + visits, 1_000_000); existing.seconds = max(existing.seconds, seconds); if existing.title.isEmpty { existing.title = title }; merged[url] = existing }
             else { merged[url] = Visit(url: url, title: title, seconds: seconds, count: max(1, visits)) }
         }
         return Array(merged.values)
@@ -148,8 +151,10 @@ enum HistoryImport {
 
     private static func seconds(from item: [String: Any]) -> Int64 {
         func number(_ key: String) -> Double? { (item[key] as? NSNumber)?.doubleValue ?? (item[key] as? String).flatMap(Double.init) }
-        if let micro = number("time_usec") ?? number("last_visit_time") ?? number("visit_time_usec") { return Int64(micro / 1_000_000) }
-        if let s = number("time") ?? number("visit_time") ?? number("lastVisitTime") { return Int64(s > 1e12 ? s / 1000 : s) }
+        // A number from a file may be NaN, infinite or far out of range: converting that to Int64 would stop the app, so it is held to the years that make sense.
+        func whole(_ d: Double) -> Int64 { d.isFinite ? Int64(min(max(d, 0), 4_102_444_800)) : 0 }
+        if let micro = number("time_usec") ?? number("last_visit_time") ?? number("visit_time_usec") { return whole(micro / 1_000_000) }
+        if let s = number("time") ?? number("visit_time") ?? number("lastVisitTime") { return whole(s > 1e12 ? s / 1000 : s) }
         return 0
     }
 }

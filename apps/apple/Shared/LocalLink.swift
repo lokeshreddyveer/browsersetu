@@ -7,11 +7,22 @@ import UniformTypeIdentifiers
 
 /// The wire format between two Browser Setu devices on the same network: a 4-byte length, then JSON.
 struct LinkMessage: Codable, Equatable {
-    enum Kind: String, Codable { case text, link, file, sync }
+    enum Kind: String, Codable {
+        case text, link, file, sync
+        // A file of any size, sent in pieces after the other device has agreed to it (see LinkTransfer.swift).
+        case offer, accept, decline, chunk, finish, result, abort
+        var isTransfer: Bool { switch self { case .offer, .accept, .decline, .chunk, .finish, .result, .abort: true; default: false } }
+    }
     var kind: Kind
     var name: String?
     var text: String?
     var data: Data?
+    /// For a transfer: which one, how large, its SHA-256, which piece this is, and (in a result) whether it arrived whole.
+    var id: String?
+    var size: Int?
+    var sha256: String?
+    var index: Int?
+    var ok: Bool?
 }
 
 enum LinkWire {
@@ -94,9 +105,17 @@ final class LocalLink: ObservableObject {
     @Published var peers: [Peer] = []
     @Published var status = ""
     @Published var inbox: [LinkMessage] = []
+    /// The file being sent or received now, if any.
+    @Published var transfer: TransferProgress?
+    /// Whether an incoming file waits for a yes. On unless the person turned it off.
+    var askBeforeReceiving = true
+    var receivedFolder = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first ?? FileManager.default.temporaryDirectory
+    var onFileReceived: ((URL) -> Void)?
+    private var incoming: [ObjectIdentifier: IncomingFile] = [:]
+    private var sendTask: Task<Void, Never>?
 
     /// Set by the browser: given a snapshot that arrived, returns this device's snapshot to send back.
-    var onSync: ((Data) -> Data?)?
+    var onSync: ((Data) async -> Data?)?
     private var listener: NWListener?
     private var browser: NWBrowser?
     private var buffers: [ObjectIdentifier: Data] = [:]
@@ -161,7 +180,7 @@ final class LocalLink: ObservableObject {
                 case .failed, .cancelled:
                     // A handshake that fails is a wrong code (or a stranger): too many of them end the session.
                     if case .failed = state { self.failedAttempts += 1 }
-                    self.connections[id] = nil; self.buffers[id] = nil
+                    self.connections[id] = nil; self.buffers[id] = nil; self.discardIncoming(id)
                     if self.failedAttempts >= LinkWire.failedAttemptLimit { self.stop(); self.status = "Too many wrong attempts, so sharing was stopped. Start again for a new code." }
                 default: break
                 }
@@ -181,9 +200,11 @@ final class LocalLink: ObservableObject {
                     let messages = try LinkWire.unframe(&buffer)
                     self.buffers[id] = buffer
                     for message in messages {
+                        if message.kind.isTransfer { self.handleTransfer(message, on: connection, id: id); continue }
                         if message.kind == .sync {
                             // A device is syncing with this one: take in its data and answer with this device's own, on the same connection.
-                            if let data = message.data, let reply = self.onSync?(data), let framed = try? LinkWire.frame(LinkMessage(kind: .sync, data: reply)) {
+                            // The other side is checked first (and asked about, the first time); only then is anything taken in.
+                            if let data = message.data, let reply = await self.onSync?(data), self.generation == session, let framed = try? LinkWire.frame(LinkMessage(kind: .sync, data: reply)) {
                                 connection.send(content: framed, completion: .contentProcessed { _ in })
                             }
                         } else if self.inbox.count < LinkWire.maxInboxItems, self.inboxBytes + (message.data?.count ?? 0) <= LinkWire.maxInboxBytes {
@@ -191,8 +212,8 @@ final class LocalLink: ObservableObject {
                             self.inbox.append(message)
                         } else { connection.cancel(); self.connections[id] = nil; self.buffers[id] = nil; return }
                     }
-                } catch { connection.cancel(); self.buffers[id] = nil; self.connections[id] = nil; return }
-                if done || error != nil { connection.cancel(); self.buffers[id] = nil; self.connections[id] = nil } else { self.receive(on: connection, id: id, session: session) }
+                } catch { connection.cancel(); self.buffers[id] = nil; self.connections[id] = nil; self.discardIncoming(id); return }
+                if done || error != nil { connection.cancel(); self.buffers[id] = nil; self.connections[id] = nil; self.discardIncoming(id) } else { self.receive(on: connection, id: id, session: session) }
             }
         }
     }
@@ -278,6 +299,8 @@ final class LocalLink: ObservableObject {
         listener?.cancel(); listener = nil
         browser?.cancel(); browser = nil
         for connection in connections.values { connection.cancel() }
+        for file in incoming.values { file.discard() }
+        incoming = [:]
         connections = [:]
         buffers = [:]
         code = ""
@@ -286,6 +309,177 @@ final class LocalLink: ObservableObject {
     }
 
     func clearInbox() { inbox = []; inboxBytes = 0 }
+
+    // MARK: Files of any size
+
+    private func discardIncoming(_ id: ObjectIdentifier) {
+        if let file = incoming[id] {
+            file.discard(); incoming[id] = nil
+            if transfer?.isActive == true, transfer?.state == .receiving { transfer?.state = .failed("the connection ended") }
+        }
+    }
+
+    private func reply(_ message: LinkMessage, on connection: NWConnection) {
+        guard let framed = try? LinkWire.frame(message) else { return }
+        connection.send(content: framed, completion: .contentProcessed { _ in })
+    }
+
+    /// The receiving side: an offer is put to the person (unless they said not to ask), then the pieces are written and counted as they come, and the whole is checked.
+    private func handleTransfer(_ message: LinkMessage, on connection: NWConnection, id: ObjectIdentifier) {
+        switch message.kind {
+        case .offer:
+            guard let transferID = message.id, let name = message.name, let size = message.size, let sha = message.sha256, incoming[id] == nil, incoming.count < LinkTransferRules.maxIncoming,
+                  size >= 0, size <= LinkTransferRules.maxFileBytes else { reply(LinkMessage(kind: .decline, id: message.id), on: connection); return }
+            let folder = receivedFolder
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                var yes = !self.askBeforeReceiving
+                if !yes {
+                    let readable = ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
+                    yes = await Dialogs.choose(title: "Receive “\(LinkWire.safeFileName(name))”?", message: "A device that has your code wants to send you this file (\(readable)). It goes straight between the two devices, and is checked when it arrives.", buttons: ["Receive", "Decline"]) == 0
+                }
+                guard yes, self.connections[id] != nil, self.incoming[id] == nil, let file = IncomingFile(id: transferID, name: name, size: size, sha256: sha, folder: folder) else {
+                    self.reply(LinkMessage(kind: .decline, id: transferID), on: connection); return
+                }
+                self.incoming[id] = file
+                self.transfer = TransferProgress(name: file.name, done: 0, total: size, state: .receiving)
+                self.reply(LinkMessage(kind: .accept, id: transferID), on: connection)
+                // A sender that goes quiet does not hold the file open for ever.
+                Task { @MainActor [weak self] in
+                    while let self, let file = self.incoming[id] {
+                        try? await Task.sleep(for: .seconds(5))
+                        if self.incoming[id] === file, Date().timeIntervalSince(file.lastActivity) > LinkTransferRules.idleTimeout {
+                            file.discard(); self.incoming[id] = nil; self.transfer?.state = .failed("the other device stopped sending"); connection.cancel(); return
+                        }
+                    }
+                }
+            }
+        case .chunk:
+            guard let file = incoming[id], message.id == file.id, let data = message.data, let index = message.index, file.append(data, index: index) else {
+                if let file = incoming[id] { file.discard(); incoming[id] = nil; transfer?.state = .failed("a piece was missing or out of order") }
+                reply(LinkMessage(kind: .result, id: message.id, ok: false), on: connection); return
+            }
+            transfer?.done = file.received
+        case .finish:
+            guard let file = incoming[id], message.id == file.id else { reply(LinkMessage(kind: .result, id: message.id, ok: false), on: connection); return }
+            transfer?.state = .verifying
+            incoming[id] = nil
+            if let url = file.finish() {
+                transfer?.done = file.size; transfer?.state = .finished
+                reply(LinkMessage(kind: .result, id: message.id, ok: true), on: connection)
+                onFileReceived?(url)
+            } else {
+                transfer?.state = .failed("it did not match what was offered")
+                reply(LinkMessage(kind: .result, id: message.id, ok: false), on: connection)
+            }
+        case .abort:
+            if let file = incoming[id] { file.discard(); incoming[id] = nil; transfer?.state = .cancelled }
+        default:
+            break      // an answer meant for a sender, arriving at a receiver: ignored
+        }
+    }
+
+    /// The sending side: hash the file, offer it, wait for a yes, then send it piece by piece (each piece waits for the last to be handed over) and wait for the other device's check.
+    func sendFile(_ url: URL, to peer: Peer, code: String) {
+        sendTask?.cancel()
+        let name = LinkWire.safeFileName(url.lastPathComponent)
+        transfer = TransferProgress(name: name, state: .waiting)
+        let scoped = url.startAccessingSecurityScopedResource()
+        sendTask = Task { @MainActor [weak self] in
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            guard let self else { return }
+            #if os(iOS)
+            var background: UIBackgroundTaskIdentifier = .invalid
+            background = UIApplication.shared.beginBackgroundTask(withName: "Send a file") { [weak self] in Task { @MainActor in self?.sendTask?.cancel() }; UIApplication.shared.endBackgroundTask(background) }
+            defer { if background != .invalid { UIApplication.shared.endBackgroundTask(background) } }
+            #else
+            let activity = ProcessInfo.processInfo.beginActivity(options: .userInitiated, reason: "Sending a file")
+            defer { ProcessInfo.processInfo.endActivity(activity) }
+            #endif
+            @MainActor func fail(_ reason: String) { self.transfer?.state = .failed(reason) }
+            guard let sums = try? await Task.detached(priority: .userInitiated, operation: { try LinkTransferRules.checksum(of: url) }).value else { fail("the file could not be read"); return }
+            guard sums.size <= LinkTransferRules.maxFileBytes else { fail("it is larger than 2 GB"); return }
+            self.transfer?.total = sums.size
+            let connection = NWConnection(to: peer.endpoint, using: Self.parameters(code: code))
+            let reader = LinkReader(connection)
+            defer { connection.cancel() }
+            guard await reader.start() else { fail("could not connect. Check the code and that both devices are on the same network"); return }
+            let transferID = UUID().uuidString
+            guard await reader.send(LinkMessage(kind: .offer, name: name, id: transferID, size: sums.size, sha256: sums.sha256)) else { fail("could not send the offer"); return }
+            guard let answer = await reader.next(timeout: LinkTransferRules.acceptTimeout), answer.id == transferID else { fail("no answer from the other device"); return }
+            guard answer.kind == .accept else { self.transfer?.state = .declined; return }
+            self.transfer?.state = .sending
+            guard let handle = try? FileHandle(forReadingFrom: url) else { fail("the file could not be read"); return }
+            defer { try? handle.close() }
+            var index = 0
+            while !Task.isCancelled {
+                guard let piece = try? handle.read(upToCount: LinkTransferRules.chunkBytes), !piece.isEmpty else { break }
+                guard await reader.send(LinkMessage(kind: .chunk, data: piece, id: transferID, index: index)) else { fail("the connection was lost"); return }
+                index += 1
+                self.transfer?.done += piece.count
+            }
+            if Task.isCancelled { _ = await reader.send(LinkMessage(kind: .abort, id: transferID)); self.transfer?.state = .cancelled; return }
+            guard await reader.send(LinkMessage(kind: .finish, id: transferID)) else { fail("the connection was lost"); return }
+            self.transfer?.state = .verifying
+            if let result = await reader.next(timeout: 30), result.kind == .result, result.ok == true { self.transfer?.state = .finished } else { fail("the other device could not confirm it") }
+        }
+    }
+
+    func cancelTransfer() { sendTask?.cancel() }
+}
+
+/// One connection read and written as awaited steps, for the sender: connect, send a message and wait until it is handed over, wait for the next message with a time limit.
+@MainActor
+final class LinkReader {
+    private let connection: NWConnection
+    private var buffer = Data()
+    private var queue: [LinkMessage] = []
+
+    init(_ connection: NWConnection) { self.connection = connection }
+
+    func start() async -> Bool {
+        await withCheckedContinuation { continuation in
+            var finished = false
+            connection.stateUpdateHandler = { state in
+                guard !finished else { return }
+                switch state {
+                case .ready: finished = true; continuation.resume(returning: true)
+                case .failed, .waiting, .cancelled: finished = true; continuation.resume(returning: false)
+                default: break
+                }
+            }
+            connection.start(queue: .main)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 10) { if !finished { finished = true; continuation.resume(returning: false) } }
+        }
+    }
+
+    func send(_ message: LinkMessage) async -> Bool {
+        guard let framed = try? LinkWire.frame(message) else { return false }
+        return await withCheckedContinuation { continuation in
+            connection.send(content: framed, completion: .contentProcessed { error in continuation.resume(returning: error == nil) })
+        }
+    }
+
+    func next(timeout: TimeInterval) async -> LinkMessage? {
+        let deadline = Date().addingTimeInterval(timeout)
+        while queue.isEmpty {
+            if Date() >= deadline || Task.isCancelled { return nil }
+            let got: Bool = await withCheckedContinuation { continuation in
+                var finished = false
+                connection.receive(minimumIncompleteLength: 1, maximumLength: 256 * 1024) { [weak self] data, _, done, error in
+                    Task { @MainActor in
+                        guard !finished else { return }
+                        finished = true
+                        if let data, let self { self.buffer.append(data); if let messages = try? LinkWire.unframe(&self.buffer) { self.queue += messages } }
+                        continuation.resume(returning: error == nil && !done || !(data?.isEmpty ?? true))
+                    }
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + max(0.1, min(5, deadline.timeIntervalSinceNow))) { if !finished { finished = true; continuation.resume(returning: true) } }
+            }
+            if !got && queue.isEmpty { return nil }
+        }
+        return queue.removeFirst()
+    }
 }
 
 struct DevicesView: View {
@@ -308,6 +502,8 @@ struct DevicesView: View {
                 } else {
                     Button("Receive from Another Device") { link.startReceiving(deviceName: ProcessInfo.processInfo.hostName) }
                 }
+                Toggle("Ask before receiving a file", isOn: $model.linkAskBeforeReceiving)
+                    .onChange(of: model.linkAskBeforeReceiving) { _, on in link.askBeforeReceiving = on }
                 #endif
                 ForEach(Array(link.inbox.enumerated()), id: \.offset) { _, item in
                     HStack {
@@ -325,23 +521,38 @@ struct DevicesView: View {
                 TextField("Code shown on the other device (20 characters)", text: $enteredCode).autocorrectionDisabled()
                 Button("Send This Page’s Link") { send(LinkMessage(kind: .link, name: model.active?.title, text: model.active?.url?.absoluteString)) }.disabled(!ready || model.active?.url == nil)
                 Button("Send Copied Text") { if let text = pasteboardText() { send(LinkMessage(kind: .text, text: text)) } }.disabled(!ready)
-                Button("Send a File…") { picking = true }.disabled(!ready)
+                Button("Send a File…") { picking = true }.disabled(!ready || link.transfer?.isActive == true)
+                if let file = model.transferFile {
+                    Button("Send “\(file.lastPathComponent)”") {
+                        if let chosen, let code = LinkWire.normalized(enteredCode) { link.sendFile(file, to: chosen, code: code); model.transferFile = nil }
+                    }.disabled(!ready || link.transfer?.isActive == true)
+                }
                 Button("Sync Bookmarks and Tabs with This Device") { syncNow() }.disabled(!ready).accessibilityIdentifier("wifi-sync")
             } header: { Text("Send") }
+            if let transfer = link.transfer {
+                Section {
+                    if transfer.isActive { ProgressView(value: transfer.fraction) }
+                    Text(transfer.summary).font(.callout)
+                    if transfer.total > 0 { Text("\(ByteCountFormatter.string(fromByteCount: Int64(transfer.done), countStyle: .file)) of \(ByteCountFormatter.string(fromByteCount: Int64(transfer.total), countStyle: .file))").font(.caption).foregroundStyle(.secondary) }
+                    if transfer.isActive { Button("Cancel", role: .destructive) { link.cancelTransfer() } }
+                } header: { Text("File") }
+            }
             if !link.status.isEmpty { Section { Text(link.status).foregroundStyle(.secondary) } }
         }
         .formStyle(.grouped)
         .onAppear {
             link.startBrowsing()
-            link.onSync = { data in model.receiveWiFiSnapshot(data) }
+            link.onSync = { data in await model.acceptWiFiSnapshot(data) }
+            link.askBeforeReceiving = model.linkAskBeforeReceiving
+            link.onFileReceived = { url in model.notice = "Received “\(url.lastPathComponent)” and checked it." }
         }
         .onDisappear { link.stop(); link.clearInbox() }
         .fileImporter(isPresented: $picking, allowedContentTypes: [.item]) { result in
             guard case .success(let url) = result else { return }
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-            guard let data = try? Data(contentsOf: url) else { link.status = "Could not read that file."; return }
-            send(LinkMessage(kind: .file, name: url.lastPathComponent, data: data))
+            // Any size, in pieces: nothing is read into memory whole, the other device is asked first, and the file is checked when it arrives.
+            if let chosen, let code = LinkWire.normalized(enteredCode) { link.sendFile(url, to: chosen, code: code) }
         }
         .accessibilityIdentifier("devices")
     }
@@ -349,23 +560,24 @@ struct DevicesView: View {
     private var ready: Bool { chosen != nil && LinkWire.normalized(enteredCode) != nil }
 
     private func syncNow() {
-        guard let chosen, let snapshot = model.wifiSnapshot() else { return }
+        guard let chosen, let snapshot = model.signedWiFiSnapshot() else { return }
         guard let code = LinkWire.normalized(enteredCode) else { return }
         link.sync(snapshot: snapshot, to: chosen, code: code) { reply in
-            model.finishWiFiSync(reply: reply, deviceName: chosen.name)
-            link.status = model.syncStatus
+            Task { @MainActor in
+                await model.acceptWiFiReply(reply, deviceName: chosen.name)
+                link.status = model.syncStatus
+            }
         }
     }
 
     private func send(_ message: LinkMessage) { if let chosen, let code = LinkWire.normalized(enteredCode) { link.send(message, to: chosen, code: code) } }
 
     private func label(_ item: LinkMessage) -> String {
-        switch item.kind { case .file: "File: \(item.name ?? "")"; case .link: "Link: \(item.text ?? "")"; case .text: "Text: \(item.text ?? "")"; case .sync: "Sync" }
+        switch item.kind { case .file: "File: \(item.name ?? "")"; case .link: "Link: \(item.text ?? "")"; case .text: "Text: \(item.text ?? "")"; default: "Transfer" }
     }
 
     private func handle(_ item: LinkMessage) {
         switch item.kind {
-        case .sync: break
         case .link: if let text = item.text { model.open(urlString: text, newTab: true) }
         case .text: if let text = item.text { copyToPasteboard(text); model.notice = "Copied." }
         case .file:
@@ -374,6 +586,7 @@ struct DevicesView: View {
             let folder = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first ?? FileManager.default.temporaryDirectory
             let target = folder.appendingPathComponent(name)
             model.notice = (try? data.write(to: target, options: .withoutOverwriting)) != nil ? "Saved \(name) to Downloads." : "Could not save \(name)."
+        default: break
         }
     }
 

@@ -387,7 +387,7 @@ struct TabSearchPanel: View {
 
     private var results: [TabController] {
         let words = model.tabSearchQuery.split(whereSeparator: \.isWhitespace).map(String.init)
-        let pool = model.tabs.filter { $0.isPrivate == model.activeIsPrivate && !$0.isBlank || $0.id == model.activeID }
+        let pool = model.tabs.filter { ($0.isPrivate == model.activeIsPrivate && !$0.isBlank || $0.id == model.activeID) && !model.isHiddenTab($0) }
         let matches = words.isEmpty ? pool : pool.filter { tab in
             let haystack = tab.displayTitle + " " + (tab.url?.absoluteString ?? "")
             return words.allSatisfy { haystack.localizedCaseInsensitiveContains($0) }
@@ -441,7 +441,7 @@ struct TabSearchPanel: View {
             TabFavicon(tab: tab, size: 16).frame(width: 18)
             VStack(alignment: .leading, spacing: 1) {
                 Text(tab.displayTitle).font(.system(size: 13)).lineLimit(1)
-                Text(displayHost(tab.url) + (tab.workspace == model.activeWorkspace ? "" : " · \(tab.workspace.isEmpty ? "Personal" : tab.workspace)"))
+                Text(displayHost(tab.url) + (model.isEssentialTab(tab) ? " · Essential" : (tab.workspace == model.activeWorkspace ? "" : " · \(tab.workspace.isEmpty ? "Personal" : tab.workspace)")))
                     .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 0)
@@ -455,7 +455,7 @@ struct TabSearchPanel: View {
     private func activate(_ list: [TabController]) {
         guard list.indices.contains(selection) else { return }
         let tab = list[selection]
-        if tab.workspace != model.activeWorkspace { model.switchWorkspace(tab.workspace) }
+        if !model.isEssentialTab(tab), tab.workspace != model.activeWorkspace { model.switchWorkspace(tab.workspace) }
         model.select(tab.id)
         close()
     }
@@ -469,18 +469,21 @@ struct TabSearchPanel: View {
 struct VerticalTabsList: View {
     @EnvironmentObject var model: BrowserModel
     @State private var groupQuery = ""
+    /// Knows whether the tab in front has scrolled out of view, to offer the way back to it.
+    @StateObject private var locator = TabVisibilityCoordinator()
 
     var body: some View {
         let tabs = model.visibleTabs
         let pinned = tabs.filter(\.pinned)
         let regular = tabs.filter { !$0.pinned }
+        ScrollViewReader { proxy in
         ScrollView {
             VStack(alignment: .leading, spacing: model.density.rowSpacing) {
-                // Pinned tabs: compact icon tiles above everything else. They belong to the workspace they were pinned in,
-                // and stay pinned there until unpinned.
+                // Essentials: the sites kept in every workspace. Then the pinned tabs, which belong to the workspace they were pinned in.
+                EssentialsGrid()
                 if !pinned.isEmpty {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 38, maximum: 52), spacing: 6)], spacing: 6) {
-                        ForEach(pinned) { PinnedTile(tab: $0, selected: $0.id == model.activeID) }
+                        ForEach(pinned) { PinnedTile(tab: $0, selected: $0.id == model.activeID).trackedWhenSelected($0.id == model.activeID, in: TabListSpace.name) }
                     }
                     .padding(.bottom, 6)
                     Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 0.5).padding(.horizontal, 4).padding(.bottom, 6)
@@ -493,25 +496,48 @@ struct VerticalTabsList: View {
                     .padding(.bottom, 2)
                 }
                 if !model.groupNames.isEmpty { groups }
-                ForEach(model.stackedVisible(model.treeVisible(regular))) { VerticalTabRow(tab: $0, selected: $0.id == model.activeID) }
-                Button { model.newTab() } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "plus").font(.system(size: 11, weight: .medium)).frame(width: 16)
-                        Text("New Tab").font(.system(size: 13))
-                        Spacer()
-                    }
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 9).frame(height: model.density.smallRowHeight)
-                    .contentShape(Rectangle())
+                ForEach(model.stackedVisible(model.treeVisible(regular))) {
+                    VerticalTabRow(tab: $0, selected: $0.id == model.activeID).trackedWhenSelected($0.id == model.activeID, in: TabListSpace.name)
                 }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("new-tab-row")
+                HStack(spacing: 0) {
+                    Button { model.newTab() } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "plus").font(.system(size: 11, weight: .medium)).frame(width: 16)
+                            Text("New Tab").font(.system(size: 13))
+                            Spacer()
+                        }
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 9).frame(height: model.density.smallRowHeight)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("new-tab-row")
+                    // Closes this workspace's unpinned tabs (not Essentials, not pinned ones) and offers Undo.
+                    if model.clearableTabs().count >= 2 {
+                        Button("Clear") { model.clearTabs() }
+                            .buttonStyle(.plain).font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+                            .padding(.horizontal, 9).frame(height: model.density.smallRowHeight)
+                            .help("Close the unpinned tabs in this workspace")
+                            .accessibilityIdentifier("clear-tabs")
+                            .transition(.opacity)
+                    }
+                }
             }
             .padding(.horizontal, 6).padding(.bottom, 8)
             .motion(.easeOut(duration: 0.12), value: model.visibleTabs.map(\.id))
             .motion(.easeOut(duration: 0.18), value: model.density)
         }
+        .tracksTabVisibility(locator, in: TabListSpace.name)
+        .tabLocator(locator) {
+            guard let active = model.active else { return }
+            // An Essential's tile is identified by its record, any other tab by its own id.
+            animated(.easeInOut(duration: 0.3)) {
+                if let record = model.essentialRecord(for: active) { proxy.scrollTo(record.id, anchor: .top) }
+                else { proxy.scrollTo(active.id, anchor: .center) }
+            }
+        }
         .acceptsDroppedTabs(model)
+        }
     }
 
     private var groups: some View {
@@ -665,10 +691,10 @@ private struct SidebarDownloadsList: View {
                             Image(systemName: "exclamationmark.arrow.circlepath").font(.system(size: 13)).foregroundStyle(.orange).frame(width: 18)
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(d.filename).font(.system(size: 13)).lineLimit(1).truncationMode(.middle)
-                                Text("Stopped part-way").font(.system(size: 11)).foregroundStyle(.secondary)
+                                Text(d.recovery.canAct ? (d.recovery == .resumable ? "Stopped part-way" : "Stopped part-way, starts over") : "Needs a fresh link").font(.system(size: 11)).foregroundStyle(.secondary)
                             }
                             Spacer(minLength: 0)
-                            Button("Resume") { coordinator.resume(d.id) }.buttonStyle(.borderless).font(.system(size: 12))
+                            if let action = d.recovery.actionTitle { Button(action) { coordinator.resume(d.id) }.buttonStyle(.borderless).font(.system(size: 12)) }
                             Button { coordinator.dismissInterrupted(d.id) } label: { Image(systemName: "xmark").accessibilityLabel("Dismiss") }.buttonStyle(.borderless).help("Remove")
                         }
                         .padding(.horizontal, 12).padding(.vertical, 6)
@@ -1080,6 +1106,7 @@ struct SidebarRail: View {
             if model.effectiveTabLayout == .sidebar {
                 ScrollView {
                     VStack(spacing: 4) {
+                        EssentialsInline(size: 32, vertical: true)
                         ForEach(model.visibleTabs) { RailTab(tab: $0, selected: $0.id == model.activeID) }
                     }
                     .padding(.vertical, 4)
@@ -1110,6 +1137,7 @@ struct RailTab: View {
             .buttonStyle(.plain)
             .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(selected ? Color.raised : Color.clear).shadow(color: .black.opacity(selected ? 0.14 : 0), radius: 2, y: 1))
             .contentShape(Rectangle())
+            .accessibilityLabel(tab.spokenTitle)
             .accessibilityAddTraits(selected ? .isSelected : [])
             .accessibilityIdentifier("tab-chip")
             .contextMenu { TabMenuItems(tab: tab) }
@@ -1135,6 +1163,8 @@ struct SidebarContainer: View {
             }
             .frame(width: width)
             .sidebarSurface()
+            // The workspace's colour theme, as a faint wash fading down from the top edge of the sidebar.
+            .overlay(alignment: .top) { WorkspaceWash() }
             if model.sidebarPosition == .left { handle }
         }
     }
@@ -1149,7 +1179,11 @@ struct SidebarContainer: View {
                             guard !model.sidebarRail else { return }
                             if dragStart == nil { dragStart = model.sidebarWidth }
                             let delta = Double(value.translation.width) * (model.sidebarPosition == .left ? 1 : -1)
-                            model.sidebarWidth = clampedSidebarWidth((dragStart ?? 250) + delta)
+                            let raw = clampedSidebarWidth((dragStart ?? 250) + delta)
+                    // Close to the standard width it settles on it, with a small tap so it can be felt.
+                    let snapped = model.snapSidebarWidth && abs(raw - SidebarSnap.standard) <= SidebarSnap.reach
+                    if snapped && model.sidebarWidth != SidebarSnap.standard { NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now) }
+                    model.sidebarWidth = snapped ? SidebarSnap.standard : raw
                         }
                         .onEnded { _ in dragStart = nil })
             )
@@ -1242,8 +1276,12 @@ struct SidebarDownloadQueue: View {
                 if held { Text(coordinator.heldUntil == .distantFuture ? "Held until you resume" : "Held until \(coordinator.heldUntil.map { $0.formatted(date: .omitted, time: .shortened) } ?? "")").font(.system(size: 11)).foregroundStyle(.secondary) }
                 ForEach(coordinator.waiting) { item in
                     HStack(spacing: 6) {
-                        Image(systemName: "hourglass").font(.system(size: 12)).foregroundStyle(.secondary).frame(width: 18)
-                        Text(item.filename).font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
+                        Image(systemName: item.isRetry ? "arrow.clockwise" : "hourglass").font(.system(size: 12)).foregroundStyle(.secondary).frame(width: 18)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(item.filename).font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
+                            Text("\(item.isRetry ? "Trying again · " : item.isResume ? "Resuming · " : "")#\(item.position) in line\(coordinator.queueNote.map { " · " + $0 } ?? "")")
+                                .font(.system(size: 10.5)).foregroundStyle(.secondary).lineLimit(1)
+                        }
                         Spacer(minLength: 0)
                         Menu(item.priority.title) { ForEach(DownloadPriority.allCases.reversed()) { p in Button(p.title) { coordinator.setPriority(item.id, p) } } }.menuStyle(.borderlessButton).fixedSize()
                         Button { coordinator.cancelWaiting(item.id) } label: { Image(systemName: "xmark").accessibilityLabel("Cancel download") }.buttonStyle(.borderless)
@@ -1252,8 +1290,13 @@ struct SidebarDownloadQueue: View {
                 ForEach(coordinator.scheduled) { item in
                     HStack(spacing: 6) {
                         Image(systemName: "clock").font(.system(size: 12)).foregroundStyle(.secondary).frame(width: 18)
-                        Text(item.filename).font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(item.filename).font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
+                            Text(coordinator.overdue.contains(item.id) ? "Was due \(item.dueAt.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "")" : (item.dueAt.map { "Starts \($0.formatted(date: .abbreviated, time: .shortened))" } ?? "Starts when the queue is released"))
+                                .font(.system(size: 10.5)).foregroundStyle(.secondary).lineLimit(1)
+                        }
                         Spacer(minLength: 0)
+                        if coordinator.overdue.contains(item.id) { Button("Start Now") { coordinator.startScheduled(item.id) }.font(.system(size: 11)) }
                         Button { coordinator.removeScheduled(item.id) } label: { Image(systemName: "xmark").accessibilityLabel("Remove from schedule") }.buttonStyle(.borderless)
                     }
                 }
@@ -1261,4 +1304,11 @@ struct SidebarDownloadQueue: View {
             .padding(.horizontal, 12).padding(.vertical, 6)
         }
     }
+}
+
+
+/// The sidebar's standard width and how near to it a drag settles on it.
+enum SidebarSnap {
+    static let standard: Double = 260
+    static let reach: Double = 6
 }

@@ -104,7 +104,7 @@ final class Workbench: ObservableObject {
         case .find: model.showFind()
         case .copyURL: if let url = tab?.url { copyToPasteboard(url.absoluteString); model.notice = "Address copied." }
         case .bookmark: model.toggleBookmark()
-        case .toggleSidebar: model.sidebarVisible.toggle()
+        case .toggleSidebar: model.toggleSidebar()
         }
     }
 
@@ -170,7 +170,7 @@ final class Workbench: ObservableObject {
     // MARK: Automation
 
     /// Commands a workflow or an outside link may run. Anything that deletes or changes settings is left out on purpose.
-    static let safeCommands: Set<String> = ["digest", "inbox", "restore-last-session", "screenshot-annotate", "toolkit", "new-tab", "new-private", "reopen", "sidebar", "overview", "bookmarks", "history", "downloads", "restore-layout", "group-by-site", "scratch-tab", "research", "site-privacy", "layout-research", "layout-writing", "layout-media", "layout-minimal"]
+    static let safeCommands: Set<String> = ["digest", "inbox", "restore-last-session", "toolkit", "new-tab", "new-private", "reopen", "sidebar", "overview", "bookmarks", "history", "downloads", "restore-layout", "group-by-site", "scratch-tab", "research", "site-privacy", "layout-research", "layout-writing", "layout-media", "layout-minimal"]
 
     func setWorkflows(_ list: [Workflow]) { workflows = list; saveMap("workflows", "list", list) }
 
@@ -201,7 +201,7 @@ final class Workbench: ObservableObject {
         }
     }
 
-    /// An action from a link or Shortcuts. Anything that opens pages or runs steps is confirmed first, because a web page can fire these links.
+    /// An action from a link or Shortcuts. Opening a page or a search is what a link to the browser is for, so it needs no question (the page opens in a tab the person can see and close). Running steps is confirmed first, because a web page can fire these links; commands are limited to a short safe list.
     func handle(_ action: URLAction) {
         guard let model else { return }
         Task { @MainActor in
@@ -211,6 +211,8 @@ final class Workbench: ObservableObject {
             case .command(let id):
                 guard Self.safeCommands.contains(id) else { model.notice = "That command cannot be run from outside the browser."; return }
                 model.allPaletteItems(full: true).first { $0.id == id }?.run()
+            case .space(let query): model.openSpace(matching: query)
+            case .report(let text): model.notice = text
             case .workflow(let name):
                 guard let flow = workflows.first(where: { $0.id == name.lowercased() }) else { model.notice = "There is no workflow called “\(name)”."; return }
                 let answer = await Dialogs.choose(title: "Run “\(flow.name)”?", message: "Something outside the browser asked to run these \(flow.steps.count) steps.", buttons: ["Run", "Cancel"])
@@ -241,7 +243,9 @@ final class Workbench: ObservableObject {
 
     func runDueChecks() async {
         guard let model, model.hasStarted else { return }
-        for index in schedule.indices where schedule[index].isDue(now: Date()) {
+        for due in schedule.filter({ $0.isDue(now: Date()) }).map(\.key) {
+            // Look the item up again each time: the list can change while a check waits for its page.
+            guard let index = schedule.firstIndex(where: { $0.key == due }) else { continue }
             let item = schedule[index]
             guard let url = URL(string: item.url), let watch = model.watchedPages[item.key] else { continue }
             schedule[index].lastRun = Date().timeIntervalSince1970
@@ -291,6 +295,20 @@ final class Workbench: ObservableObject {
         let h = host.trimmingCharacters(in: .whitespaces).lowercased()
         guard !h.contains("/"), !h.contains(" ") else { return false }
         let rule = DownloadRule(host: h, kind: kind, folder: clean)
+        setDownloadRules(downloadRules.filter { $0.id != rule.id } + [rule])
+        return true
+    }
+
+    /// A rule that saves into a folder outside Downloads, which the person has just chosen (the access is kept as a bookmark, so it still works after a relaunch).
+    func addExternalDownloadRule(host: String, kind: DownloadRule.Kind, folder url: URL) -> Bool {
+        guard downloadRules.count < 50 else { return false }
+        let h = host.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !h.contains("/"), !h.contains(" ") else { return false }
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        guard let data = try? DownloadDestinationAccess.makeBookmark(for: url) else { return false }
+        var rule = DownloadRule(host: h, kind: kind, folder: "")
+        rule.bookmark = data; rule.bookmarkName = url.lastPathComponent
         setDownloadRules(downloadRules.filter { $0.id != rule.id } + [rule])
         return true
     }

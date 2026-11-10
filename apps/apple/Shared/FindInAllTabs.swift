@@ -14,13 +14,13 @@ struct FindInAllTabsView: View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Find in all open tabs", text: $query).textFieldStyle(.plain).focused($focused)
+                FormTextField("Find in all open tabs", text: $query).textFieldStyle(.plain).focused($focused)
                     .onSubmit { run() }
                 if searching { ProgressView().controlSize(.small) }
             }
             .padding(12)
             Divider()
-            List {
+            PanelList {
                 if !query.isEmpty && !searching && hits.isEmpty {
                     Text("No open tab contains “\(query)”.").foregroundStyle(.secondary)
                 }

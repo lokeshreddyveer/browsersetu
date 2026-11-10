@@ -28,7 +28,7 @@ extension BrowserModel {
 
     /// A login form was submitted in `tab`.
     func loginSubmitted(origin: String, user: String, password: String, in tab: TabController) {
-        guard !tab.isPrivate, saveLoginsEnabled, !askingAboutLogin else { return }
+        guard tab.privacy.canSaveLogins, saveLoginsEnabled, !askingAboutLogin else { return }
         tab.typedLogin = nil
         let offer = LoginRules.offer(origin: origin, user: user, password: password, kept: WebLoginVault.list(origin: origin, profile: profileName), neverFor: neverSaveOrigins)
         guard offer != .nothing else { return }

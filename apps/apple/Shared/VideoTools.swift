@@ -21,9 +21,36 @@ struct DetectedVideo: Identifiable, Equatable {
     var nowPlaying = ""
     var tracks: [(label: String, showing: Bool)] = []
     var canAirPlay = false
+    /// Where the player says it can be moved to (nil: it cannot be moved at all), and how far it has loaded.
+    var seekStart: Double?
+    var seekEnd: Double?
+    var bufferedEnd: Double?
+    var isLive = false
+    var loops = false
+    /// Whether it is really on show (not hidden or tiny), in view, and how big; a muted, looping, control-less one is decoration, not something to watch.
+    var visible = true
+    var inView = true
+    var area = 0
+    var decorative = false
+    /// The two points of an A–B repeat, once set.
+    var repeatA: Double?
+    var repeatB: Double?
+    var audioTracks: [(label: String, enabled: Bool)] = []
+    var theater = false
+    var focus = false
+    var fit = ""
+    var picture: (brightness: Double, contrast: Double, saturation: Double)?
+    var chapters: [(title: String, start: Double)] = []
+    var errorCode: Int?
+    var errorMessage: String?
+    var isBlobSource = false
+    var readyState = 0
+    var networkState = 0
+    var canSeek: Bool { seekStart != nil && seekEnd != nil && !(isLive && (seekEnd ?? 0) - (seekStart ?? 0) < 1) }
 
     static func == (a: DetectedVideo, b: DetectedVideo) -> Bool {
         a.id == b.id && a.source == b.source && a.time == b.time && a.paused == b.paused && a.rate == b.rate && a.muted == b.muted && a.height == b.height
+            && a.loops == b.loops && a.theater == b.theater && a.repeatA == b.repeatA && a.repeatB == b.repeatB && a.bufferedEnd == b.bufferedEnd && a.audioTracks.map(\.enabled) == b.audioTracks.map(\.enabled) && a.focus == b.focus && a.fit == b.fit && a.picture?.brightness == b.picture?.brightness && a.picture?.contrast == b.picture?.contrast && a.picture?.saturation == b.picture?.saturation && a.chapters.count == b.chapters.count && a.errorCode == b.errorCode
             && a.tracks.map(\.label) == b.tracks.map(\.label) && a.tracks.map(\.showing) == b.tracks.map(\.showing)
     }
 
@@ -35,8 +62,8 @@ struct DetectedVideo: Identifiable, Equatable {
         return text
     }
 
-    init(index: Int, raw: [String: Any]) {
-        id = index
+    init(raw: [String: Any]) {
+        id = (raw["id"] as? NSNumber)?.intValue ?? 0
         source = (raw["src"] as? String) ?? ""
         duration = (raw["duration"] as? NSNumber)?.doubleValue ?? 0
         time = (raw["currentTime"] as? NSNumber)?.doubleValue ?? 0
@@ -55,6 +82,33 @@ struct DetectedVideo: Identifiable, Equatable {
         nowPlaying = title.isEmpty ? ((raw["pageTitle"] as? String) ?? "") : (artist.isEmpty ? title : "\(title) · \(artist)")
         tracks = ((raw["tracks"] as? [[String: Any]]) ?? []).map { (($0["label"] as? String) ?? "Track", ($0["mode"] as? String) == "showing") }
         canAirPlay = (raw["canAirPlay"] as? NSNumber)?.boolValue ?? false
+        seekStart = (raw["seekStart"] as? NSNumber)?.doubleValue
+        seekEnd = (raw["seekEnd"] as? NSNumber)?.doubleValue
+        bufferedEnd = (raw["bufferedEnd"] as? NSNumber)?.doubleValue
+        isLive = (raw["live"] as? NSNumber)?.boolValue ?? false
+        loops = (raw["loop"] as? NSNumber)?.boolValue ?? false
+        visible = (raw["visible"] as? NSNumber)?.boolValue ?? true
+        inView = (raw["inView"] as? NSNumber)?.boolValue ?? true
+        area = (raw["area"] as? NSNumber)?.intValue ?? 0
+        decorative = (raw["decorative"] as? NSNumber)?.boolValue ?? false
+        audioTracks = ((raw["audioTracks"] as? [[String: Any]]) ?? []).map { (($0["label"] as? String) ?? "Track", ($0["enabled"] as? NSNumber)?.boolValue ?? false) }
+        theater = (raw["theater"] as? NSNumber)?.boolValue ?? false
+        focus = (raw["focus"] as? NSNumber)?.boolValue ?? false
+        fit = (raw["fit"] as? String) ?? ""
+        if let pic = raw["picture"] as? [String: Any] {
+            picture = ((pic["brightness"] as? NSNumber)?.doubleValue ?? 1, (pic["contrast"] as? NSNumber)?.doubleValue ?? 1, (pic["saturation"] as? NSNumber)?.doubleValue ?? 1)
+        }
+        chapters = ((raw["chapters"] as? [[String: Any]]) ?? []).compactMap { c in
+            guard let start = (c["start"] as? NSNumber)?.doubleValue else { return nil }
+            let title = ((c["title"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return (title.isEmpty ? DetectedVideo.clock(start) : title, start)
+        }
+        errorCode = (raw["errorCode"] as? NSNumber)?.intValue
+        errorMessage = raw["errorMessage"] as? String
+        isBlobSource = (raw["blob"] as? NSNumber)?.boolValue ?? false
+        readyState = (raw["readyState"] as? NSNumber)?.intValue ?? 0
+        networkState = (raw["networkState"] as? NSNumber)?.intValue ?? 0
+        if let ab = raw["ab"] as? [String: Any] { repeatA = (ab["a"] as? NSNumber)?.doubleValue; repeatB = (ab["b"] as? NSNumber)?.doubleValue }
     }
 
     var title: String { (isVideo ? "Video" : "Audio") + (duration.isFinite && duration > 0 ? " · " + Self.clock(duration) : " · live") }
@@ -65,7 +119,21 @@ struct DetectedVideo: Identifiable, Equatable {
     }
 }
 
-enum VideoAction: String { case play, pause, speed, pictureInPicture, fullscreen, seek, mute, volume, airplay, subtitle }
+enum VideoAction: String { case play, pause, speed, pictureInPicture, fullscreen, seek, seekBy, loop, markA, markB, clearAB, mute, volume, airplay, subtitle, audioTrack, theater, focus, fit, frame, speedBy, subtitleShift, endAction }
+
+/// Which player a page-wide request (Pop Out, the speed menu, the player controls) is about: the one that is really being watched. A player that is playing and audible comes first, then
+/// one that is playing, then the biggest one in view; hidden ones and decorative loops are only used when nothing else is there.
+enum MediaSelection {
+    static func primary(of videos: [DetectedVideo]) -> DetectedVideo? {
+        func rank(_ v: DetectedVideo) -> (Int, Int, Int, Int) {
+            let playing = !v.paused ? 1 : 0
+            let audible = (!v.paused && !v.muted && v.volume > 0) ? 1 : 0
+            let shown = (v.visible && v.inView && !v.decorative) ? 1 : 0
+            return (shown, audible, playing, v.area)
+        }
+        return videos.max { rank($0) < rank($1) }
+    }
+}
 
 struct VideoToolsView: View {
     @EnvironmentObject var model: BrowserModel
@@ -77,7 +145,21 @@ struct VideoToolsView: View {
             if loaded && videos.isEmpty && model.playingElsewhere.isEmpty && model.mediaHistory.isEmpty {
                 ContentUnavailableView("No Video Found", systemImage: "play.slash", description: Text("No video or audio player was found on this page."))
             } else {
-                List {
+                Form {
+                Section {
+                    if model.floatingPlayerOpen {
+                        HStack {
+                            Label("The player controls are floating on the page.", systemImage: "rectangle.on.rectangle").foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Close It") { model.closeFloatingPlayer() }.controlSize(.small)
+                        }
+                    } else {
+                        EnhancedPlayerPanel(player: model.player) { model.hidePlayer() }.listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
+                        #if os(macOS)
+                        Button { model.openFloatingPlayer(); model.sheet = nil } label: { Label("Float These Controls on the Page", systemImage: "rectangle.on.rectangle") }
+                        #endif
+                    }
+                }
                 MediaOverviewSections()
                 ForEach(videos) { video in
                     VStack(alignment: .leading, spacing: 8) {
@@ -116,18 +198,23 @@ struct VideoToolsView: View {
                     .padding(.vertical, 4)
                 }
                 }
+                .formStyle(.grouped)
             }
         }
-        .task { await refresh() }
+        .task { await refresh(); model.showPlayer() }
+        .onDisappear { if !model.floatingPlayerOpen { model.hidePlayer() } }
     }
 
     private func refresh() async {
-        videos = (await model.active?.engine.mediaElements() ?? []).enumerated().map { DetectedVideo(index: $0.offset, raw: $0.element) }
+        videos = (await model.active?.engine.mediaElements() ?? []).map { DetectedVideo(raw: $0) }
         loaded = true
     }
 
     private func run(_ video: DetectedVideo, _ action: VideoAction, _ value: Double = 0) {
-        Task { await model.active?.engine.controlVideo(index: video.id, action: action.rawValue, value: value); await refresh() }
+        Task {
+            if let problem = await model.active?.engine.controlVideo(id: video.id, action: action.rawValue, value: value) { model.notice = problem }
+            await refresh()
+        }
     }
 }
 
@@ -143,6 +230,10 @@ struct PageRepairView: View {
                     model.privacy.toggleSite(host: model.active?.url?.host); model.active?.reload()
                 }
                 step("Load the desktop version", "For pages that fail on the mobile layout.", "desktopcomputer") { model.active?.engine.setDesktopMode(true); model.active?.reload() }
+                step("Look at the cookie banner again", "If a banner is still in the way, or came back. A banner is only called refused when it really closed.", "checkmark.shield") { model.handleBannerNow() }
+                step("Leave this site’s cookie banners alone", "Switches banner handling off for this website only, then reloads.", "xmark.shield") {
+                    model.setConsentHandling(host: model.active?.url?.host, on: false); model.active?.reload()
+                }
                 step("Let this site start video by itself", "If a player on this page waits for a tap that it should not need.", "play.circle") {
                     model.setAutoplayException(host: model.active?.url?.host, allowed: true); model.active?.reload()
                 }

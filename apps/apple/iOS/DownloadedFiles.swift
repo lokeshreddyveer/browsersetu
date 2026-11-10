@@ -7,6 +7,10 @@ import UIKit
 /// the contact, add the event) instead of only landing in the downloads list. Everything is read on the device; nothing is sent anywhere.
 @MainActor
 enum DownloadedFiles {
+    /// Whether the system has a sheet for this kind of file (a pass, a contact card, a calendar event).
+    static func canOpen(_ file: URL) -> Bool { ["pkpass", "vcf", "ics"].contains(file.pathExtension.lowercased()) }
+
+    /// Only ever called from a button the person pressed.
     static func open(_ file: URL) {
         switch file.pathExtension.lowercased() {
         case "pkpass": pass(file)

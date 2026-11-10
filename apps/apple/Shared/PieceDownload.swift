@@ -24,6 +24,8 @@ enum PiecePlan {
         guard response.statusCode == 200, let url = response.url, url.scheme?.lowercased() == "https" else { return false }
         if let method = request?.httpMethod, method.uppercased() != "GET" { return false }
         if request?.httpBody != nil || request?.httpBodyStream != nil { return false }
+        // A request that carried its own credentials is never repeated by the app's separate session: the pieces would go out without them, or with them copied out of the page.
+        if let headers = request?.allHTTPHeaderFields, headers.keys.contains(where: { ["authorization", "cookie", "proxy-authorization"].contains($0.lowercased()) }) { return false }
         let accepts = (response.value(forHTTPHeaderField: "Accept-Ranges") ?? "").lowercased()
         guard accepts.contains("bytes") else { return false }
         // A compressed body cannot be fetched by byte positions in the file.

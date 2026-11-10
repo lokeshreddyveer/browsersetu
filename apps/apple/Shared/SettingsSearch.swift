@@ -16,7 +16,7 @@ enum SettingsIndex {
         SettingEntry(title: "Default Browser", words: "make default open links", phone: "general", mac: "general"),
         SettingEntry(title: "Startup and Home Page", words: "on launch homepage restore tabs", phone: "general", mac: "general"),
         SettingEntry(title: "Start Page", words: "favorites greeting new tab background continue", phone: "general", mac: "general"),
-        SettingEntry(title: "Downloads", words: "download location folder organize", phone: "general", mac: "general"),
+        SettingEntry(title: "Downloads", words: "download location folder organize torrent magnet p2p peer speed limit bandwidth proxy retry connections multipart notifications ed2k duplicate collision link grabber extensions accounts", phone: "general", mac: "downloads"),
         SettingEntry(title: "Search Engine", words: "brave duckduckgo google bing default search", phone: "general", mac: "search"),
         SettingEntry(title: "Search Suggestions", words: "autocomplete suggestions from search engine typing", phone: "privacy", mac: "search"),
         SettingEntry(title: "Search Shortcuts", words: "keywords yt g custom search", phone: "general", mac: "search"),
@@ -78,6 +78,8 @@ enum SettingsIndex {
         SettingEntry(title: "Backup Passwords", words: "backup export encrypted passwords icloud drive restore", phone: "privacy", mac: "advanced"),
         SettingEntry(title: "Sidebar Buttons", words: "footer bottom icons history downloads bookmarks settings profile customise arrange", phone: "interface", mac: "tabs"),
         SettingEntry(title: "Address Bar Buttons", words: "address bar icons lock shield reload star share copy link page actions arrange customise", phone: "interface", mac: "search"),
+        SettingEntry(title: "Single-Tab Strip", words: "hide tab strip one tab only single", phone: "interface", mac: "tabs"),
+        SettingEntry(title: "Sidebar Width Snap", words: "snap resize sidebar standard default width", phone: "interface", mac: "tabs"),
         SettingEntry(title: "Keyboard Shortcuts", words: "keys hotkeys commands", phone: "interface", mac: "shortcuts"),
         SettingEntry(title: "About and Version", words: "build engine licences acknowledgements update", phone: "about", mac: "advanced"),
     ]
@@ -94,4 +96,87 @@ enum SettingsIndex {
         .sorted { $0.1 > $1.1 }
         .map(\.0)
     }
+}
+
+extension SettingsIndex {
+    /// The section of the Mac pane (the name its view goes by in `SettingsPanelView`) that holds each setting, so a search result can scroll to it and not only open the pane.
+    static let macSections: [String: String] = [
+        "Default Browser": "DefaultBrowserSection",
+        "Startup and Home Page": "StartupSettingsSection",
+        "Start Page": "StartPageSettingsSection",
+        "Downloads": "DownloadsSettingsSection",
+        "Search Engine": "SearchSettingsSection",
+        "Search Suggestions": "SearchSettingsSection",
+        "Search Shortcuts": "SearchShortcutsSection",
+        "Profiles": "ProfileSettingsSection",
+        "Theme": "AppearanceSettingsSection",
+        "Themes": "AppearanceSettingsSection",
+        "VayuSetu (VPN, Encrypted DNS)": "VayuSetuSection",
+        "AI Features": "AISettingsSection",
+        "AI Tools": "AISettingsSection",
+        "Look-alike Address Warning": "SafetySettingsSection",
+        "Clear Everything Now": "BrowsingDataSection",
+        "Automatic Workspace Switching": "FocusScheduleSection",
+        "Accent Color": "AppearanceSettingsSection",
+        "Websites Look": "AppearanceSettingsSection",
+        "Dark Pages": "DarkPagesSection",
+        "Density": "AppearanceSettingsSection",
+        "Layout": "AppearanceSettingsSection",
+        "Toolbar and Menu": "AppearanceSettingsSection",
+        "Address Bar Position": "AppearanceSettingsSection",
+        "Tab Position": "TabPositionSection",
+        "Tabs, Groups and Workspaces": "TabsSettingsSection",
+        "Gestures": "GesturesSection",
+        "Page Zoom": "SiteZoomSection",
+        "Protection Level": "VayuLevelSection",
+        "AMP, YouTube Ads and Fingerprint Randomizing": "PageDefensesSection",
+        "Clear on Quit": "ClearOnQuitSection",
+        "Lock Sensitive Settings": "SensitiveLockSection",
+        "Searchable Copy of Pages": "SearchableCopySection",
+        "Page Memory": "PageMemorySection",
+        "Use a Proxy": "ProxySection",
+        "Threat List": "ThreatListSection",
+        "Camera, Microphone and Location": "SitePermissionsSection",
+        "Saved Sign-ins and Passwords": "SavedSignInsSection",
+        "Website Data": "WebsiteDataSection",
+        "Link Cleaning": "LinkCleaningSection",
+        "Site Icons": "SiteIconsSection",
+        "iCloud Sync": "SyncSection",
+        "Wi-Fi Sync": "SyncSection",
+        "Backup and Restore": "BackupSection",
+        "Bookmarks Import and Export": "BookmarkTransferSection",
+        "Recovery": "RecoverySection",
+        "Memory Saver": "MemorySettingsSection",
+        "Resource Dashboard": "ResourceMonitorSection",
+        "Network Speed": "ResourceMonitorSection",
+        "Health Check": "HealthCheckSection",
+        "Media Compatibility": "MediaCompatibilitySection",
+        "Extensions and Scripts": "ExtensionsSettingsSection",
+        "Address Bar Results": "AddressSourcesSection",
+        "Theme Schedule": "AppearanceSettingsSection",
+        "Tab Previews": "TabHoverAndStacksSection",
+        "Tab Stacks": "TabHoverAndStacksSection",
+        "Web Panels": "WebPanelsSection",
+        "Right-Click Menus": "ContextMenusSection",
+        "Break Mode": "BreakAndPageActionsSection",
+        "Page Actions": "BreakAndPageActionsSection",
+        "Command Chains": "CommandChainsSection",
+        "Tab Tree": "TabsSettingsSection",
+        "Passwords in iCloud Keychain": "PasswordsInfoSection",
+        "Backup Passwords": "BackupSection",
+        "Sidebar Buttons": "SidebarFooterSection",
+        "Address Bar Buttons": "AddressBarButtonsSection",
+        "Keyboard Shortcuts": "ShortcutsSettingsSection",
+        "Single-Tab Strip": "TabHoverAndStacksSection",
+        "Sidebar Width Snap": "TabHoverAndStacksSection",
+        "About and Version": "AboutSection",
+    ]
+
+    static func macSection(for entry: SettingEntry) -> String? { macSections[entry.title] }
+}
+
+/// A request to bring one section of a Settings pane into view; the token makes asking for the same section twice a new request.
+struct SettingsReveal: Equatable {
+    let section: String
+    let token = UUID()
 }

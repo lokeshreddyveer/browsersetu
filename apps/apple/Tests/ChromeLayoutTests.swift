@@ -398,3 +398,65 @@ final class ChromeLayoutTests: XCTestCase {
         }
     }
 }
+
+/// Hidden toolbar buttons take no room, and extension buttons do.
+final class ToolbarRoomTests: XCTestCase {
+    func testAHiddenButtonLeavesNoRoomForItself() {
+        let all = ToolbarPriority(width: 1000)
+        var hidden = all
+        hidden.visible.bookmark = false; hidden.visible.downloads = false
+        XCTAssertEqual(all.trailingWidth - hidden.trailingWidth, 56, "two 28 pt buttons")
+        var noOptional = all
+        noOptional.visible.share = false; noOptional.visible.newTab = false; noOptional.visible.overview = false
+        XCTAssertEqual(all.trailingWidth - noOptional.trailingWidth, 84)
+        var noLeading = all
+        noLeading.visible.sidebar = false; noLeading.visible.backForward = false
+        XCTAssertLessThan(noLeading.leadingWidth(inset: 84), all.leadingWidth(inset: 84))
+        XCTAssertEqual(noLeading.leadingWidth(inset: 84), 84 + 8)
+    }
+
+    func testExtensionButtonsTakeRoom() {
+        let plain = ToolbarPriority(width: 1000)
+        var withExtensions = plain
+        withExtensions.visible.extensionButtons = 5
+        XCTAssertEqual(withExtensions.trailingWidth - plain.trailingWidth, 5 * 28)
+    }
+
+    func testTheDefaultStillMeansEverythingIsShown() {
+        // The earlier width model: leading inset + 28 + 2 + (4 + 28 + 28) + 8, trailing 4 + 28 + 28 + 28 + 28 * 3 + 10.
+        let p = ToolbarPriority(width: 1000)
+        let leading: CGFloat = 84 + 28 + 2 + 4 + 28 + 28 + 8
+        let trailing: CGFloat = 4 + 28 + 28 + 28 + 84 + 10
+        XCTAssertEqual(p.leadingWidth(inset: 84), leading)
+        XCTAssertEqual(p.trailingWidth, trailing)
+    }
+
+    func testMoreButtonsStayWhenTheOnesOnTheLeftAreHidden() {
+        // At 560 pt the full set does not fit, so the bar drops bookmark and downloads. With the sidebar and back/forward hidden there is room for them.
+        let full = ToolbarPriority(fitting: 560, leadingInset: 84)
+        XCTAssertFalse(full.showBookmark)
+        let lean = ToolbarPriority(fitting: 560, leadingInset: 84, visible: ToolbarVisibility(sidebar: false, backForward: false))
+        XCTAssertTrue(lean.showBookmark && lean.showDownloads)
+    }
+
+    func testTheFieldNeverTouchesTheControlsWhateverIsHidden() {
+        for width in stride(from: 520.0, through: 2000.0, by: 20.0) {
+            for mask in 0..<64 {
+                var v = ToolbarVisibility()
+                v.sidebar = mask & 1 == 0
+                v.backForward = mask & 2 == 0
+                v.share = mask & 4 == 0
+                v.bookmark = mask & 8 == 0
+                v.downloads = mask & 16 == 0
+                v.extensionButtons = mask & 32 == 0 ? 0 : 5
+                let window = CGFloat(width)
+                let p = ToolbarPriority(fitting: window, leadingInset: 84, visible: v)
+                let field: CGFloat = p.fieldWidth(window: window, leadingInset: 84)
+                let room: CGFloat = (window - field) / 2
+                let needed: CGFloat = max(p.leadingWidth(inset: 84), p.trailingWidth)
+                // The narrowest set may still not fit in a very narrow window; the field then keeps its floor and is the thing that gives.
+                if window >= p.requiredWindow(leadingInset: 84) { XCTAssertGreaterThanOrEqual(room, needed + 12 - 0.01, "width \(width) mask \(mask)") }
+            }
+        }
+    }
+}

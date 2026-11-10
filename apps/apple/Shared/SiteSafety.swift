@@ -150,14 +150,21 @@ enum LookalikeCheck {
             while true {
                 guard index < chars.count, let d = digit(chars[index]) else { return nil }
                 index += 1
-                i += d * w
+                let (product, o1) = d.multipliedReportingOverflow(by: w)
+                let (sum, o2) = i.addingReportingOverflow(product)
+                guard !o1, !o2 else { return nil }   // a hostile label must not crash the browser
+                i = sum
                 let t = k <= bias ? tMin : (k >= bias + tMax ? tMax : k - bias)
                 if d < t { break }
-                w *= base - t
+                let (nextW, o3) = w.multipliedReportingOverflow(by: base - t)
+                guard !o3 else { return nil }
+                w = nextW
                 k += base
             }
             bias = adapt(i - oldi, output.count + 1, oldi == 0)
-            n += i / (output.count + 1)
+            let (grown, o4) = n.addingReportingOverflow(i / (output.count + 1))
+            guard !o4 else { return nil }
+            n = grown
             i %= output.count + 1
             guard let scalar = Unicode.Scalar(n) else { return nil }
             output.insert(Character(scalar), at: i)

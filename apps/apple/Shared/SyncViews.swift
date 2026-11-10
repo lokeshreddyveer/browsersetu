@@ -21,7 +21,7 @@ struct SyncSection: View {
             }
             if model.iCloudSync {
                 HStack {
-                    TextField("Sync group", text: $groupDraft).autocorrectionDisabled().onSubmit { model.changeSyncGroup(groupDraft) }
+                    FormTextField("Sync group", text: $groupDraft).autocorrectionDisabled().onSubmit { model.changeSyncGroup(groupDraft) }
                     if groupDraft.trimmingCharacters(in: .whitespaces) != model.syncGroupName, !groupDraft.trimmingCharacters(in: .whitespaces).isEmpty {
                         Button("Join") { model.changeSyncGroup(groupDraft) }
                     }
@@ -89,7 +89,7 @@ struct SyncedTabsView: View {
 
     var body: some View {
         NavigationStack {
-            List {
+            PanelList {
                 ForEach(model.remoteTabs) { device in
                     Section {
                         let named = Dictionary(grouping: device.tabs.filter { !($0.group ?? "").isEmpty }, by: { $0.group ?? "" })
@@ -114,7 +114,7 @@ struct SyncedTabsView: View {
                 }
             }
             .navigationTitle("Tabs on Other Devices")
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .sheetDoneToolbar { dismiss() }
         }
         #if os(macOS)
         .frame(minWidth: 460, minHeight: 420)

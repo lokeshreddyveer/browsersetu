@@ -1,0 +1,224 @@
+current,target folder,feature owner,xcode targets,platform guards,lines,risk
+Shared/AISettings.swift,Shared/Settings/,Settings,"Mac, Direct, iOS",DIRECT_BUILD,97,low
+Shared/AISwitches.swift,Shared/Settings/,Settings,"Mac, Direct, iOS",DIRECT_BUILD,46,low
+Shared/Accessibility.swift,Shared/DesignSystem/,DesignSystem,"Mac, Direct, iOS",,60,low
+Shared/AdaptiveDark.swift,Shared/Privacy/ContentBlocking/,Privacy,"Mac, Direct, iOS",,284,low
+Shared/AddressBarController.swift,Shared/Browsing/Navigation/,Browsing,"Mac, Direct, iOS",macOS-guard,580,low
+Shared/AddressShortcut.swift,Shared/Browsing/Navigation/,Browsing,"Mac, Direct, iOS",,13,low
+Shared/AgentHTTP.swift,Shared/Tools/Automation/,Tools,"Mac, Direct, iOS",,86,compiled by scripts/test-agent-server.sh with swiftc
+Shared/AgentMCP.swift,Shared/Tools/Automation/,Tools,"Mac, Direct, iOS",,103,low
+Shared/AgentPolicy.swift,Shared/Tools/Automation/,Tools,"Mac, Direct, iOS",,232,low
+Shared/AnimatedWallpaper.swift,Shared/Browsing/StartPage/,Browsing,"Mac, Direct, iOS",macOS-guard;iOS-guard,334,extends BrowserModel/TabController (cross-folder)
+Shared/AppCommands.swift,Shared/App/Commands/,App,"Mac, Direct, iOS",macOS-guard,195,low
+Shared/AppSettings.swift,Shared/Settings/,Settings,"Mac, Direct, iOS",,378,low
+Shared/AutofillTools.swift,Shared/Privacy/Credentials/,Privacy,"Mac, Direct, iOS",,300,extends BrowserModel/TabController (cross-folder)
+Shared/Automation.swift,Shared/Tools/Automation/,Tools,"Mac, Direct, iOS",,95,low
+Shared/AutomationTools.swift,Shared/Tools/Automation/,Tools,"Mac, Direct, iOS",macOS-guard,190,extends BrowserModel/TabController (cross-folder)
+Shared/BackToTop.swift,Shared/Browsing/WebKit/,Browsing,"Mac, Direct, iOS",iOS-guard,131,extends BrowserModel/TabController (cross-folder)
+Shared/BackupFile.swift,Shared/Profiles/Sync/,Profiles,"Mac, Direct, iOS",,139,low
+Shared/BlockedCounter.swift,Shared/Privacy/ContentBlocking/,Privacy,"Mac, Direct, iOS",,32,low
+Shared/BlockedStats.swift,Shared/Privacy/ContentBlocking/,Privacy,"Mac, Direct, iOS",,100,low
+Shared/BookmarkHTML.swift,Shared/Browsing/Bookmarks/,Browsing,"Mac, Direct, iOS",,108,low
+Shared/BreachCheck.swift,Shared/Privacy/Credentials/,Privacy,"Mac, Direct, iOS",,79,read by tests as a path: PasswordSafetyTests.swift
+Shared/BrowserError.swift,Shared/Browsing/WebKit/,Browsing,"Mac, Direct, iOS",,337,low
+Shared/BrowserExtras.swift,Shared/Extensions/,Extensions,"Mac, Direct, iOS",,773,extends BrowserModel/TabController (cross-folder)
+Shared/BrowserModel.swift,Shared/App/Model/,App,"Mac, Direct, iOS",macOS-guard,4103,"read by tests as a path: DownloadPolicyTests.swift,PasswordSafetyTests.swift,Phase14NotificationsDiagnosticsTests.swift,Phase16LinkGrabberTests.swift,PrivacyIntegrationTests.swift; extends BrowserModel/TabController (cross-folder)"
+Shared/CertificateIdentity.swift,Shared/Privacy/SitePermissions/,Privacy,"Mac, Direct, iOS",,153,low
+Shared/ChromeWebStore.swift,Shared/Extensions/,Extensions,"Mac, Direct, iOS",,66,low
+Shared/ClearTabs.swift,Shared/Browsing/Tabs/,Browsing,"Mac, Direct, iOS",,94,extends BrowserModel/TabController (cross-folder)
+Shared/ConsentTools.swift,Shared/Privacy/TrackerProtection/,Privacy,"Mac, Direct, iOS",,167,extends BrowserModel/TabController (cross-folder)
+Shared/Continuity.swift,Shared/App/Bootstrap/,App,"Mac, Direct, iOS",,67,extends BrowserModel/TabController (cross-folder)
+Shared/CookieBanners.swift,Shared/Privacy/ContentBlocking/,Privacy,"Mac, Direct, iOS",,274,low
+Shared/CrashGuard.swift,Shared/App/Bootstrap/,App,"Mac, Direct, iOS",,75,low
+Shared/Credentials.swift,Shared/Privacy/SitePermissions/,Privacy,"Mac, Direct, iOS",macOS-guard,68,low
+Shared/DebugLog.swift,Shared/Platform/Diagnostics/,Platform,"Mac, Direct, iOS",,10,low
+Shared/DetailExtraction.swift,Shared/Browsing/Reading/,Browsing,"Mac, Direct, iOS",macOS-guard,127,low
+Shared/DevCapture.swift,Shared/Tools/Developer/,Tools,"Mac, Direct, iOS",,233,low
+Shared/DevTools.swift,Shared/Tools/Developer/,Tools,"Mac, Direct, iOS",,180,low
+Shared/DevUtilities.swift,Shared/Tools/Developer/,Tools,"Mac, Direct, iOS",,302,low
+Shared/DeviceNetwork.swift,Shared/Privacy/NetworkPolicy/,Privacy,"Mac, Direct, iOS",,36,low
+Shared/DockedPanels.swift,Shared/DesignSystem/,DesignSystem,"Mac, Direct, iOS",,76,low
+Shared/DownloadCoordinator.swift,Shared/Downloads/Coordination/,Downloads,"Mac, Direct, iOS",macOS-guard,1417,read by tests as a path: DownloadPolicyTests.swift
+Shared/DownloadCoordinator+Network.swift,Shared/Downloads/Coordination/,Downloads,"Mac, Direct, iOS",,100,low
+Shared/DownloadFlight.swift,Shared/Downloads/Browser/,Downloads,"Mac, Direct, iOS",,99,low
+Shared/DownloadQueue.swift,Shared/Downloads/Coordination/,Downloads,"Mac, Direct, iOS",iOS-guard,115,low
+Shared/DownloadStats.swift,Shared/Downloads/Coordination/,Downloads,"Mac, Direct, iOS",macOS-guard,72,low
+Shared/DownloadToast.swift,Shared/Downloads/Browser/,Downloads,"Mac, Direct, iOS",,111,extends BrowserModel/TabController (cross-folder)
+Shared/EnhancedPlayer.swift,Shared/MediaPlayer/,MediaPlayer,"Mac, Direct, iOS",,472,read by tests as a path: RealVideoPlayerTests.swift; extends BrowserModel/TabController (cross-folder)
+Shared/Enhancements.swift,Shared/Extensions/,Extensions,"Mac, Direct, iOS",,154,extends BrowserModel/TabController (cross-folder)
+Shared/ErrorPageView.swift,Shared/Browsing/WebKit/,Browsing,"Mac, Direct, iOS",,392,low
+Shared/ErrorRecovery.swift,Shared/Browsing/WebKit/,Browsing,"Mac, Direct, iOS",macOS-guard,79,extends BrowserModel/TabController (cross-folder)
+Shared/Essentials.swift,Shared/Browsing/Tabs/,Browsing,"Mac, Direct, iOS",,216,extends BrowserModel/TabController (cross-folder)
+Shared/EssentialsViews.swift,Shared/Browsing/Tabs/,Browsing,"Mac, Direct, iOS",,142,low
+Shared/ExtensionCenter.swift,Shared/Extensions/,Extensions,"Mac, Direct, iOS",,216,low
+Shared/ExtensionCompatibility.swift,Shared/Extensions/,Extensions,"Mac, Direct, iOS",,69,low
+Shared/ExtensionPackage.swift,Shared/Extensions/,Extensions,"Mac, Direct, iOS",,275,low
+Shared/ExtensionTools.swift,Shared/Extensions/,Extensions,"Mac, Direct, iOS",,266,low
+Shared/ExternalApps.swift,Shared/Platform/SystemIntegration/,Platform,"Mac, Direct, iOS",,47,low
+Shared/ExternalLookups.swift,Shared/Platform/Networking/,Platform,"Mac, Direct, iOS",,393,low
+Shared/FaviconStore.swift,Shared/Browsing/Bookmarks/,Browsing,"Mac, Direct, iOS",macOS-guard,185,low
+Shared/FeedTools.swift,Shared/Browsing/Reading/,Browsing,"Mac, Direct, iOS",,126,extends BrowserModel/TabController (cross-folder)
+Shared/FileRules.swift,Shared/Downloads/Files/,Downloads,"Mac, Direct, iOS",,124,low
+Shared/FileTools.swift,Shared/Downloads/Files/,Downloads,"Mac, Direct, iOS",,121,extends BrowserModel/TabController (cross-folder)
+Shared/FindInAllTabs.swift,Shared/Browsing/Tabs/,Browsing,"Mac, Direct, iOS",,70,low
+Shared/FloatingPlayer.swift,Shared/MediaPlayer/,MediaPlayer,"Mac, Direct, iOS",macOS-guard,185,low
+Shared/FrameMonitor.swift,Shared/Platform/Diagnostics/,Platform,"Mac, Direct, iOS",iOS-guard,311,low
+Shared/FuzzyText.swift,Shared/Browsing/Search/,Browsing,"Mac, Direct, iOS",,123,low
+Shared/GitHubEnhancements.swift,Shared/Extensions/,Extensions,"Mac, Direct, iOS",,94,low
+Shared/Glance.swift,Shared/Browsing/Tabs/,Browsing,"Mac, Direct, iOS",,105,low
+Shared/GlanceView.swift,Shared/Browsing/Tabs/,Browsing,"Mac, Direct, iOS",,181,low
+Shared/HealthCheck.swift,Shared/Privacy/NetworkPolicy/,Privacy,"Mac, Direct, iOS",,82,low
+Shared/ImportTools.swift,Shared/Privacy/Credentials/,Privacy,"Mac, Direct, iOS",,160,low
+Shared/Intents.swift,Shared/App/Bootstrap/,App,"Mac, Direct, iOS",,95,low
+Shared/InterfaceViews.swift,Shared/DesignSystem/,DesignSystem,"Mac, Direct, iOS",macOS-guard;iOS-guard,806,low
+Shared/KnowledgeTools.swift,Shared/Browsing/Bookmarks/,Browsing,"Mac, Direct, iOS",,278,extends BrowserModel/TabController (cross-folder)
+Shared/LaunchArguments.swift,Shared/App/Bootstrap/,App,"Mac, Direct, iOS",,87,low
+Shared/LayoutState.swift,Shared/Settings/,Settings,"Mac, Direct, iOS",,381,extends BrowserModel/TabController (cross-folder)
+Shared/LayoutTips.swift,Shared/Settings/,Settings,"Mac, Direct, iOS",iOS-guard,147,extends BrowserModel/TabController (cross-folder)
+Shared/LibraryPanels.swift,Shared/Browsing/History/,Browsing,"Mac, Direct, iOS",,427,read by tests as a path: DownloadsBatchTests.swift
+Shared/LinkTransfer.swift,Shared/Profiles/Sync/,Profiles,"Mac, Direct, iOS",,116,low
+Shared/LiveText.swift,Shared/Browsing/WebKit/,Browsing,"Mac, Direct, iOS",,53,low
+Shared/LoadingBar.swift,Shared/Browsing/Navigation/,Browsing,"Mac, Direct, iOS",,76,low
+Shared/LocalLink.swift,Shared/Profiles/Sync/,Profiles,"Mac, Direct, iOS",,600,read by tests as a path: PrivacyIntegrationTests.swift
+Shared/LookupActions.swift,Shared/Platform/Networking/,Platform,"Mac, Direct, iOS",,121,extends BrowserModel/TabController (cross-folder)
+Shared/MediaCompatibility.swift,Shared/MediaPlayer/,MediaPlayer,"Mac, Direct, iOS",macOS-guard,249,extends BrowserModel/TabController (cross-folder)
+Shared/MediaExtras.swift,Shared/MediaPlayer/,MediaPlayer,"Mac, Direct, iOS",,149,extends BrowserModel/TabController (cross-folder)
+Shared/MediaResume.swift,Shared/MediaPlayer/,MediaPlayer,"Mac, Direct, iOS",,170,extends BrowserModel/TabController (cross-folder)
+Shared/MoreTools.swift,Shared/Privacy/Credentials/,Privacy,"Mac, Direct, iOS",macOS-guard,298,extends BrowserModel/TabController (cross-folder)
+Shared/MouseGestures.swift,Shared/App/Commands/,App,"Mac, Direct, iOS",,76,extends BrowserModel/TabController (cross-folder)
+Shared/NavHistoryMenu.swift,Shared/Browsing/Tabs/,Browsing,"Mac, Direct, iOS",,19,low
+Shared/NavigationPolicy.swift,Shared/Browsing/Navigation/,Browsing,"Mac, Direct, iOS",,21,low
+Shared/NetworkSpeed.swift,Shared/Platform/Diagnostics/,Platform,"Mac, Direct, iOS",,116,low
+Shared/NetworkTools.swift,Shared/Platform/Networking/,Platform,"Mac, Direct, iOS",,349,extends BrowserModel/TabController (cross-folder)
+Shared/NewTabPage.swift,Shared/Browsing/Navigation/,Browsing,"Mac, Direct, iOS",macOS-guard,180,extends BrowserModel/TabController (cross-folder)
+Shared/NoScrollBars.swift,Shared/Browsing/WebKit/,Browsing,"Mac, Direct, iOS",macOS-guard,58,low
+Shared/OfflineGames.swift,Shared/Tools/Games/,Tools,"Mac, Direct, iOS",,407,low
+Shared/PDFEdit.swift,Shared/Tools/Documents/,Tools,"Mac, Direct, iOS",macOS-guard,277,low
+Shared/PDFEditor.swift,Shared/Tools/Documents/,Tools,"Mac, Direct, iOS",macOS-guard,425,read by tests as a path: FinalIntegrationTests.swift
+Shared/PDFOperations.swift,Shared/Tools/Documents/,Tools,"Mac, Direct, iOS",,304,low
+Shared/PageActionsView.swift,Shared/Browsing/WebKit/,Browsing,"Mac, Direct, iOS",macOS-guard,73,low
+Shared/PageDefenses.swift,Shared/Browsing/WebKit/,Browsing,"Mac, Direct, iOS",,473,extends BrowserModel/TabController (cross-folder)
+Shared/PageImage.swift,Shared/Browsing/WebKit/,Browsing,"Mac, Direct, iOS",macOS-guard,61,low
+Shared/PageIndex.swift,Shared/Browsing/History/,Browsing,"Mac, Direct, iOS",,238,extends BrowserModel/TabController (cross-folder)
+Shared/PageMemory.swift,Shared/Browsing/SessionRestore/,Browsing,"Mac, Direct, iOS",,189,read by tests as a path: TabPrivacyTests.swift; extends BrowserModel/TabController (cross-folder)
+Shared/PageMenu.swift,Shared/Browsing/WebKit/,Browsing,"Mac, Direct, iOS",macOS-guard,198,extends BrowserModel/TabController (cross-folder)
+Shared/PageSummary.swift,Shared/Browsing/Reading/,Browsing,"Mac, Direct, iOS",,116,low
+Shared/PageTools.swift,Shared/Browsing/Reading/,Browsing,"Mac, Direct, iOS",,306,extends BrowserModel/TabController (cross-folder)
+Shared/PageVersions.swift,Shared/Browsing/History/,Browsing,"Mac, Direct, iOS",,168,extends BrowserModel/TabController (cross-folder)
+Shared/PanelKit.swift,Shared/DesignSystem/,DesignSystem,"Mac, Direct, iOS",,238,low
+Shared/PanelList.swift,Shared/DesignSystem/,DesignSystem,"Mac, Direct, iOS",,30,low
+Shared/PasswordManager.swift,Shared/Privacy/Credentials/,Privacy,"Mac, Direct, iOS",,113,"read by tests as a path: PasswordSafetyTests.swift,TabPrivacyTests.swift; extends BrowserModel/TabController (cross-folder)"
+Shared/PasswordSafety.swift,Shared/Privacy/Credentials/,Privacy,"Mac, Direct, iOS",,112,read by tests as a path: PasswordSafetyTests.swift
+Shared/PerfMonitor.swift,Shared/Platform/Diagnostics/,Platform,"Mac, Direct, iOS",,30,low
+Shared/PermissionExpiry.swift,Shared/Privacy/SitePermissions/,Privacy,"Mac, Direct, iOS",,56,extends BrowserModel/TabController (cross-folder)
+Shared/PhoneActions.swift,Shared/Platform/SystemIntegration/,Platform,"Mac, Direct, iOS",,116,extends BrowserModel/TabController (cross-folder)
+Shared/PhoneCustomization.swift,Shared/Platform/SystemIntegration/,Platform,"Mac, Direct, iOS",,314,low
+Shared/PieceDownload.swift,Shared/Downloads/HTTP/,Downloads,"Mac, Direct, iOS",,212,low
+Shared/PinnedAddresses.swift,Shared/Browsing/Tabs/,Browsing,"Mac, Direct, iOS",,161,extends BrowserModel/TabController (cross-folder)
+Shared/Platform.swift,Shared/Browsing/WebKit/,Browsing,"Mac, Direct, iOS",macOS-guard,173,read by tests as a path: DownloadsBatchTests.swift
+Shared/PlayerExtras.swift,Shared/MediaPlayer/,MediaPlayer,"Mac, Direct, iOS",iOS-guard,176,extends BrowserModel/TabController (cross-folder)
+Shared/PowerFeatures.swift,Shared/Extensions/,Extensions,"Mac, Direct, iOS",,118,extends BrowserModel/TabController (cross-folder)
+Shared/PrivacyExtras.swift,Shared/Privacy/TrackerProtection/,Privacy,"Mac, Direct, iOS",,157,low
+Shared/PrivacyPresets.swift,Shared/Privacy/TrackerProtection/,Privacy,"Mac, Direct, iOS",,101,low
+Shared/PrivacyReport.swift,Shared/Privacy/TrackerProtection/,Privacy,"Mac, Direct, iOS",,96,low
+Shared/PrivateWindow.swift,Shared/Privacy/PrivateBrowsing/,Privacy,"Mac, Direct, iOS",,90,extends BrowserModel/TabController (cross-folder)
+Shared/PrivateWindowViews.swift,Shared/Privacy/PrivateBrowsing/,Privacy,"Mac, Direct, iOS",macOS-guard,87,low
+Shared/Productivity.swift,Shared/Browsing/Reading/,Browsing,"Mac, Direct, iOS",,371,extends BrowserModel/TabController (cross-folder)
+Shared/ProfileTools.swift,Shared/Profiles/Identity/,Profiles,"Mac, Direct, iOS",,147,extends BrowserModel/TabController (cross-folder)
+Shared/ProxySettings.swift,Shared/Privacy/NetworkPolicy/,Privacy,"Mac, Direct, iOS",,57,low
+Shared/QuickAnswer.swift,Shared/Browsing/Search/,Browsing,"Mac, Direct, iOS",,242,low
+Shared/Reader.swift,Shared/Browsing/Reading/,Browsing,"Mac, Direct, iOS",,111,low
+Shared/ReadingTools.swift,Shared/Browsing/Reading/,Browsing,"Mac, Direct, iOS",,252,extends BrowserModel/TabController (cross-folder)
+Shared/Reliability.swift,Shared/Platform/Diagnostics/,Platform,"Mac, Direct, iOS",,385,extends BrowserModel/TabController (cross-folder)
+Shared/Research.swift,Shared/Tools/Research/,Tools,"Mac, Direct, iOS",,717,read by tests as a path: TabPrivacyTests.swift; extends BrowserModel/TabController (cross-folder)
+Shared/ResearchNotes.swift,Shared/Tools/Research/,Tools,"Mac, Direct, iOS",,243,"read by tests as a path: FinalIntegrationTests.swift,ResearchNotesTests.swift,TabPrivacyTests.swift; extends BrowserModel/TabController (cross-folder)"
+Shared/ResourceDashboard.swift,Shared/Platform/Diagnostics/,Platform,"Mac, Direct, iOS",,104,low
+Shared/ResourceGovernor.swift,Shared/Platform/Diagnostics/,Platform,"Mac, Direct, iOS",macOS-guard,216,low
+Shared/SafetyTools.swift,Shared/Tools/Registry/,Tools,"Mac, Direct, iOS",iOS-guard,245,extends BrowserModel/TabController (cross-folder)
+Shared/ScreenshotEditor.swift,Shared/Tools/Documents/,Tools,"Mac, Direct, iOS",,383,read by tests as a path: FinalIntegrationTests.swift; extends BrowserModel/TabController (cross-folder)
+Shared/ScrollChrome.swift,Shared/Browsing/WebKit/,Browsing,"Mac, Direct, iOS",,55,low
+Shared/SearXNG.swift,Shared/Browsing/Search/,Browsing,"Mac, Direct, iOS",,112,extends BrowserModel/TabController (cross-folder)
+Shared/SearchEngineMenu.swift,Shared/Browsing/Search/,Browsing,"Mac, Direct, iOS",,73,low
+Shared/SearchEngines.swift,Shared/Browsing/Search/,Browsing,"Mac, Direct, iOS",,44,low
+Shared/SearchSuggestions.swift,Shared/Browsing/Search/,Browsing,"Mac, Direct, iOS",,89,low
+Shared/Secrets.swift,Shared/Privacy/Credentials/,Privacy,"Mac, Direct, iOS",,208,extends BrowserModel/TabController (cross-folder)
+Shared/SecurityEvents.swift,Shared/Privacy/SitePermissions/,Privacy,"Mac, Direct, iOS",macOS-guard,97,low
+Shared/SelectionSearch.swift,Shared/Browsing/Search/,Browsing,"Mac, Direct, iOS",,33,extends BrowserModel/TabController (cross-folder)
+Shared/SettingsDesign.swift,Shared/Settings/,Settings,"Mac, Direct, iOS",,52,low
+Shared/SettingsSearch.swift,Shared/Browsing/Search/,Browsing,"Mac, Direct, iOS",,182,low
+Shared/SettingsSections.swift,Shared/Settings/,Settings,"Mac, Direct, iOS",,1104,low
+Shared/SetupAssistant.swift,Shared/App/Bootstrap/,App,"Mac, Direct, iOS",,233,low
+Shared/SharedStore.swift,stays at Shared/,,"Mac, Direct, iOS + ShareExt, LiveActivity, SpeedWidget",,75,explicit project.yml path
+Shared/SharedSync.swift,Shared/App/Model/,App,"Mac, Direct, iOS",iOS-guard,54,extends BrowserModel/TabController (cross-folder)
+Shared/SharedViews.swift,Shared/DesignSystem/,DesignSystem,"Mac, Direct, iOS",iOS-guard,1537,read by tests as a path: FinalIntegrationTests.swift
+Shared/SheetChrome.swift,Shared/DesignSystem/,DesignSystem,"Mac, Direct, iOS",macOS-guard,132,extends BrowserModel/TabController (cross-folder)
+Shared/ShoppingTools.swift,Shared/Tools/Shopping/,Tools,"Mac, Direct, iOS",,180,extends BrowserModel/TabController (cross-folder)
+Shared/Shortcuts.swift,Shared/App/Commands/,App,"Mac, Direct, iOS",,230,low
+Shared/ShowMoreRows.swift,Shared/DesignSystem/,DesignSystem,"Mac, Direct, iOS",,37,low
+Shared/SignatureSheet.swift,Shared/Tools/Documents/,Tools,"Mac, Direct, iOS",,94,low
+Shared/SignatureStore.swift,Shared/Profiles/Identity/,Profiles,"Mac, Direct, iOS",,46,extends BrowserModel/TabController (cross-folder)
+Shared/SiteInfo.swift,Shared/Privacy/SitePermissions/,Privacy,"Mac, Direct, iOS",,81,low
+Shared/SiteOpenRules.swift,Shared/Browsing/Navigation/,Browsing,"Mac, Direct, iOS",,80,low
+Shared/SitePrivacy.swift,Shared/Privacy/SitePermissions/,Privacy,"Mac, Direct, iOS",,362,extends BrowserModel/TabController (cross-folder)
+Shared/SitePrivacyViews.swift,Shared/Privacy/SitePermissions/,Privacy,"Mac, Direct, iOS",,151,low
+Shared/SiteSafety.swift,Shared/Privacy/SitePermissions/,Privacy,"Mac, Direct, iOS",,317,low
+Shared/SlashCommands.swift,Shared/App/Commands/,App,"Mac, Direct, iOS",,107,low
+Shared/SlashSuggestions.swift,Shared/App/Commands/,App,"Mac, Direct, iOS",,110,extends BrowserModel/TabController (cross-folder)
+Shared/SmartSelection.swift,Shared/Platform/SystemIntegration/,Platform,"Mac, Direct, iOS",macOS-guard;iOS-guard,174,low
+Shared/SpaceLaunch.swift,Shared/App/Bootstrap/,App,"Mac, Direct, iOS",,24,extends BrowserModel/TabController (cross-folder)
+Shared/SplitTools.swift,Shared/Tools/Registry/,Tools,"Mac, Direct, iOS",,135,extends BrowserModel/TabController (cross-folder)
+Shared/SponsorBlock.swift,Shared/Privacy/ContentBlocking/,Privacy,"Mac, Direct, iOS",,383,read by tests as a path: PrivacyIntegrationTests.swift; extends BrowserModel/TabController (cross-folder)
+Shared/SponsorBlockService.swift,Shared/Privacy/ContentBlocking/,Privacy,"Mac, Direct, iOS",,90,read by tests as a path: PrivacyIntegrationTests.swift
+Shared/StartCustomize.swift,Shared/Browsing/StartPage/,Browsing,"Mac, Direct, iOS",,191,low
+Shared/StartPage.swift,Shared/Browsing/StartPage/,Browsing,"Mac, Direct, iOS",macOS-guard,1110,low
+Shared/StartWallpaper.swift,Shared/Browsing/StartPage/,Browsing,"Mac, Direct, iOS",,410,low
+Shared/SuggestionLearning.swift,Shared/Browsing/Search/,Browsing,"Mac, Direct, iOS",,174,low
+Shared/SuggestionLearningHooks.swift,Shared/Browsing/Search/,Browsing,"Mac, Direct, iOS",,40,extends BrowserModel/TabController (cross-folder)
+Shared/SuggestionRanking.swift,Shared/Browsing/Search/,Browsing,"Mac, Direct, iOS",,183,low
+Shared/Sync.swift,Shared/Profiles/Sync/,Profiles,"Mac, Direct, iOS",,220,low
+Shared/SyncAdvanced.swift,Shared/Profiles/Sync/,Profiles,"Mac, Direct, iOS",,399,extends BrowserModel/TabController (cross-folder)
+Shared/SyncMerge.swift,Shared/Profiles/Sync/,Profiles,"Mac, Direct, iOS",,143,read by tests as a path: PasswordSafetyTests.swift
+Shared/SyncModel.swift,Shared/App/Model/,App,"Mac, Direct, iOS",,444,read by tests as a path: PasswordSafetyTests.swift; extends BrowserModel/TabController (cross-folder)
+Shared/SyncViews.swift,Shared/Profiles/Sync/,Profiles,"Mac, Direct, iOS",,123,low
+Shared/TabBehavior.swift,Shared/Browsing/Tabs/,Browsing,"Mac, Direct, iOS",,96,low
+Shared/TabController.swift,Shared/Browsing/Tabs/,Browsing,"Mac, Direct, iOS",,805,read by tests as a path: Phase12SafetyFixTests.swift
+Shared/TabExtras.swift,Shared/Browsing/Tabs/,Browsing,"Mac, Direct, iOS",,333,extends BrowserModel/TabController (cross-folder)
+Shared/TabLifecycle.swift,Shared/Browsing/Tabs/,Browsing,"Mac, Direct, iOS",,156,low
+Shared/TabLocatorView.swift,Shared/Browsing/Tabs/,Browsing,"Mac, Direct, iOS",,40,low
+Shared/TabOrganizer.swift,Shared/Browsing/Tabs/,Browsing,"Mac, Direct, iOS",,393,extends BrowserModel/TabController (cross-folder)
+Shared/TabPrivacy.swift,Shared/Browsing/Tabs/,Browsing,"Mac, Direct, iOS",,50,extends BrowserModel/TabController (cross-folder)
+Shared/TabScope.swift,Shared/Browsing/Tabs/,Browsing,"Mac, Direct, iOS",,17,extends BrowserModel/TabController (cross-folder)
+Shared/TabSharing.swift,Shared/Browsing/Tabs/,Browsing,"Mac, Direct, iOS",,58,low
+Shared/TabTextSearch.swift,Shared/Browsing/Tabs/,Browsing,"Mac, Direct, iOS",,56,extends BrowserModel/TabController (cross-folder)
+Shared/TabTools.swift,Shared/Browsing/SessionRestore/,Browsing,"Mac, Direct, iOS",,294,read by tests as a path: DownloadsBatchTests.swift; extends BrowserModel/TabController (cross-folder)
+Shared/TabVisibility.swift,Shared/Browsing/Tabs/,Browsing,"Mac, Direct, iOS",,75,low
+Shared/ThemeTools.swift,Shared/DesignSystem/,DesignSystem,"Mac, Direct, iOS",,631,extends BrowserModel/TabController (cross-folder)
+Shared/Themes.swift,Shared/DesignSystem/,DesignSystem,"Mac, Direct, iOS",macOS-guard,873,extends BrowserModel/TabController (cross-folder)
+Shared/ToolRegistry.swift,Shared/Tools/Registry/,Tools,"Mac, Direct, iOS",,225,read by tests as a path: ToolRegistryTests.swift
+Shared/ToolbarPriority.swift,Shared/DesignSystem/,DesignSystem,"Mac, Direct, iOS",,64,low
+Shared/ToolkitFeatures.swift,Shared/Browsing/Reading/,Browsing,"Mac, Direct, iOS",macOS-guard,575,read by tests as a path: TabPrivacyTests.swift; extends BrowserModel/TabController (cross-folder)
+Shared/ToolsMenu.swift,Shared/Tools/Registry/,Tools,"Mac, Direct, iOS",DIRECT_BUILD,45,low
+Shared/ToolsPanel.swift,Shared/Tools/Registry/,Tools,"Mac, Direct, iOS",,96,"read by tests as a path: ToolBoundsTests.swift,ToolRegistryTests.swift"
+Shared/URLCompletion.swift,Shared/Browsing/Navigation/,Browsing,"Mac, Direct, iOS",,30,low
+Shared/UnifiedSearch.swift,Shared/Browsing/Search/,Browsing,"Mac, Direct, iOS",,66,low
+Shared/UserScriptNetwork.swift,Shared/Extensions/,Extensions,"Mac, Direct, iOS",,101,read by tests as a path: PrivacyIntegrationTests.swift
+Shared/UserScriptRuntime.swift,Shared/Extensions/,Extensions,"Mac, Direct, iOS",,319,low
+Shared/UserScripts.swift,Shared/Extensions/,Extensions,"Mac, Direct, iOS",,551,extends BrowserModel/TabController (cross-folder)
+Shared/VayuSetuLink.swift,Shared/Platform/SystemIntegration/,Platform,"Mac, Direct, iOS",macOS-guard,63,low
+Shared/VideoControls.swift,Shared/Browsing/WebKit/,Browsing,"Mac, Direct, iOS",,318,low
+Shared/VideoTools.swift,Shared/MediaPlayer/,MediaPlayer,"Mac, Direct, iOS",,298,extends BrowserModel/TabController (cross-folder)
+Shared/VimMode.swift,Shared/App/Commands/,App,"Mac, Direct, iOS",,97,low
+Shared/VoiceSearch.swift,Shared/Browsing/Search/,Browsing,"Mac, Direct, iOS",,143,low
+Shared/WallpaperLibrary.swift,Shared/Browsing/StartPage/,Browsing,"Mac, Direct, iOS",,289,extends BrowserModel/TabController (cross-folder)
+Shared/WebApps.swift,Shared/Profiles/Identity/,Profiles,"Mac, Direct, iOS",,260,extends BrowserModel/TabController (cross-folder)
+Shared/WebLogins.swift,Shared/Privacy/Credentials/,Privacy,"Mac, Direct, iOS",,226,read by tests as a path: PasswordSafetyTests.swift
+Shared/WiFiTrust.swift,Shared/Privacy/NetworkPolicy/,Privacy,"Mac, Direct, iOS",,99,low
+Shared/WindowPolicy.swift,Shared/App/Lifecycle/,App,"Mac, Direct, iOS",,55,low
+Shared/Windows.swift,Shared/App/Lifecycle/,App,"Mac, Direct, iOS",,333,read by tests as a path: WebAppTests.swift; extends BrowserModel/TabController (cross-folder)
+Shared/Workbench.swift,Shared/Tools/Developer/,Tools,"Mac, Direct, iOS",macOS-guard,526,extends BrowserModel/TabController (cross-folder)
+Shared/WorkbenchViews.swift,Shared/Tools/Developer/,Tools,"Mac, Direct, iOS",macOS-guard,510,low
+Shared/WorkspaceGradients.swift,Shared/Browsing/Workspaces/,Browsing,"Mac, Direct, iOS",,211,low
+Shared/WorkspaceRename.swift,Shared/Browsing/Workspaces/,Browsing,"Mac, Direct, iOS",,40,extends BrowserModel/TabController (cross-folder)
+Shared/WorkspaceThemeViews.swift,Shared/Browsing/Workspaces/,Browsing,"Mac, Direct, iOS",,176,low
+Shared/Workspaces.swift,Shared/Browsing/Workspaces/,Browsing,"Mac, Direct, iOS",,153,low
+Shared/YouTubeAdRules.swift,Shared/Privacy/ContentBlocking/,Privacy,"Mac, Direct, iOS",,140,extends BrowserModel/TabController (cross-folder)

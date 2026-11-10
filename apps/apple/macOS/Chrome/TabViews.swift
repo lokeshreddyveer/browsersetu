@@ -25,6 +25,17 @@ struct TabFavicon: View {
             }
         }
         .frame(width: size, height: size)
+        // A small red dot while the page is using the camera or the microphone.
+        .overlay(alignment: .topTrailing) {
+            if tab.usesCamera || tab.usesMicrophone {
+                Circle().fill(Color.red).frame(width: max(6, size * 0.4), height: max(6, size * 0.4))
+                    .overlay(Circle().strokeBorder(Color(nsColor: .windowBackgroundColor), lineWidth: 1))
+                    .offset(x: 3, y: -3)
+                    .transition(.scale.combined(with: .opacity))
+                    .help(tab.usesCamera ? "This page is using your camera" : "This page is using your microphone")
+            }
+        }
+        .motion(.easeOut(duration: 0.18), value: tab.usesCamera || tab.usesMicrophone)
         .accessibilityHidden(true)
     }
 }
@@ -46,6 +57,7 @@ struct TabDragCard: View {
 }
 
 struct TabCloseButton: View {
+    @EnvironmentObject var model: BrowserModel
     let action: () -> Void
     @State private var hovering = false
     var body: some View {
@@ -59,6 +71,10 @@ struct TabCloseButton: View {
         .onHover { hovering = $0 }
         .help("Close Tab")
         .accessibilityLabel("Close tab")
+        .opacity(model.hideTabCloseButtons ? 0 : 1)
+        .allowsHitTesting(!model.hideTabCloseButtons)
+        .accessibilityHidden(model.hideTabCloseButtons)
+        .motion(.easeOut(duration: 0.16), value: model.hideTabCloseButtons)
     }
 }
 
@@ -114,6 +130,8 @@ private struct TabInteractions: ViewModifier {
                 TabPreviewCard(tab: tab).allowsHitTesting(false)
             }
             .onTapGesture { showPreview = false; model.select(tab.id) }
+            // Off unless chosen: the first click still selects at once, the second closes.
+            .simultaneousGesture(TapGesture(count: 2).onEnded { if model.doubleClickClosesTab, !tab.isLocked { model.closeTab(id: tab.id) } })
             .focusable()
             .focusEffectDisabled()
             .onKeyPress(.return) { model.select(tab.id); return .handled }
@@ -145,7 +163,7 @@ private struct TabInteractions: ViewModifier {
                 return true
             }
             .accessibilityElement(children: .combine)
-            .accessibilityLabel(tab.displayTitle)
+            .accessibilityLabel(tab.spokenTitle)
             .accessibilityAddTraits(tab.id == model.activeID ? [.isButton, .isSelected] : .isButton)
             .accessibilityIdentifier("tab-chip")
     }
@@ -231,10 +249,7 @@ struct CompactTab: View {
 struct HorizontalTabStrip: View {
     @EnvironmentObject var model: BrowserModel
     static let minTab: CGFloat = 120
-    /// Each tab is a separate capsule: Apple's rule for large controls is a radius of half the height.
-    static let pillHeight: CGFloat = 28
     static let gap: CGFloat = 4
-    static let height: CGFloat = 36
     /// Tabs share the whole row, so a few tabs are wide.
     static let maxTab: CGFloat = 800
 
@@ -262,12 +277,17 @@ struct HorizontalTabStrip: View {
                         .padding(.leading, 8).padding(.trailing, 2)
                     }
                     .onChange(of: model.activeID) { _, id in if let id { animated(.easeOut(duration: 0.15)) { proxy.scrollTo(id) } } }
+                    // The tab in front stays in view when the window is resized (the row can become too narrow for it) and when the strip first appears (a restored window, a layout change).
+                    .onChange(of: geo.size.width) { _, _ in if let id = model.activeID { proxy.scrollTo(id) } }
+                    .onAppear { if let id = model.activeID { proxy.scrollTo(id) } }
                 }
                 newTabButton.padding(.trailing, 6)
             }
             .frame(height: geo.size.height)
         }
         .frame(height: model.density.stripHeight)
+        // The Essentials sit at the left end of the strip; the tabs share the width that is left.
+        .safeAreaInset(edge: .leading, spacing: 0) { EssentialsInline(size: 26).padding(.leading, 8) }
         .background(WindowDragRegion())
         .acceptsDroppedTabs(model)
         .accessibilityIdentifier("tab-bar")
@@ -308,6 +328,7 @@ struct CompactTabStrip: View {
             ChromeButton(symbol: "plus", help: "New Tab", identifier: "new-tab-inline") { model.newTab() }.scaleEffect(0.85)
         }
         .frame(height: model.density.stripHeight)
+        .safeAreaInset(edge: .leading, spacing: 0) { EssentialsInline(size: 24).padding(.leading, 8) }
         .background(WindowDragRegion())
         .acceptsDroppedTabs(model)
         .accessibilityIdentifier("tab-bar")

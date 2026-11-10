@@ -40,7 +40,7 @@ struct ShieldButton: View {
                 if showLabel {
                     HStack(spacing: 4) {
                         Image(systemName: state.symbol).foregroundStyle(tint)
-                        Text(shortLabel).font(.caption).foregroundStyle(.secondary).lineLimit(1).fixedSize()
+                        Text(shortLabel).settingsNote().lineLimit(1).fixedSize()
                     }
                 }
                 Image(systemName: state.symbol).foregroundStyle(tint)
@@ -345,7 +345,7 @@ struct VayuProtectionSection: View {
                 Picker("Protection Mode", selection: Binding(get: { privacy.configuration.mode }, set: { privacy.setMode($0) })) {
                     ForEach(ProtectionMode.levels) { Text($0.title).tag($0) }
                 }
-                Text(privacy.configuration.mode.summary).font(.caption).foregroundStyle(.secondary)
+                    .settingsNoted(privacy.configuration.mode.summary)
                 if privacy.configuration.mode == .strict {
                     Label("Strict mode blocks third-party requests to tracking-style endpoints and third-party cookies. Some websites may not sign in or load correctly.", systemImage: "exclamationmark.triangle")
                         .font(.caption).foregroundStyle(.orange)
@@ -364,7 +364,7 @@ struct VayuProtectionSection: View {
                 Toggle("Update lists automatically (at most weekly, at launch)", isOn: Binding(
                     get: { privacy.configuration.automaticUpdates }, set: { privacy.setAutomaticUpdates($0) }))
                 LabeledContent("Last Successful Update", value: last)
-                if let status = privacy.listUpdateStatus { Text(status).font(.caption).foregroundStyle(.secondary) }
+                if let status = privacy.listUpdateStatus { Text(status).settingsNote() }
                 Button("Diagnostics…") { sheet = .diagnostics }
                 Button("Privacy Information…") { sheet = .info }
             } header: {
@@ -402,7 +402,7 @@ struct PrivacySheetView: View {
                 }
             }
             .navigationTitle(title)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .sheetDoneToolbar { dismiss() }
         }
         #if os(macOS)
         .frame(minWidth: 520, minHeight: 460)
@@ -437,7 +437,7 @@ struct FilterListsView: View {
                     VStack(alignment: .leading) {
                         Text(list.name)
                         Text("Always available offline. First-party list; no third-party text is redistributed.")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .settingsNote()
                     }
                 }
             }
@@ -449,7 +449,7 @@ struct FilterListsView: View {
                                                  set: { privacy.setList(list.url, enabled: $0) })) {
                                 VStack(alignment: .leading) {
                                     Text(list.name)
-                                    Text(list.summary).font(.caption).foregroundStyle(.secondary)
+                                    Text(list.summary).settingsNote()
                                     Text(stateText(list.url)).font(.caption2).foregroundStyle(.secondary)
                                 }
                             }
@@ -477,7 +477,7 @@ struct CustomRulesView: View {
         List {
             Section {
                 Button("Import a List…") { importing = true }
-                if let importNote { Text(importNote).font(.caption).foregroundStyle(.secondary) }
+                if let importNote { Text(importNote).settingsNote() }
             } footer: {
                 Text("Reads a hosts file, an Adblock-style list or one domain per line, and blocks each whole domain. Rules for paths, page elements and exceptions are skipped.")
             }
@@ -589,7 +589,7 @@ struct PrivacyDiagnosticsView: View {
         Form {
             Section("Status") {
                 LabeledContent("Protection", value: privacy.state(forHost: nil).headline)
-                if let detail = privacy.state(forHost: nil).detail { Text(detail).font(.caption).foregroundStyle(.secondary) }
+                if let detail = privacy.state(forHost: nil).detail { Text(detail).settingsNote() }
                 LabeledContent("Installed rule set", value: privacy.report?.identifier.map { String($0.suffix(10)) } ?? "None")
                 LabeledContent("Open tabs protected", value: "\(privacy.report?.attachedWebViews ?? 0)")
                 LabeledContent("Last install", value: privacy.report.map { $0.reusedCompiledList ? "Reused compiled rules" : String(format: "Compiled in %.0f ms", $0.compileMilliseconds) } ?? "—")
@@ -603,18 +603,35 @@ struct PrivacyDiagnosticsView: View {
                     LabeledContent("Your rules", value: "\(snapshot.userRules)")
                     LabeledContent("Website exceptions", value: "\(snapshot.siteExceptions)")
                     ForEach(snapshot.strictExtras, id: \.self) { Label($0, systemImage: "checkmark") }
-                    LabeledContent("Unsupported syntax skipped", value: "\(snapshot.unsupportedRules)")
+                    LabeledContent("Blocks that override exceptions", value: "\(snapshot.importantRules)")
+                    LabeledContent("Page rules the browser runs itself", value: "\(snapshot.scriptRules.procedural.count) hiding, \(snapshot.scriptRules.scriptlets.count) scriptlets")
+                    LabeledContent("Syntax this browser cannot do", value: "\(snapshot.unsupportedRules)")
                     LabeledContent("Dropped for compile budget", value: "\(snapshot.droppedForBudget)")
                     ForEach(snapshot.failedLists.sorted(by: { $0.key < $1.key }), id: \.key) { name, reason in
                         Label("\(name): \(reason)", systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
                     }
                 }
             }
+            if let error = privacy.report?.error {
+                Section {
+                    Label("The last update could not be installed, so the previous rules are still in use: \(error)", systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+                }
+            }
+            if let snapshot = privacy.snapshot, !snapshot.diagnostics.filter({ $0.lines > 0 }).isEmpty {
+                Section {
+                    ForEach(snapshot.diagnostics.filter { $0.lines > 0 }) { list in FilterListDiagnosticRow(list: list) }
+                } header: {
+                    Text("Each list, line by line")
+                } footer: {
+                    Text("What every line of each list became, and why the rest was not used. Rules are never changed into something else to make them fit: what WebKit cannot do is left out and listed here.")
+                }
+            }
+            ConsentLogSection()
             Section("What this can and cannot do") {
                 ForEach(PrivacyCapabilities.all) { capability in
                     VStack(alignment: .leading, spacing: 2) {
                         Label(capability.name, systemImage: capability.supported ? "checkmark.circle" : "minus.circle")
-                        Text(capability.note).font(.caption).foregroundStyle(.secondary)
+                        Text(capability.note).settingsNote()
                     }
                 }
             }
@@ -721,5 +738,44 @@ struct ProtectionsList: View {
         }
         .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.white.opacity(0.07)))
         .accessibilityElement(children: .contain)
+    }
+}
+
+
+/// One list's lines sorted by what they became, with the reasons for what was not used and an example of each.
+struct FilterListDiagnosticRow: View {
+    let list: ListDiagnostics
+
+    var body: some View {
+        DisclosureGroup {
+            row("Network rules", list.network)
+            row("Blocks that override exceptions", list.important)
+            row("Exceptions", list.exceptions)
+            row("Hidden elements", list.cosmetic)
+            row("Hiding rules run by the browser", list.procedural)
+            row("Scriptlets", list.scriptlets)
+            row("Plain host rules", list.domainRules)
+            row("Switched off by a badfilter line", list.disabledByBadfilter)
+            row("Not used", list.unsupported)
+            ForEach(list.reasons.sorted(by: { $0.value > $1.value }), id: \.key) { reason, count in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(count) × \(reason)").font(.caption)
+                    ForEach(list.samples[reason] ?? [], id: \.self) { sample in
+                        Text(sample).font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    }
+                }
+            }
+        } label: {
+            HStack {
+                Text(list.name)
+                Spacer()
+                Text("\(list.lines) lines").foregroundStyle(.secondary)
+                if list.unsupported > 0 { Text("\(list.unsupported) not used").font(.caption).foregroundStyle(.orange) }
+            }
+        }
+    }
+
+    @ViewBuilder private func row(_ title: String, _ value: Int) -> some View {
+        if value > 0 { LabeledContent(title, value: "\(value)") }
     }
 }

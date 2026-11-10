@@ -42,10 +42,18 @@ enum DiskSpace {
         return values?.volumeAvailableCapacityForImportantUsage
     }
 
+    /// Whether `needed` bytes fit with room to spare: the spare is the larger of `floor` and `needed / divisor`. Every engine asks here; each passes the spare its own work needs
+    /// (a torrent's pieces, a converted movie and a thousand small files do not need the same), so the rule is one and the margins stay the engine's own.
+    static func fits(needed: Int64, available: Int64, floor: Int64 = 0, divisor: Int64 = 20) -> Bool {
+        let spare = max(floor, divisor > 0 ? needed / divisor : 0)
+        let (total, overflow) = needed.addingReportingOverflow(spare)
+        return !overflow && available >= total
+    }
+
     /// Tight when the file would leave less than 5% of what it needs, or under 100 MB, spare.
     static func isTight(needed: Int64, available: Int64) -> Bool {
         guard needed > 0 else { return false }
-        return available < needed + max(100_000_000, needed / 20)
+        return !fits(needed: needed, available: available, floor: 100_000_000, divisor: 20)
     }
 }
 
@@ -68,25 +76,5 @@ enum FileChecksum {
         }
         let e = clean(expected)
         return !e.isEmpty && e == clean(actual)
-    }
-}
-
-/// A banner when a download finishes while the app is in the background.
-enum DownloadNotifier {
-    @MainActor static func finished(_ filename: String) {
-        #if os(macOS)
-        let inactive = !NSApplication.shared.isActive
-        #else
-        let inactive = UIApplication.shared.applicationState != .active
-        #endif
-        guard inactive else { return }
-        let center = UNUserNotificationCenter.current()
-        center.requestAuthorization(options: [.alert]) { granted, _ in
-            guard granted else { return }
-            let content = UNMutableNotificationContent()
-            content.title = "Download finished"
-            content.body = filename
-            center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
-        }
     }
 }

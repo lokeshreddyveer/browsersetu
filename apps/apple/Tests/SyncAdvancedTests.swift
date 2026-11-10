@@ -72,17 +72,17 @@ final class SyncAdvancedModelTests: XCTestCase {
         let a = await model(), b = await model()
         try visit(a, "https://h1.test/", ago: 100, count: 7)
         XCTAssertFalse(a.syncs(.history), "off until the person turns it on")
-        _ = b.receiveWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
+        _ = b.mergeWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
         XCTAssertNil(has(b, "https://h1.test/"))
         a.setSync(.history, true)
-        _ = b.receiveWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
+        _ = b.mergeWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
         XCTAssertNil(has(b, "https://h1.test/"), "the receiving side has it off")
         b.setSync(.history, true)
-        _ = b.receiveWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
+        _ = b.mergeWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
         let got = try XCTUnwrap(has(b, "https://h1.test/"))
         XCTAssertEqual(got.title, "Title of https://h1.test/")
         let count = got.visitCount
-        for _ in 0..<3 { _ = b.receiveWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot())) }
+        for _ in 0..<3 { _ = b.mergeWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot())) }
         XCTAssertEqual(has(b, "https://h1.test/")?.visitCount, count, "syncing again does not add visits")
     }
 
@@ -90,28 +90,28 @@ final class SyncAdvancedModelTests: XCTestCase {
         let a = await model(), b = await model()
         for m in [a, b] { m.setSync(.history, true) }
         try visit(a, "https://gone.test/", ago: 500)
-        _ = b.receiveWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
+        _ = b.mergeWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
         XCTAssertNotNil(has(b, "https://gone.test/"))
         try a.core.deleteHistoryEntry(url: "https://gone.test/")
-        _ = b.receiveWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
+        _ = b.mergeWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
         XCTAssertNil(has(b, "https://gone.test/"), "the deletion reaches the other device")
         try visit(b, "https://gone.test/", ago: 0)
-        _ = a.receiveWiFiSnapshot(try XCTUnwrap(b.wifiSnapshot()))
+        _ = a.mergeWiFiSnapshot(try XCTUnwrap(b.wifiSnapshot()))
         XCTAssertNotNil(has(a, "https://gone.test/"), "a later visit brings it back")
     }
 
     func testSwitchingACategoryOffSendsNothingAndDeletesNothingElsewhere() async throws {
         let a = await model(), b = await model()
         try a.core.addBookmark(url: "https://keep.test/", title: "Keep", folder: "")
-        _ = b.receiveWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
+        _ = b.mergeWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
         XCTAssertTrue(try b.core.isBookmarked(url: "https://keep.test/"))
         a.setSync(.bookmarks, false)
         let snapshot = try XCTUnwrap(a.makeSyncSnapshot() as BackupPayload?)
         XCTAssertTrue(snapshot.state?.bookmarks.isEmpty ?? false, "nothing is sent")
-        _ = b.receiveWiFiSnapshot(try JSONEncoder().encode(snapshot))
+        _ = b.mergeWiFiSnapshot(try JSONEncoder().encode(snapshot))
         XCTAssertTrue(try b.core.isBookmarked(url: "https://keep.test/"), "and switching it off is not a deletion")
         try b.core.addBookmark(url: "https://new-on-b.test/", title: "B", folder: "")
-        _ = a.receiveWiFiSnapshot(try XCTUnwrap(b.wifiSnapshot()))
+        _ = a.mergeWiFiSnapshot(try XCTUnwrap(b.wifiSnapshot()))
         XCTAssertFalse(try a.core.isBookmarked(url: "https://new-on-b.test/"), "nothing is taken in either")
     }
 
@@ -121,15 +121,15 @@ final class SyncAdvancedModelTests: XCTestCase {
         try a.core.setSetting(key: "accent", value: "orange")
         a.setSync(.siteRules, true); a.syncSettingsToo = true
         b.syncSettingsToo = true                                  // settings on, site rules off
-        _ = b.receiveWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
+        _ = b.mergeWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
         XCTAssertEqual(try b.core.getSetting(key: "accent"), "orange")
         XCTAssertNil(try b.core.getSetting(key: "site_zoom"), "site rules are not taken in while their switch is off")
         b.setSync(.siteRules, true)
-        _ = b.receiveWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
+        _ = b.mergeWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
         XCTAssertEqual(try b.core.getSetting(key: "site_zoom"), #"{"zoom.test":1.5}"#)
         let c = await model()
         c.syncSettingsToo = true                                   // never turned site rules on
-        _ = c.receiveWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
+        _ = c.mergeWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
         XCTAssertNil(try c.core.getSetting(key: "site_zoom"))
     }
 
@@ -137,7 +137,7 @@ final class SyncAdvancedModelTests: XCTestCase {
         let a = await model(), b = await model()
         a.setSync(.siteRules, true); b.setSync(.siteRules, true)
         XCTAssertTrue(a.workbench.addSiteRule(host: "synced.test", action: .privateTab))
-        _ = b.receiveWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
+        _ = b.mergeWiFiSnapshot(try XCTUnwrap(a.wifiSnapshot()))
         XCTAssertTrue(b.workbench.siteRules.contains { $0.host == "synced.test" }, "the rule is live on the other device without a restart")
     }
 
@@ -146,15 +146,15 @@ final class SyncAdvancedModelTests: XCTestCase {
         let tab = mac.openTab(url: URL(string: "https://article.test/read?utm_source=x"), isPrivate: false)
         let target = SyncDevice(id: phone.syncDeviceID, name: "Phone", status: .approved, lastSeen: Date())
         XCTAssertTrue(mac.sendTab(tab, to: target))
-        _ = phone.receiveWiFiSnapshot(try XCTUnwrap(mac.wifiSnapshot()))
+        _ = phone.mergeWiFiSnapshot(try XCTUnwrap(mac.wifiSnapshot()))
         XCTAssertEqual(phone.inbox.map(\.url), ["https://article.test/read"], "tracking is cleaned off on the way")
         XCTAssertEqual(phone.inbox.first?.fromName, mac.syncDeviceName)
-        _ = phone.receiveWiFiSnapshot(try XCTUnwrap(mac.wifiSnapshot()))
+        _ = phone.mergeWiFiSnapshot(try XCTUnwrap(mac.wifiSnapshot()))
         XCTAssertEqual(phone.inbox.count, 1, "the same tab is not delivered twice")
-        _ = other.receiveWiFiSnapshot(try XCTUnwrap(mac.wifiSnapshot()))
+        _ = other.mergeWiFiSnapshot(try XCTUnwrap(mac.wifiSnapshot()))
         XCTAssertTrue(other.inbox.isEmpty, "a third device never sees it")
         phone.dismissSentTab(phone.inbox[0])
-        _ = phone.receiveWiFiSnapshot(try XCTUnwrap(mac.wifiSnapshot()))
+        _ = phone.mergeWiFiSnapshot(try XCTUnwrap(mac.wifiSnapshot()))
         XCTAssertTrue(phone.inbox.isEmpty, "and a dismissed one stays dismissed")
     }
 
@@ -171,7 +171,7 @@ final class SyncAdvancedModelTests: XCTestCase {
         var snapshot = try XCTUnwrap(mac.makeSyncSnapshot() as BackupPayload?)
         snapshot.outbox = [SentTab(id: "1", to: phone.syncDeviceID, fromName: "x", url: "javascript:alert(1)", title: "", sent: Date().timeIntervalSince1970),
                            SentTab(id: "2", to: phone.syncDeviceID, fromName: "x", url: "https://old.test/", title: "", sent: Date().timeIntervalSince1970 - 30 * 86_400)]
-        _ = phone.receiveWiFiSnapshot(try JSONEncoder().encode(snapshot))
+        _ = phone.mergeWiFiSnapshot(try JSONEncoder().encode(snapshot))
         XCTAssertTrue(phone.inbox.isEmpty)
     }
 

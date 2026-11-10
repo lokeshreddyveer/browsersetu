@@ -16,6 +16,7 @@ enum VoiceQuery {
 @MainActor
 final class VoiceSearch: ObservableObject {
     @Published private(set) var listening = false
+    private var starting = false
     @Published private(set) var transcript = ""
     /// Set to a plain sentence when listening could not start; the caller shows it and clears it.
     @Published var problem: String?
@@ -36,7 +37,9 @@ final class VoiceSearch: ObservableObject {
     }
 
     func start() async {
-        guard !listening else { return }
+        guard !listening, !starting else { return }
+        starting = true
+        defer { starting = false }
         transcript = ""
         problem = nil
         guard await Self.speechAllowed() else { problem = "Allow Speech Recognition for Browser Setu in System Settings to use voice search."; return }

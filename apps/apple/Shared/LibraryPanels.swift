@@ -5,6 +5,7 @@ import SwiftUI
 // MARK: - Bookmarks
 
 struct BookmarksPanel: View {
+    @State private var importing = false
     @EnvironmentObject var model: BrowserModel
     @State private var query = ""
     @State private var items: [BookmarkItem] = []
@@ -48,7 +49,8 @@ struct BookmarksPanel: View {
             PanelHeader(symbol: "book", title: "Bookmarks", count: allCount, query: $query, prompt: "Search bookmarks and tags") { EmptyView() }
             PanelChips(choices: Filter.allCases, selection: $filter, title: { $0.title }, count: { count(for: $0) })
             if loaded && shown.isEmpty {
-                PanelBody { PanelEmpty(symbol: "book", title: query.isEmpty ? "No bookmarks here" : "Nothing matches", detail: query.isEmpty ? "Press the star in the address bar, or ⌘D, to keep a page." : "Try a title, an address or a #tag.") }
+                PanelBody { PanelEmpty(symbol: "book", title: query.isEmpty ? "No bookmarks here" : "Nothing matches", detail: query.isEmpty ? "Press the star in the address bar, or ⌘D, to keep a page, or bring them from another browser." : "Try a title, an address or a #tag.", actionTitle: query.isEmpty ? "Import Bookmarks…" : nil, action: { importing = true }) }
+                    .sheet(isPresented: $importing) { ImportSheet() }
             } else {
                 PanelBody {
                     ForEach(folders, id: \.name) { folder in
@@ -138,6 +140,7 @@ struct BookmarksPanel: View {
 // MARK: - History
 
 struct HistoryPanel: View {
+    @State private var importing = false
     @EnvironmentObject var model: BrowserModel
     @State private var query = ""
     @State private var items: [HistoryItem] = []
@@ -191,7 +194,8 @@ struct HistoryPanel: View {
             }
             PanelChips(choices: Range.allCases, selection: $range, title: { $0.title }, count: { r in items.filter { inRange($0, r) }.count })
             if loaded && shown.isEmpty {
-                PanelBody { PanelEmpty(symbol: "clock", title: query.isEmpty ? "No history" : "Nothing matches", detail: query.isEmpty ? "Pages you visit appear here, newest first. Private tabs are never listed." : "Try fewer words, or widen the range above.") }
+                PanelBody { PanelEmpty(symbol: "clock", title: query.isEmpty ? "No history" : "Nothing matches", detail: query.isEmpty ? "Pages you visit appear here, newest first. Private tabs are never listed. You can also bring history from Chrome." : "Try fewer words, or widen the range above.", actionTitle: query.isEmpty ? "Import History…" : nil, action: { importing = true }) }
+                    .sheet(isPresented: $importing) { ImportSheet() }
             } else {
                 PanelBody {
                     ForEach(sections, id: \.title) { section in
@@ -283,7 +287,7 @@ struct DownloadsPanel: View {
         }
     }
 
-    private var busy: Bool { !coordinator.active.isEmpty || !coordinator.interrupted.isEmpty || !coordinator.waiting.isEmpty }
+    private var busy: Bool { !coordinator.active.isEmpty || !coordinator.interrupted.isEmpty || !coordinator.waiting.isEmpty || !coordinator.failures.isEmpty }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -304,6 +308,11 @@ struct DownloadsPanel: View {
                             ForEach(Array(coordinator.active.values)) { d in active(d) }
                         }
                     }
+                    if !coordinator.failures.isEmpty {
+                        PanelSection(title: "Did Not Download", symbol: "exclamationmark.triangle", count: coordinator.failures.count) {
+                            ForEach(coordinator.failures) { f in failure(f) }
+                        }
+                    }
                     if !coordinator.interrupted.isEmpty {
                         PanelSection(title: "Interrupted", symbol: "exclamationmark.arrow.circlepath", count: coordinator.interrupted.count) {
                             ForEach(Array(coordinator.interrupted.values)) { d in interrupted(d) }
@@ -311,7 +320,8 @@ struct DownloadsPanel: View {
                     }
                     if !shown.isEmpty {
                         PanelSection(title: "Completed", symbol: "checkmark.circle", count: shown.count) {
-                            ForEach(shown, id: \.created) { d in completed(d) }
+                            // Downloads that finish in the same second share a time, so the time cannot be the row's identity.
+                            ForEach(Array(shown.enumerated()), id: \.offset) { _, d in completed(d) }
                         }
                     }
                 }
@@ -362,9 +372,27 @@ struct DownloadsPanel: View {
                 ProgressView(value: d.fraction).tint(Theme.accent)
                 Text(d.detail.isEmpty ? "\(Int(d.fraction * 100))%" : "\(Int(d.fraction * 100))% · \(d.detail)").font(.system(size: 11.5)).foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
             }
+            if coordinator.canPause(d.id) { Button("Pause") { coordinator.pause(d.id) }.buttonStyle(.borderless).font(.system(size: 12)) }
             Button("Cancel") { coordinator.cancel(d.id) }.buttonStyle(.borderless).font(.system(size: 12))
         }
         .padding(.horizontal, 12).padding(.vertical, 10)
+    }
+
+    /// A download that stopped for good, with the reason, and what can be done about it.
+    private func failure(_ f: DownloadFailure) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "exclamationmark.triangle").font(.system(size: 14, weight: .medium)).foregroundStyle(.orange)
+                .frame(width: 30, height: 30).background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.orange.opacity(0.14)))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(f.filename).font(.system(size: 13.5, weight: .medium)).lineLimit(1).truncationMode(.middle)
+                Text(f.reason).font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(2)
+            }
+            Spacer()
+            if f.canRetry { Button("Try Again") { coordinator.retryFailure(f.id) }.buttonStyle(.borderedProminent).controlSize(.small) }
+            Button("Remove") { coordinator.dismissFailure(f.id) }.buttonStyle(.borderless).font(.system(size: 12))
+        }
+        .padding(.horizontal, 12).padding(.vertical, 10)
+        .accessibilityElement(children: .combine)
     }
 
     private func interrupted(_ d: InterruptedDownload) -> some View {
@@ -372,10 +400,10 @@ struct DownloadsPanel: View {
             fileIcon(d.filename)
             VStack(alignment: .leading, spacing: 2) {
                 Text(d.filename).font(.system(size: 13.5, weight: .medium)).lineLimit(1).truncationMode(.middle)
-                Text("Stopped part-way. Resuming works if the website allows it.").font(.system(size: 11.5)).foregroundStyle(.secondary)
+                Text(coordinator.queuePosition(of: d.id).map { "Waiting for a free place · #\($0) in line" } ?? d.recovery.summary).font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(2)
             }
             Spacer()
-            Button("Resume") { coordinator.resume(d.id) }.buttonStyle(.borderedProminent).controlSize(.small)
+            if let action = d.recovery.actionTitle { Button(action) { coordinator.resume(d.id) }.buttonStyle(.borderedProminent).controlSize(.small) }
             Button("Remove") { coordinator.dismissInterrupted(d.id) }.buttonStyle(.borderless).font(.system(size: 12))
         }
         .padding(.horizontal, 12).padding(.vertical, 10)
@@ -389,7 +417,7 @@ struct DownloadsPanel: View {
         } trailing: {
             Menu {
                 ForEach(model.tags(forDownload: d.filename), id: \.self) { tag in Button("Remove “\(tag)”") { model.removeDownloadTag(tag, from: d.filename) } }
-                Button("Add Tag…") { Task { @MainActor in if let t = await Dialogs.promptText(title: "Tag This File", message: d.filename, placeholder: "work, receipts…"), !t.isEmpty { model.addDownloadTag(t, to: d.filename) } } }
+                Button("Add Tag…") { Task { @MainActor in if let t = await Dialogs.promptText(title: "Tag This File", message: d.filename, placeholder: "work, receipts…", prefill: false), !t.isEmpty { model.addDownloadTag(t, to: d.filename) } } }
             } label: { Image(systemName: model.tags(forDownload: d.filename).isEmpty ? "tag" : "tag.fill").accessibilityLabel("Tags") }.menuStyle(.borderlessButton).fixedSize()
             if let file = DownloadCoordinator.locate(filename: d.filename) { DownloadFileActions(url: file) }
             else { Text("Moved or deleted").font(.system(size: 11)).foregroundStyle(.tertiary) }

@@ -1,0 +1,16 @@
+{
+  "rules": [
+    {
+      "id": "file-page",
+      "match": "https://files.example.org/view/*",
+      "resolve": {
+        "resources": [
+          { "url": "https://cdn.example.org/files/{last}-{setting.quality}.zip", "filename": "{last}-{setting.quality}.zip", "mimeType": "application/zip", "size": 1048576, "title": "{last} ({setting.quality})" },
+          { "url": "https://cdn.example.org/files/{last}.txt", "filename": "{last}-notes.txt", "mimeType": "text/plain", "title": "Notes for {last}" }
+        ]
+      },
+      "filename": "{last}.zip",
+      "category": "Archives"
+    }
+  ]
+}

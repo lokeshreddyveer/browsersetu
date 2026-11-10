@@ -23,20 +23,10 @@ struct SiteTile: View {
     let url: String
     let title: String
     var size: CGFloat = 54
-    /// Observed so a tile switches from its letter to the site's icon the moment the icon arrives.
-    @ObservedObject private var icons = FaviconStore.shared
     @ObservedObject private var look = LookState.shared
 
     var body: some View {
-        if let icon = icons.image(forURL: url) {
-            Image(platform: icon).resizable().interpolation(.high).scaledToFit()
-                .padding(size * 0.14)
-                .frame(width: size, height: size)
-                .background(Color(white: 0.96), in: RoundedRectangle(cornerRadius: size * look.shape.corner, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: size * look.shape.corner, style: .continuous).strokeBorder(Color.black.opacity(0.08), lineWidth: 0.5))
-        } else {
-            letterTile
-        }
+        FaviconView(url: url, size: size, cornerRadius: size * look.shape.corner) { letterTile }
     }
 
     private var letterTile: some View {
@@ -58,6 +48,14 @@ struct TabMenuItems: View {
 
     var body: some View {
         Button(tab.pinned ? "Unpin Tab" : "Pin Tab") { model.togglePin(tab) }
+        if tab.pinned { pinnedAddressItems }
+        if !tab.isPrivate, !tab.isBlank, !model.isGuest {
+            if model.isEssentialTab(tab) {
+                Button("Remove from Essentials") { if let id = model.essentialRecord(for: tab)?.id { model.removeFromEssentials(id) } }
+            } else {
+                Button("Add to Essentials") { model.addToEssentials(tab) }.disabled(model.essentialObstacle(for: tab) != nil)
+            }
+        }
         SendTabMenu(tab: tab)
         Button(tab.isLocked ? "Unlock Tab" : "Lock Tab") { model.toggleLock(tab) }
         Button("Duplicate Tab") { model.duplicateTab(tab) }.disabled(tab.isBlank)
@@ -143,6 +141,24 @@ struct TabMenuItems: View {
         Divider()
         Button("Close Tab") { model.closeTab(id: tab.id) }
         Button("Close Other Tabs") { model.closeOtherTabs(except: tab.id) }
+        Button(model.effectiveTabLayout == .sidebar ? "Close Tabs Above" : "Close Tabs to the Left") { model.closeTabs(above: tab.id, wantAbove: true) }
+            .disabled(model.tabsToClose(above: tab.id, wantAbove: true).isEmpty)
+        Button(model.effectiveTabLayout == .sidebar ? "Close Tabs Below" : "Close Tabs to the Right") { model.closeTabs(above: tab.id, wantAbove: false) }
+            .disabled(model.tabsToClose(above: tab.id, wantAbove: false).isEmpty)
+        Button("Clear Unpinned Tabs") { model.clearTabs() }.disabled(model.clearableTabs().count < 2)
+    }
+
+    /// The pinned tab's address: back to it, make this page it, type another, and whether leaving the workspace starts it over.
+    @ViewBuilder private var pinnedAddressItems: some View {
+        let meta = model.pinnedMetadata(for: tab)
+        let atHome = meta.flatMap { PinnedAddresses.parse($0.home).url }.map { home in tab.url.map { PinnedAddresses.key(for: $0) == PinnedAddresses.key(for: home) } ?? false } ?? false
+        Button("Reset to Pinned Address") { model.resetPinnedTab(tab) }.disabled(atHome)
+        Button("Set Current Page as Pinned Address") { model.setCurrentPageAsPinnedAddress(tab) }.disabled(atHome || !Essentials.isEligible(tab.url))
+        Button("Edit Pinned Address…") { model.editPinnedAddress(for: tab) }
+        Toggle("Reset Automatically on Workspace Switch", isOn: Binding(
+            get: { meta?.resetOnWorkspaceSwitch ?? false },
+            set: { model.setResetOnWorkspaceSwitch(tab, $0) }))
+        Divider()
     }
 
     private func promptNewGroup(moving tab: TabController) {
@@ -261,14 +277,22 @@ struct SwipeToClose: ViewModifier {
             .opacity(1 - min(abs(dx) / 320, 0.6))
             .motion(.interactiveSpring(), value: dx)
             .simultaneousGesture(
-                DragGesture(minimumDistance: 24)
+                DragGesture(minimumDistance: 20)
                     .onChanged { value in
-                        if abs(value.translation.width) > abs(value.translation.height) { dx = value.translation.width }
+                        // Only a clearly sideways drag moves the card, so an up or down drag is always the list scrolling.
+                        if abs(value.translation.width) > abs(value.translation.height) * 2.2 { dx = value.translation.width }
+                        else if dx != 0, abs(value.translation.height) > abs(value.translation.width) * 0.8 { dx = 0 }
                     }
                     .onEnded { value in
-                        if abs(value.translation.width) > 110, abs(value.translation.width) > abs(value.translation.height) {
+                        // A short, quick flick is enough: it is judged on where the finger was heading, not only where it stopped.
+                        let flick = value.predictedEndTranslation.width
+                        if dx != 0, max(abs(value.translation.width), abs(flick) * 0.5) > 60, abs(value.translation.width) > abs(value.translation.height) * 2 {
                             animated(.easeOut(duration: 0.2)) { dx = value.translation.width > 0 ? 500 : -500 }
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { model.closeTab(id: tab.id) }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+                                model.closeTab(id: tab.id)
+                                // A locked tab does not close, and a pinned one asks first: the card must come back, not stay off-screen.
+                                if model.tabs.contains(where: { $0.id == tab.id }) { animated(.easeOut(duration: 0.2)) { dx = 0 } }
+                            }
                         } else {
                             animated(.easeOut(duration: 0.2)) { dx = 0 }
                         }
@@ -337,13 +361,14 @@ struct TabCard: View {
         VStack(spacing: 0) {
             ZStack(alignment: .topTrailing) {
                 preview
-                    .frame(maxWidth: .infinity).frame(height: 130)
+                    .frame(maxWidth: .infinity).frame(height: previewHeight)
                     .clipped()
                 Button { model.closeTab(id: tab.id) } label: {
                     Image(systemName: "xmark.circle.fill").font(.title3).accessibilityLabel("Close tab")
                         .symbolRenderingMode(.palette).foregroundStyle(.white, .black.opacity(0.55))
+                        .frame(width: 40, height: 40).contentShape(Rectangle())
                 }
-                .buttonStyle(.plain).padding(6)
+                .buttonStyle(.plain)
                 .accessibilityLabel("Close tab")
             }
             HStack(spacing: 6) {
@@ -390,6 +415,15 @@ struct TabCard: View {
         .accessibilityIdentifier("tab-card")
     }
 
+    /// Tall on a phone, where the page is tall too, so a card looks like the page it stands for.
+    private var previewHeight: CGFloat {
+        #if os(iOS)
+        UIDevice.current.userInterfaceIdiom == .phone ? 210 : 130
+        #else
+        130
+        #endif
+    }
+
     @ViewBuilder private var preview: some View {
         if model.tabPreviews, let data = tab.snapshot, let image = Image(platformData: data) {
             // The picture fills the column and is cropped to it; sized as an overlay so its own width never widens the card.
@@ -411,6 +445,7 @@ struct TabOverview: View {
     @EnvironmentObject var model: BrowserModel
     @StateObject private var selection = OverviewSelection()
     @State private var query = ""
+    @State private var confirmingCloseAll = false
     @FocusState private var searchFocused: Bool
 
     private var tabs: [TabController] {
@@ -462,8 +497,7 @@ struct TabOverview: View {
         }
     }
 
-    var body: some View {
-        VStack(spacing: 14) {
+    private var desktopHeader: some View {
             HStack(spacing: 12) {
                 #if os(iOS)
                 Picker("", selection: Binding(get: { model.privateMode }, set: { switchMode(private: $0) })) {
@@ -501,10 +535,123 @@ struct TabOverview: View {
                 Button("Done") { model.hideOverview() }.keyboardShortcut(.defaultAction)
                     .accessibilityIdentifier("overview-done")
             }
+    }
+
+    #if os(iOS)
+    /// The phone's header, in two clean rows: Select, the Tabs / Private switch and Done; then the search. New tab and the view options sit at the foot, in reach of the thumb.
+    private var phoneHeader: some View {
+        VStack(spacing: 10) {
+            ZStack {
+                Picker("", selection: Binding(get: { model.privateMode }, set: { switchMode(private: $0) })) {
+                    Text("Tabs").tag(false)
+                    Text("Private").tag(true)
+                }
+                .pickerStyle(.segmented).frame(width: 190)
+                HStack {
+                    if selection.active {
+                        Button("Cancel") { animated(.easeInOut(duration: 0.2)) { selection.end() } }
+                    } else {
+                        Button("Select") { animated(.easeInOut(duration: 0.2)) { selection.active = true } }.accessibilityIdentifier("overview-select")
+                    }
+                    Spacer()
+                    Button("Done") { model.hideOverview() }.fontWeight(.semibold).accessibilityIdentifier("overview-done")
+                }
+            }
+            if selection.active {
+                HStack {
+                    Button("Select All") { selection.ids = Set(tabs.map(\.id)) }.accessibilityIdentifier("overview-select-all")
+                    Spacer()
+                    Button("Close \(selection.ids.count)", role: .destructive) {
+                        let doomed = selection.ids
+                        animated(.easeOut(duration: 0.2)) { for id in doomed { model.closeTab(id: id) } }
+                        selection.end()
+                    }
+                    .disabled(selection.ids.isEmpty).accessibilityIdentifier("overview-close-selected")
+                }
+                .font(.callout)
+            }
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Search Tabs", text: $query).textFieldStyle(.plain).focused($searchFocused).accessibilityIdentifier("tab-search")
+                if !query.isEmpty {
+                    Button { query = "" } label: { Image(systemName: "xmark.circle.fill").accessibilityLabel("Clear") }.buttonStyle(.plain).foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 12).padding(.vertical, 9)
+            .background(.quaternary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+    }
+
+    private var phoneFooter: some View {
+        HStack {
+            viewMenu.frame(width: 44, height: 44)
+            Spacer()
+            Button { model.newTab(); model.hideOverview() } label: {
+                Label("New Tab", systemImage: "plus").font(.callout.weight(.semibold)).padding(.horizontal, 18).frame(height: 44)
+                    .background(Theme.accent.opacity(0.16), in: Capsule())
+            }
+            .accessibilityLabel("New tab")
+            Spacer()
+            Menu {
+                let blanks = model.visibleTabs.filter { $0.isBlank && $0.id != model.activeID }
+                if !blanks.isEmpty {
+                    Button("Close \(blanks.count) Blank Tab\(blanks.count == 1 ? "" : "s")", systemImage: "square.dashed") {
+                        animated(.easeOut(duration: 0.2)) { for tab in blanks { model.closeTab(id: tab.id) } }
+                    }
+                }
+                if model.visibleTabs.count > 1, let current = model.active {
+                    Button("Close Other Tabs", systemImage: "xmark.square") {
+                        animated(.easeOut(duration: 0.2)) { model.closeOtherTabs(except: current.id) }
+                    }
+                }
+                if model.clearableTabs().count >= 2 {
+                    Button("Clear Unpinned Tabs", systemImage: "xmark.bin") { animated(.easeOut(duration: 0.2)) { model.clearTabs() } }
+                }
+                Button("Close All \(model.visibleTabs.count) Tabs", systemImage: "xmark.square.fill", role: .destructive) { confirmingCloseAll = true }
+            } label: {
+                Image(systemName: "xmark.square").font(.system(size: 19)).frame(width: 44, height: 44)
+            }
+            .accessibilityLabel("Close tabs").accessibilityIdentifier("overview-close-menu")
+            .disabled(model.visibleTabs.isEmpty)
+        }
+        .confirmationDialog("Close all \(model.visibleTabs.count) tabs?", isPresented: $confirmingCloseAll, titleVisibility: .visible) {
+            Button("Close All Tabs", role: .destructive) {
+                if model.visibleTabs.count > 5 { model.takeCheckpoint(reason: "Before closing all tabs", force: true) }
+                animated(.easeOut(duration: 0.2)) { model.closeAllTabs() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { Text("Pinned and locked tabs stay where the browser keeps them locked. You can reopen closed tabs from the start page.") }
+    }
+    #endif
+
+    private var isPhone: Bool {
+        #if os(iOS)
+        UIDevice.current.userInterfaceIdiom == .phone
+        #else
+        false
+        #endif
+    }
+
+    @ViewBuilder private var header: some View {
+        #if os(iOS)
+        if isPhone { phoneHeader } else { desktopHeader }
+        #else
+        desktopHeader
+        #endif
+    }
+
+    var body: some View {
+        VStack(spacing: 14) {
+            header
             if !model.separatesPrivate || !model.privateMode {
                 HStack(spacing: 10) { WorkspaceMenu().fixedSize(); GroupChips() }
             }
+            ScrollViewReader { proxy in
             ScrollView {
+                // The sites kept in every workspace. Not in the private set: nothing of the person's own sites belongs there.
+                if !model.separatesPrivate || !model.privateMode {
+                    EssentialsGrid(tileHeight: 48, minimumTile: 52, didOpen: { model.hideOverview() })
+                }
                 if tabs.isEmpty {
                     ContentUnavailableView(query.isEmpty ? "No Tabs" : "No Matching Tabs", systemImage: "square.on.square")
                         .padding(.top, 60)
@@ -538,10 +685,16 @@ struct TabOverview: View {
                     .motion(.easeInOut(duration: 0.2), value: model.overviewGrouped)
                 }
             }
+            // With many tabs the one in front can be far down; the overview opens with it in view.
+            .onAppear { if let id = model.activeID, model.visibleTabs.contains(where: { $0.id == id }) { proxy.scrollTo(id, anchor: .center) } }
+            }
+            #if os(iOS)
+            if isPhone { phoneFooter }
+            #endif
         }
         .padding(18)
         .environment(\.overviewSelection, selection)
-        .modifier(OverlayBackground())
+        .modifier(OverviewBackground(opaque: isPhone))
         #if os(macOS)
         .onExitCommand { model.hideOverview() }
         #endif
@@ -556,6 +709,14 @@ struct TabOverview: View {
         if let first = model.visibleTabs.first { model.select(first.id) } else { model.openTab(url: nil, isPrivate: isPrivate) }
     }
     #endif
+}
+
+/// The tab overview's backdrop. On a phone it is solid: the page showing through the controls made them hard to read.
+struct OverviewBackground: ViewModifier {
+    let opaque: Bool
+    func body(content: Content) -> some View {
+        if opaque { content.background(Color.platformBackground.ignoresSafeArea()) } else { content.modifier(OverlayBackground()) }
+    }
 }
 
 struct OverlayBackground: ViewModifier {

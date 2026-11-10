@@ -97,7 +97,7 @@ struct BrowserTheme: Identifiable, Equatable {
 
     /// Themes whose background moves. Each is drawn in code, so it works offline and weighs nothing; it stands still when motion is off or the battery is low.
     static let animated: [BrowserTheme] = [
-        BrowserTheme(id: "aurora", name: "Aurora", note: "Slow ribbons of green and violet light", accent: RGB(hex: 0x3DDC97), chrome: RGB(hex: 0x0A1218),
+        BrowserTheme(id: "aurora-live", name: "Aurora", note: "Slow ribbons of green and violet light", accent: RGB(hex: 0x3DDC97), chrome: RGB(hex: 0x0A1218),
                      top: RGB(hex: 0x050D14), bottom: RGB(hex: 0x07141C), glow: RGB(hex: 0x0B2A2C), scheme: .dark, decoration: .aurora, family: "Animated"),
         BrowserTheme(id: "rainynight", name: "Rainy Night", note: "Rain falling past a blue window", accent: RGB(hex: 0x7AA2F7), chrome: RGB(hex: 0x0E1118),
                      top: RGB(hex: 0x0A0C13), bottom: RGB(hex: 0x0F121B), glow: RGB(hex: 0x1A2438), scheme: .dark, decoration: .rain, family: "Animated"),
@@ -113,7 +113,7 @@ struct BrowserTheme: Identifiable, Equatable {
                      top: RGB(hex: 0x04060F), bottom: RGB(hex: 0x0A1020), glow: RGB(hex: 0x15213D), scheme: .dark, decoration: .meteors, family: "Animated"),
         BrowserTheme(id: "coderain", name: "Code Rain", note: "Falling green characters, like a hacker film", accent: RGB(hex: 0x39FF7A), chrome: RGB(hex: 0x050A06),
                      top: RGB(hex: 0x020603), bottom: RGB(hex: 0x06100A), glow: RGB(hex: 0x0B2A14), scheme: .dark, decoration: .codeRain, family: "Animated"),
-        BrowserTheme(id: "synthwave", name: "Synthwave", note: "A retro sun over a moving neon grid", accent: RGB(hex: 0xFF4FD8), chrome: RGB(hex: 0x12081C),
+        BrowserTheme(id: "synthwave-live", name: "Synthwave", note: "A retro sun over a moving neon grid", accent: RGB(hex: 0xFF4FD8), chrome: RGB(hex: 0x12081C),
                      top: RGB(hex: 0x0D0618), bottom: RGB(hex: 0x1E0A2E), glow: RGB(hex: 0x3A1457), scheme: .dark, decoration: .synthwave, family: "Animated"),
         BrowserTheme(id: "bubbles", name: "Bubbles", note: "Bubbles rising through clear water", accent: RGB(hex: 0x7FDBFF), chrome: RGB(hex: 0x061620),
                      top: RGB(hex: 0x04121C), bottom: RGB(hex: 0x082436), glow: RGB(hex: 0x0E3C57), scheme: .dark, decoration: .bubbles, family: "Animated"),
@@ -125,7 +125,7 @@ struct BrowserTheme: Identifiable, Equatable {
                      top: RGB(hex: 0x3A8FD6), bottom: RGB(hex: 0x8FD0F5), glow: RGB(hex: 0xBFE6FF), scheme: .dark, decoration: .clouds, family: "Animated"),
         BrowserTheme(id: "confetti", name: "Party", note: "Confetti falling, in bright colours", accent: RGB(hex: 0xFF5C8A), chrome: RGB(hex: 0x14102A),
                      top: RGB(hex: 0x100C24), bottom: RGB(hex: 0x1E1642), glow: RGB(hex: 0x32245F), scheme: .dark, decoration: .confetti, family: "Animated"),
-        BrowserTheme(id: "arcade", name: "Arcade", note: "Falling pixel blocks, like a retro game", accent: RGB(hex: 0xFFD23F), chrome: RGB(hex: 0x0C0A1A),
+        BrowserTheme(id: "arcade-live", name: "Arcade", note: "Falling pixel blocks, like a retro game", accent: RGB(hex: 0xFFD23F), chrome: RGB(hex: 0x0C0A1A),
                      top: RGB(hex: 0x08061A), bottom: RGB(hex: 0x120E2E), glow: RGB(hex: 0x241C58), scheme: .dark, decoration: .arcade, family: "Animated"),
         BrowserTheme(id: "starrynight", name: "Starry Night", note: "Stars that twinkle", accent: RGB(hex: 0xC3A6FF), chrome: RGB(hex: 0x0B0A18),
                      top: RGB(hex: 0x06050F), bottom: RGB(hex: 0x0C0A1A), glow: RGB(hex: 0x1C1640), scheme: .dark, decoration: .twinkle, family: "Animated"),
@@ -232,6 +232,23 @@ struct ChromeBackdrop: View {
 
 // MARK: - Drawing
 
+/// A backdrop photo that drifts a few percent in and out over about a minute: enough to feel alive, never enough to notice while reading. It stands
+/// still for Reduce Motion, Animation Off and Low Power Mode, and costs one animated scale on one image.
+struct DriftingPhoto: View {
+    let image: Image
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var zoomed = false
+    private var moving: Bool { !reduceMotion && MotionStyle.current != .off && !ProcessInfo.processInfo.isLowPowerModeEnabled && scenePhase == .active }
+
+    var body: some View {
+        Color.clear
+            .overlay(image.resizable().scaledToFill().scaleEffect(zoomed && moving ? 1.07 : 1.0, anchor: .center))
+            .clipped()
+            .onAppear { withAnimation(.easeInOut(duration: 28).repeatForever(autoreverses: true)) { zoomed = true } }
+    }
+}
+
 /// The background of a theme: the gradient, a soft glow, the mood, and the photo if there is one.
 struct ThemeBackdrop: View {
     let theme: BrowserTheme
@@ -243,7 +260,7 @@ struct ThemeBackdrop: View {
             LinearGradient(colors: [theme.top.color, theme.bottom.color], startPoint: .top, endPoint: .bottom)
             RadialGradient(colors: [theme.glow.color.opacity(0.75), .clear], center: .init(x: 0.5, y: 0.38), startRadius: 0, endRadius: 560)
             if let name = theme.backdropImage, let data = BundledBackdrops.data(name), let image = Image(platformData: data) {
-                Color.clear.overlay(image.resizable().scaledToFill()).overlay(Color.black.opacity(0.28)).clipped()
+                DriftingPhoto(image: image).overlay(Color.black.opacity(0.28)).clipped()
             }
             if let photo, let image = Image(platformData: photo) {
                 image.resizable().scaledToFill().overlay(Color.black.opacity(photoDim))
@@ -544,7 +561,7 @@ extension BrowserModel {
 
     var themeIsActive: Bool { themeID != "midnight" }
 
-    private var themeFolder: URL { profileFolder.appendingPathComponent("themes", isDirectory: true) }
+    var themeFolder: URL { profileFolder.appendingPathComponent("themes", isDirectory: true) }
     private var photoURL: URL { themeFolder.appendingPathComponent("background.jpg") }
 
     var themePhoto: Data? { themeID == "custom" && customTheme.hasPhoto ? (try? Data(contentsOf: photoURL)) : nil }
@@ -607,24 +624,51 @@ extension BrowserModel {
         objectWillChange.send()
     }
 
-    private var startImageURL: URL { themeFolder.appendingPathComponent("start.jpg") }
+    var startImageURL: URL { themeFolder.appendingPathComponent("start.jpg") }
 
-    func loadStartImage() { startImageData = try? Data(contentsOf: startImageURL) }
+    func loadStartImage() {
+        startHasVideo = FileManager.default.fileExists(atPath: startVideoURL.path)
+        // With a collection, the picture for now comes from it (see `refreshWallpaper`); the single saved picture is the fallback.
+        removeOrphanedWallpapers(knownState: wallpaperLibraryWasRead)
+        startImageData = try? Data(contentsOf: startImageURL)
+        analyzeStartImage()
+    }
+
+    /// What the picture looks like, worked out once off the main thread; the page keeps its usual colours until it is known.
+    func analyzeStartImage() {
+        guard let data = startImageData else { startAnalysis = nil; return }
+        Task { [weak self] in
+            // The measuring runs off the main thread; the result is only used if the picture on the page is still this one.
+            let found = await Task.detached(priority: .utility) { WallpaperAnalyzer.analyze(data) }.value
+            guard let self, self.startImageData == data else { return }
+            self.startAnalysis = found
+        }
+    }
 
     /// A picture for the start page background, chosen from this device: shrunk, kept in this profile's folder, never sent anywhere.
     func setStartImage(from url: URL) {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-        guard let data = try? Data(contentsOf: url), let jpeg = Self.shrunkJPEG(data, longSide: 2200) else { notice = "That picture could not be used."; return }
+        guard let data = try? Data(contentsOf: url), let jpeg = WallpaperImages.prepared(data) else { notice = "That picture could not be used."; return }
         try? FileManager.default.createDirectory(at: themeFolder, withIntermediateDirectories: true)
         guard (try? jpeg.write(to: startImageURL, options: .atomic)) != nil else { notice = "The picture could not be saved."; return }
+        WallpaperImages.clear()
+        // A still picture chosen by hand replaces an animated wallpaper (whose poster this was).
+        if startHasVideo { removeStartVideo() }
+        currentWallpaperID = nil
         startImageData = jpeg
+        // A new picture starts with its own position; the other adjustments are the person's and stay.
+        startLook.focalX = 0.5; startLook.focalY = 0.5
+        analyzeStartImage()
         startBackground = .image
     }
 
     func removeStartImage() {
         try? FileManager.default.removeItem(at: startImageURL)
+        if startHasVideo { removeStartVideo() }
+        WallpaperImages.clear()
         startImageData = nil
+        startAnalysis = nil
         if startBackground == .image { startBackground = .gradient }
     }
 

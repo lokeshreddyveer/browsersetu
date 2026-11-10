@@ -65,7 +65,7 @@ final class ShoppingAndLinkTests: XCTestCase {
     }
 
     func testVideoDetectionReadsFlags() {
-        let v = DetectedVideo(index: 2, raw: ["tag": "video", "duration": 125.0, "currentTime": 10.0, "paused": true, "rate": 1.5, "hasMediaKeys": true])
+        let v = DetectedVideo(raw: ["tag": "video", "duration": 125.0, "currentTime": 10.0, "paused": true, "rate": 1.5, "hasMediaKeys": true])
         XCTAssertEqual(v.title, "Video · 2:05")
         XCTAssertTrue(v.protected)
         XCTAssertEqual(v.rate, 1.5)

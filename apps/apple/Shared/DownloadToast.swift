@@ -96,6 +96,7 @@ struct DownloadToast: View {
             HStack {
                 #if os(macOS)
                 Button("Show in Finder") { model.revealDownload(banner) }
+                Button("Send to Device…") { model.transferFile = banner.fileURL; model.sheet = .devices }
                 #endif
                 Button("All Downloads") { model.sheet = .downloads; model.dismissDownloadBanner() }
             }

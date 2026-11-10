@@ -35,7 +35,7 @@ extension BrowserModel {
     var playingElsewhere: [TabController] { tabs.filter { $0.playingAudio && $0.id != activeID } }
 
     func noteMediaStarted(_ tab: TabController) {
-        guard keepMediaHistory, !tab.isPrivate, let url = tab.url, url.scheme?.hasPrefix("http") == true else { return }
+        guard keepMediaHistory, !tab.leavesNoTrace, let url = tab.url, url.scheme?.hasPrefix("http") == true else { return }
         mediaHistory = MediaHistoryRules.adding(MediaHistoryEntry(title: tab.displayTitle, url: url.absoluteString, site: displayHost(url)), to: mediaHistory)
         saveSetting("media_history", (try? String(data: JSONEncoder().encode(mediaHistory), encoding: .utf8)) ?? "[]")
     }
@@ -62,6 +62,7 @@ extension BrowserModel {
 
     /// Called with the window's background check: when the time comes, everything pauses.
     func checkMediaSleepTimer(now: Date = Date()) {
+        checkBackgroundMediaPolicy(now: now)
         guard let end = mediaSleepAt, now >= end else { return }
         mediaSleepAt = nil
         pauseAllMedia()
@@ -92,6 +93,24 @@ struct MediaOverviewSections: View {
                 }
                 Button("Pause Everything") { model.pauseAllMedia() }.buttonStyle(.bordered).controlSize(.small)
             }
+        }
+        #if os(macOS)
+        Section {
+            Toggle("Show the player controls when a video starts playing", isOn: $model.autoShowPlayer)
+        } footer: {
+            Text("They appear in a small panel you can drag anywhere on the page. Close it with its cross; it comes back with the next video.")
+        }
+        #endif
+        Section {
+            Toggle("Pause other tabs when one starts playing", isOn: $model.audioFocus)
+            Picker("Pause sound in background tabs after", selection: $model.mediaBackgroundMinutes) {
+                Text("Never").tag(0)
+                Text("10 minutes").tag(10)
+                Text("30 minutes").tag(30)
+                Text("1 hour").tag(60)
+            }
+        } header: { Text("Playing in several tabs") } footer: {
+            Text("A tab using the camera or microphone, such as a call, is never paused, and neither is the tab in front. A video in Picture in Picture counts as a background tab, so it can be paused too.")
         }
         Section {
             if let end = model.mediaSleepAt {

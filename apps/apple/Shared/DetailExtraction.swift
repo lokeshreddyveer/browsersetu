@@ -84,7 +84,7 @@ struct DetailsList: View {
         if details.isEmpty {
             ContentUnavailableView("Nothing Found", systemImage: "calendar.badge.exclamationmark", description: Text("No dates, phone numbers, emails or addresses were recognised."))
         } else {
-            List {
+            PanelList {
                 ForEach(details) { detail in
                     HStack {
                         Image(systemName: symbol(detail.kind)).foregroundStyle(.secondary).frame(width: 20)

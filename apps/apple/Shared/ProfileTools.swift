@@ -119,7 +119,7 @@ extension BrowserModel {
 
     // MARK: Temporary profile
 
-    /// A profile that is deleted, with its cookies and everything else, when you leave it or quit.
+    /// A profile that is deleted, with its cookies and everything else, when you leave it or, if it is still there, the next time the app starts.
     func startTemporaryProfile() {
         let name = ProfileRegistry.temporaryName()
         guard createProfile(name) else { notice = "Could not start a temporary profile."; return }

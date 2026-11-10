@@ -59,7 +59,11 @@ enum PDFEdit {
         for part in text.split(separator: ",") {
             let bits = part.split(separator: "-", omittingEmptySubsequences: false).map { $0.trimmingCharacters(in: .whitespaces) }
             if bits.count == 1, let n = Int(bits[0]) { out.insert(n) }
-            else if bits.count == 2, let a = bits[0].isEmpty ? 1 : Int(bits[0]), let b = bits[1].isEmpty ? pageCount : Int(bits[1]), a <= b { for n in a...b { out.insert(n) } }
+            else if bits.count == 2, let a = bits[0].isEmpty ? 1 : Int(bits[0]), let b = bits[1].isEmpty ? pageCount : Int(bits[1]), a <= b {
+                // Held to the pages that exist before counting: "1-99999999999" must not loop for ever.
+                let low = max(a, 1), high = min(b, pageCount)
+                if low <= high { for n in low...high { out.insert(n) } }
+            }
         }
         return out.filter { $0 >= 1 && $0 <= pageCount }.sorted()
     }
@@ -169,7 +173,9 @@ enum PDFEdit {
     /// Puts a picture of a signature on one page. That page is redrawn with the picture on it (the other pages are left alone), so that page's text can no longer be selected.
     static func burnImage(_ image: CGImage, in rect: CGRect, onPageAt index: Int, of document: PDFDocument) -> Bool {
         guard index >= 0, index < document.pageCount, let page = document.page(at: index), rect.width > 4, rect.height > 4 else { return false }
-        guard let flat = redrawn(page, drawing: { context, _ in context.draw(image, in: rect) }) else { return false }
+        let origin = page.bounds(for: .mediaBox)
+        let placed = rect.offsetBy(dx: -origin.minX, dy: -origin.minY)
+        guard let flat = redrawn(page, drawing: { context, _ in context.draw(image, in: placed) }) else { return false }
         document.removePage(at: index)
         document.insert(flat, at: index)
         return true
@@ -182,9 +188,16 @@ enum PDFEdit {
     @discardableResult
     static func redact(_ rects: [CGRect], onPageAt index: Int, of document: PDFDocument, dpi: CGFloat = 200) -> Bool {
         guard index >= 0, index < document.pageCount, let page = document.page(at: index), !rects.isEmpty else { return false }
-        guard let flat = redrawn(page, asPicture: true, dpi: dpi, drawing: { context, _ in
+        // A very large page (a poster, a plan sheet) at 200 dpi cannot be drawn into one bitmap, and then nothing would be blacked out: the dpi comes down to fit.
+        let box = page.bounds(for: .mediaBox)
+        let longest = max(box.width, box.height) * dpi / 72
+        let fitted = longest > 9000 ? dpi * 9000 / longest : dpi
+        // The marks are in the page's own coordinates, but the picture starts at the corner of the media box: on a page whose box does not start at 0,0 they would
+        // land beside the text and leave it readable.
+        let shifted = rects.map { $0.offsetBy(dx: -box.minX, dy: -box.minY) }
+        guard let flat = redrawn(page, asPicture: true, dpi: fitted, drawing: { context, _ in
             context.setFillColor(CGColor(gray: 0, alpha: 1))
-            for r in rects { context.fill(r) }
+            for r in shifted { context.fill(r) }
         }) else { return false }
         document.removePage(at: index)
         document.insert(flat, at: index)

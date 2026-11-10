@@ -89,6 +89,8 @@ final class PageIndex {
         queue.sync {
             run("DELETE FROM pages;", [])
             sqlite3_exec(db, "INSERT INTO pages(pages) VALUES('optimize'); VACUUM;", nil, nil, nil)
+            // The text of erased pages can still sit in the write-ahead log until it is folded back and emptied.
+            sqlite3_exec(db, "PRAGMA wal_checkpoint(TRUNCATE);", nil, nil, nil)
         }
     }
 
@@ -121,7 +123,11 @@ enum PageIndexRules {
         guard url.scheme == "https", let host = url.host?.lowercased(), !host.isEmpty, host != "localhost" else { return false }
         if excludedHosts.contains(where: { host == $0 || host.hasSuffix("." + $0) }) { return false }
         let path = (url.path + " " + host).lowercased()
-        return !sensitiveWords.contains { path.contains($0) }
+        if sensitiveWords.contains(where: { path.contains($0) }) { return false }
+        // An address that carries a secret in its query (a sign-in code, a reset token, a signed link) is never copied: the address itself would be stored and offered back.
+        let secretNames: Set<String> = ["token", "access_token", "id_token", "refresh_token", "secret", "key", "apikey", "api_key", "sig", "signature", "code", "jwt", "otp", "sid", "ticket", "reset", "nonce"]
+        let names = (URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []).map { $0.name.lowercased() }
+        return !names.contains { secretNames.contains($0) || sensitiveWords.contains(where: $0.contains) }
     }
 }
 
@@ -134,7 +140,7 @@ extension BrowserModel {
 
     /// Copies the text of the page that just loaded, if the person turned this on and the page is an ordinary one.
     func indexPageIfAllowed(_ tab: TabController) {
-        guard indexPages, !tab.isPrivate, let url = tab.url, PageIndexRules.shouldIndex(url, excludedHosts: indexExcludedHosts) else { return }
+        guard indexPages, !tab.leavesNoTrace, let url = tab.url, PageIndexRules.shouldIndex(url, excludedHosts: indexExcludedHosts) else { return }
         let generation = indexGeneration
         let profile = profileName
         Task {
@@ -144,7 +150,7 @@ extension BrowserModel {
             guard let text = await engine.pageText(), text.count > 120 else { return }
             // Everything is checked again at the moment of saving: the person may have turned this off, excluded the site, switched profile or opened it
             // privately while the page's text was being read.
-            guard generation == indexGeneration, profile == profileName, indexPages, !tab.isPrivate, tab.url == url, !tab.isLoading,
+            guard generation == indexGeneration, profile == profileName, indexPages, !tab.leavesNoTrace, tab.url == url, !tab.isLoading,
                   PageIndexRules.shouldIndex(url, excludedHosts: indexExcludedHosts), !Task.isCancelled else { return }
             var clean = URLComponents(url: TrackingParameters.clean(url) ?? url, resolvingAgainstBaseURL: false)
             clean?.fragment = nil

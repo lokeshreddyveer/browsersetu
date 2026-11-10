@@ -11,8 +11,12 @@ struct TabMeta: Codable, Equatable {
     var container: String?
     /// A scratch tab leaves no trace: its own temporary storage, no history, not in Recently Closed, gone when the app quits.
     var scratch: Bool?
+    /// The id of the Essential this tab is the open page of (see `EssentialTab`). Such a tab is shown with the Essentials, in every workspace, not in a workspace's list.
+    var essential: String?
+    /// The key of this pinned tab's saved address (see `PinnedAddresses`): the address it was pinned at.
+    var pinKey: String?
 
-    var isEmpty: Bool { name == nil && color == nil && status == nil && note == nil && parent == nil && container == nil && scratch != true }
+    var isEmpty: Bool { name == nil && color == nil && status == nil && note == nil && parent == nil && container == nil && scratch != true && essential == nil && pinKey == nil }
 }
 
 enum TabStatus: String, Codable, CaseIterable, Identifiable {
@@ -238,7 +242,7 @@ extension BrowserModel {
     /// Puts the tabs of each website that has two or more tabs into a group named after it. Tabs already in a group, pinned ones and private ones are left.
     @discardableResult
     func groupTabsByWebsite() -> Int {
-        let candidates = tabs.filter { !$0.isPrivate && !$0.isBlank && !$0.pinned && $0.group.isEmpty && $0.workspace == activeWorkspace }
+        let candidates = listedTabs(inWorkspace: activeWorkspace).filter { !$0.isPrivate && !$0.isBlank && !$0.pinned && $0.group.isEmpty }
         var bySite: [String: [TabController]] = [:]
         for tab in candidates { if let host = tab.url?.host { bySite[TabOrganizing.siteName(forHost: host), default: []].append(tab) } }
         var moved = 0
@@ -290,6 +294,8 @@ extension BrowserModel {
 
     /// Forgets a container: its tabs are closed and everything it stored is deleted.
     func deleteContainer(_ name: String) async {
+        // The Essentials that browse in it go first, so none is ever reopened in another identity.
+        dropEssentials(inContainer: name)
         for tab in tabs where tabMeta[tab.id]?.container == name { closeTab(id: tab.id, force: true) }
         await engine.clearData(profile: profileName + "#" + name)
         setContainers(containers.filter { $0 != name })
@@ -299,7 +305,7 @@ extension BrowserModel {
 
     func saveSplitTemplate(named name: String) {
         let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !clean.isEmpty, clean.count <= 40, let left = active?.url, let other = splitTabID.flatMap({ id in tabs.first { $0.id == id } })?.url else {
+        guard !clean.isEmpty, clean.count <= 40, let left = active?.url, active?.isPrivate == false, let otherTab = splitTabID.flatMap({ id in tabs.first { $0.id == id } }), !otherTab.isPrivate, let other = otherTab.url else {
             notice = "Open two pages side by side first."; return
         }
         let template = SplitTemplate(name: clean, left: left.absoluteString, right: other.absoluteString, vertical: splitOrientation == .stacked)

@@ -27,11 +27,9 @@ final class SiteIconTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: folder) }
         let store = FaviconStore(directory: folder)
         XCTAssertNil(store.image(forURL: "https://example.com/a"))
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let img = NSImage(size: NSSize(width: 8, height: 8))
         img.lockFocus(); NSColor.blue.setFill(); NSRect(x: 0, y: 0, width: 8, height: 8).fill(); img.unlockFocus()
-        let png = try XCTUnwrap(NSBitmapImageRep(data: try XCTUnwrap(img.tiffRepresentation))?.representation(using: .png, properties: [:]))
-        try png.write(to: folder.appendingPathComponent("example.com.png"))
+        store.remember(try XCTUnwrap(FaviconStore.key(forHost: "example.com")), img)
         XCTAssertNotNil(store.image(forURL: "https://www.example.com/other/page"))
         store.clear()
         XCTAssertNil(store.image(forURL: "https://example.com/"))

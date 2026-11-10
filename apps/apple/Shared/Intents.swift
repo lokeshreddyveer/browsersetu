@@ -60,6 +60,19 @@ struct RunWorkflowIntent: AppIntent {
     }
 }
 
+struct OpenWorkspaceIntent: AppIntent {
+    static let title: LocalizedStringResource = "Open a Workspace"
+    static let description = IntentDescription("Shows one of your Browser Setu workspaces, by name.")
+    static let openAppWhenRun = true
+
+    @Parameter(title: "Workspace name") var name: String
+
+    @MainActor func perform() async throws -> some IntentResult {
+        IntentInbox.send(.space(String(name.prefix(120))))
+        return .result()
+    }
+}
+
 struct ReopenLastSessionIntent: AppIntent {
     static let title: LocalizedStringResource = "Reopen My Last Session"
     static let description = IntentDescription("Opens again the pages from your most recent saved checkpoint.")
@@ -77,5 +90,6 @@ struct BrowserSetuShortcuts: AppShortcutsProvider {
         AppShortcut(intent: SearchWebIntent(), phrases: ["Search the web in \(.applicationName)"], shortTitle: "Search the Web", systemImageName: "magnifyingglass")
         AppShortcut(intent: ReopenLastSessionIntent(), phrases: ["Reopen my last session in \(.applicationName)"], shortTitle: "Reopen Last Session", systemImageName: "clock.arrow.circlepath")
         AppShortcut(intent: RunWorkflowIntent(), phrases: ["Run a workflow in \(.applicationName)"], shortTitle: "Run a Workflow", systemImageName: "list.bullet.rectangle")
+        AppShortcut(intent: OpenWorkspaceIntent(), phrases: ["Open a workspace in \(.applicationName)"], shortTitle: "Open a Workspace", systemImageName: "square.grid.2x2")
     }
 }

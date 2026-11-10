@@ -31,6 +31,7 @@ struct IPadRootView: View {
             .motion(.easeOut(duration: 0.22), value: model.dockedPanel)
             if model.overviewVisible { IPadTabOverview().transition(.opacity) }
             if model.showSetup { SetupAssistantView().transition(.opacity).zIndex(10) }
+            GlanceLayer(glance: model.glance)
             VStack(spacing: 8) { PendingLoginPill(); PopupBlockedPill() }
                 .padding(.top, barsAway ? 64 : 116)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -40,6 +41,7 @@ struct IPadRootView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         }
         .background { Group { if model.themeIsActive { ChromeBackdrop() } else { Color(.systemBackground) } }.ignoresSafeArea() }
+        .downloadFlight(model.downloads)
         .background { IPadShortcutLayer() }
         // An external keyboard talks to whatever has focus. With nothing focused its keys go nowhere, so the page takes focus whenever
         // the window, the tab or a dialog settles, and the address field keeps it while it is being typed in.
@@ -111,6 +113,7 @@ struct IPadRootView: View {
                 IPadPageHost(view: tab.hostView, shortcuts: model.shortcuts, perform: { perform($0) }, performTab: { model.selectTab(number: $0) }).id(tab.id)
                     .transition(model.tabSlide == 0 ? .opacity : .push(from: model.tabSlide > 0 ? .trailing : .leading))
                 if tab.isBlank { StartPageView(isPrivate: tab.isPrivate) }
+                Color.clear.tabErrorOverlay(tab)
                 // Suggestions drop from under the address field as one card, never over the pill or another dialog.
                 if !model.overviewVisible { IPadSuggestions(address: model.addressBar) }
             }
@@ -205,6 +208,7 @@ private struct IPadTabStrip: View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
+                    EssentialsInline(size: 40)
                     ForEach(model.visibleTabs) { tab in
                         IPadTabChip(tab: tab, selected: tab.id == model.activeID).id(tab.id)
                     }

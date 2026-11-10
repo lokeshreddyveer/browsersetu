@@ -210,7 +210,8 @@ enum AgentPolicy {
     static func prepare(pageText raw: String, limit: Int = 24_000) -> String {
         let cleaned = String(raw.unicodeScalars.filter { scalar in
             switch scalar.value {
-            case 0x200B...0x200F, 0x202A...0x202E, 0x2060...0x2064, 0x2066...0x2069, 0xFEFF: return false
+            // Zero-width and direction characters, and the "tag" characters (U+E0000–E007F) and variation selectors that can carry a whole hidden sentence.
+            case 0x200B...0x200F, 0x202A...0x202E, 0x2060...0x2064, 0x2066...0x2069, 0xFEFF, 0x00AD, 0x180E, 0xFE00...0xFE0F, 0xE0000...0xE007F, 0xE0100...0xE01EF: return false
             case 0x00...0x08, 0x0B, 0x0C, 0x0E...0x1F: return false
             default: return true
             }
