@@ -117,7 +117,9 @@ codesign --verify --deep --strict --verbose=2 "$APP" 2>&1 | tail -2
 # provisioning profile embedded in the app. Without that profile macOS refuses to launch the app.
 ENTS="$(codesign -d --entitlements - --xml "$APP" 2>/dev/null | python3 -c 'import sys,plistlib; d=sys.stdin.buffer.read(); e=plistlib.loads(d[d.index(b"<?xml"):]); print("sandbox=" + str(e.get("com.apple.security.app-sandbox", False)).lower() + " kvs=" + str("com.apple.developer.ubiquity-kvstore-identifier" in e).lower())' 2>/dev/null || echo "unreadable")"
 case "$ENTS" in *"sandbox=false"*) ;; *) fail "the app's entitlements read '$ENTS'; the downloadable build must not be sandboxed. Refusing to release it." ;; esac
-codesign -dvv "$APP" 2>&1 | grep -q "flags=.*runtime" || fail "the Hardened Runtime flag is missing; notarization would refuse it."
+# Read the output first: piping codesign into grep -q under pipefail reports failure when grep exits at the first match (SIGPIPE), even though the flag is there.
+SIGNING_INFO="$(codesign -dvv "$APP" 2>&1 || true)"
+case "$SIGNING_INFO" in *"flags="*"runtime"*) ;; *) fail "the Hardened Runtime flag is missing; notarization would refuse it." ;; esac
 case "$ENTS" in *"kvs=true"*) [ -f "$APP/Contents/embedded.provisionprofile" ] || fail "the app carries the iCloud key-value entitlement but has no embedded Developer ID provisioning profile, so macOS would not launch it. Create a Developer ID profile for com.browsersetu.mac with iCloud key-value storage and embed it (see apps/apple/project.yml)." ;; esac
 
 echo "▸ Notarizing the app (this waits for Apple)"
