@@ -183,6 +183,13 @@ def verify_inputs(tool):
             raise Fail("ffmpeg BUILDINFO.txt does not show the pinned source hash and the LGPL-only configuration; rebuild with scripts/build-ffmpeg-minimal.sh")
         if f"FFmpeg {t['version']} " not in info:
             raise Fail(f"ffmpeg BUILDINFO.txt is not version {t['version']}")
+        # The binaries themselves: the unsigned tree must be the exact one that was reviewed (a rebuild of ffmpeg is not bit-for-bit reproducible, so a new build updates this pin on purpose).
+        want = t.get("unsignedTreeSHA256")
+        if not SHA_RE.match(str(want or "")):
+            raise Fail("ThirdParty/ffmpeg/MANIFEST.json has no pinned unsignedTreeSHA256")
+        got = tree_digest(p)
+        if got != want:
+            raise Fail(f"the ffmpeg tree on disk ({got[:12]}…) is not the pinned one ({want[:12]}…); if you rebuilt ffmpeg on purpose, review it and update unsignedTreeSHA256 in ThirdParty/ffmpeg/MANIFEST.json")
 
 
 def cache_key(tool, arch, team):

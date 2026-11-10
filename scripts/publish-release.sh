@@ -9,6 +9,16 @@ VERSION="${1:?usage: publish-release.sh <version> <build> [notes]}"; BUILD="${2:
 REPO="${RELEASES_REPO:-lokeshreddyveer/browsersetu}"
 DMG="dist/BrowserSetu-$VERSION.dmg"
 [ -f "$DMG" ] || { echo "✘ $DMG not found; run scripts/release.sh $VERSION $BUILD first"; exit 1; }
+# The file in dist/ may be left over from another build: it must be THIS version and build, signed by the team, carry a stapled ticket and be accepted by Gatekeeper.
+CHECK="$(mktemp -d)"; trap 'hdiutil detach "$CHECK/mnt" -quiet 2>/dev/null; rm -rf "$CHECK"' EXIT
+hdiutil attach "$DMG" -readonly -nobrowse -noverify -mountpoint "$CHECK/mnt" -quiet || { echo "✘ cannot open $DMG"; exit 1; }
+PLIST="$(ls -d "$CHECK"/mnt/*.app | head -1)/Contents/Info.plist"
+GOT_V="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST")"; GOT_B="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PLIST")"
+[ "$GOT_V" = "$VERSION" ] && [ "$GOT_B" = "$BUILD" ] || { echo "✘ $DMG holds version $GOT_V build $GOT_B, not $VERSION build $BUILD (an older build left in dist/?)"; exit 1; }
+xcrun stapler validate "$DMG" >/dev/null || { echo "✘ $DMG has no valid stapled notarization ticket"; exit 1; }
+spctl -a -t open --context context:primary-signature "$DMG" 2>&1 | grep -q accepted || { echo "✘ Gatekeeper does not accept $DMG"; exit 1; }
+codesign --verify --deep --strict "$CHECK"/mnt/*.app || { echo "✘ the app inside $DMG does not verify"; exit 1; }
+hdiutil detach "$CHECK/mnt" -quiet
 SPARKLE_BIN="$(find build/release/SourcePackages apps/apple/build ~/Documents/iptv/macos/.build -type d -path '*artifacts/sparkle/Sparkle/bin' 2>/dev/null | head -1 || true)"
 [ -n "$SPARKLE_BIN" ] || { echo "✘ Sparkle's tools were not found (build the Direct scheme once so the package is fetched)"; exit 1; }
 SIGN="$("$SPARKLE_BIN/sign_update" --account browsersetu "$DMG")"        # sparkle:edSignature="…" length="…"

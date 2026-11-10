@@ -76,7 +76,7 @@ done < "$out/macho.txt"
 # 4. package the tree's contents, then compute the integrity values from the SIGNED tree and the zip
 zipfile="$out/$name-$ver-$arch.zip"; (cd "$out/tree" && zip -qry "$zipfile" .)
 # RECIPE-END
-tree=$(python3 "$here/tree_digest.py" "$out/tree" | cut -d' ' -f1); sha=$(shasum -a 256 "$zipfile" | cut -d' ' -f1)
+tree=$(python3 -I "$here/tree_digest.py" "$out/tree" | cut -d' ' -f1); sha=$(shasum -a 256 "$zipfile" | cut -d' ' -f1)
 size=$(stat -f %z "$zipfile"); unpacked=$(find "$out/tree" -type f -exec stat -f %z {} + | awk '{s+=$1} END {print s}')
 python3 - "$out/manifest-fragment.json" "$sha" "$tree" "$size" "$unpacked" "$arch" "$team" <<'PY'
 import json,sys
