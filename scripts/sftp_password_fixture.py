@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""An SFTP server that CHECKS PASSWORDS (a normal user cannot make the system's sshd do that), for BrowserSetu's tests. Uses asyncssh from a throwaway folder
-(pip install --target /private/tmp/bs-pwserver-lib asyncssh).
+"""An SFTP server that CHECKS PASSWORDS (a normal user cannot make the system's sshd do that), for BrowserSetu's tests. Uses asyncssh from the hash-pinned folder made by
+scripts/prepare-sftp-test-deps.sh (given in BS_PWSERVER_LIB); it never installs anything.
 
   sftp_password_fixture.py ROOT PORT HOSTKEY [--user alice --password s3cret]
 
 ROOT is the whole visible tree (a chroot). Stops when stdin says 'quit' or closes."""
 import asyncio, os, sys, threading
-sys.path.insert(0, "/private/tmp/bs-pwserver-lib")
+sys.path.insert(0, os.environ["BS_PWSERVER_LIB"])
 import asyncssh
 
 root, port, hostkey = sys.argv[1], int(sys.argv[2]), sys.argv[3]

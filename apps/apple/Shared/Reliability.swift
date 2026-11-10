@@ -32,6 +32,9 @@ enum DiagLog {
         }
     }
 
+    /// Returns once every line recorded so far has been written (for tests and for reading the log straight after writing it).
+    static func flush() { queue.sync {} }
+
     static func recent(limit: Int = 60) -> [String] {
         guard let folder, let text = try? String(contentsOf: folder.appendingPathComponent("diagnostics.log"), encoding: .utf8) else { return [] }
         return Array(text.split(separator: "\n").map(String.init).suffix(limit))

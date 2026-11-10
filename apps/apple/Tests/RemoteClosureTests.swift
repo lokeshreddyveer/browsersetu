@@ -32,15 +32,15 @@ func processLines(matching needle: String) -> [String] {
 final class PasswordSFTPFixture {
     let root: URL, files: URL, port: Int, knownHosts: URL
     private var process: Process?, stdin: Pipe?
-    static let lib = "/private/tmp/bs-pwserver-lib"
+    /// Prepared on purpose by scripts/prepare-sftp-test-deps.sh (hash-pinned wheels); the test never installs anything itself.
+    static var lib: String {
+        if let env = ProcessInfo.processInfo.environment["BS_PWSERVER_LIB"], !env.isEmpty { return env }
+        return URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("build/test-deps/sftp").path
+    }
     let password: String
     init(password: String = "s3cret") throws {
         self.password = password
-        if !FileManager.default.fileExists(atPath: Self.lib + "/asyncssh") {
-            let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/python3"); p.arguments = ["-m", "pip", "install", "--quiet", "--target", Self.lib, "asyncssh"]
-            p.standardOutput = FileHandle.nullDevice; p.standardError = FileHandle.nullDevice; try p.run(); p.waitUntilExit()
-        }
-        guard FileManager.default.fileExists(atPath: Self.lib + "/asyncssh") else { throw NSError(domain: "pw", code: 1, userInfo: [NSLocalizedDescriptionKey: "asyncssh is not installed: run  /usr/bin/python3 -m pip install --target \(Self.lib) asyncssh"]) }
+        guard FileManager.default.fileExists(atPath: Self.lib + "/asyncssh") else { throw XCTSkip("asyncssh is not prepared: run scripts/prepare-sftp-test-deps.sh (hash-pinned; the tests never install packages themselves)") }
         root = FileManager.default.temporaryDirectory.appendingPathComponent("bs-pw-\(UUID().uuidString.prefix(8))")
         files = root.appendingPathComponent("files"); knownHosts = root.appendingPathComponent("known_hosts")
         try FileManager.default.createDirectory(at: files, withIntermediateDirectories: true)
@@ -48,7 +48,7 @@ final class PasswordSFTPFixture {
         let host = root.appendingPathComponent("host")
         let k = Process(); k.executableURL = URL(fileURLWithPath: "/usr/bin/ssh-keygen"); k.arguments = ["-q", "-t", "ed25519", "-N", "", "-f", host.path]; try k.run(); k.waitUntilExit()
         let script = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("scripts/sftp_password_fixture.py").path
-        let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/python3"); p.arguments = ["-I", script, files.path, String(port), host.path, "--password", password]
+        let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/python3"); p.arguments = ["-I", script, files.path, String(port), host.path, "--password", password]; p.environment = ["BS_PWSERVER_LIB": Self.lib]
         let i = Pipe(), o = Pipe(); p.standardInput = i; p.standardOutput = o; p.standardError = FileHandle.nullDevice
         try p.run(); process = p; stdin = i
         guard String(decoding: o.fileHandleForReading.availableData, as: UTF8.self).contains("ready") else { throw NSError(domain: "pw", code: 2, userInfo: [NSLocalizedDescriptionKey: "the password SFTP fixture did not start"]) }
