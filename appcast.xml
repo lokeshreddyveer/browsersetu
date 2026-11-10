@@ -3,6 +3,15 @@
   <channel>
     <title>Browser Setu</title>
     <item>
+      <title>Browser Setu 0.4.0</title>
+      <pubDate>Tue, 10 Nov 2026 08:35:13 -0000</pubDate>
+      <sparkle:version>22</sparkle:version>
+      <sparkle:shortVersionString>0.4.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <description><![CDATA[First-run setup with import and iCloud, new Start Page, favicon engine, new mark, and a first-launch film.]]></description>
+      <enclosure url="https://github.com/lokeshreddyveer/browsersetu/releases/download/v0.4.0/BrowserSetu-0.4.0.dmg" type="application/octet-stream" sparkle:edSignature="sSIFAK2JizD0WSDyGlRgWrrT8GSV1KDSP0/Ojuk7pFgE6OvN4JiepFnyPBJ3cD+v5PhsdQoOZOfjdx+5XpkuDQ==" length="34743929"/>
+    </item>
+    <item>
       <title>Browser Setu 0.3.3</title>
       <pubDate>Sun, 25 Oct 2026 03:59:53 -0000</pubDate>
       <sparkle:version>20</sparkle:version>
@@ -230,5 +239,5 @@ Mac: notarized, stapled DMG (replaces the build 10 file on the same release). iP
       <description><![CDATA[First public release. A native WebKit browser for macOS with a Rust core: tabs, sidebar layouts, workspaces, content blocking, per-site privacy, saved passwords in your Keychain, web extensions, research collections, developer tools, and automatic updates. Early release: see docs/capabilities.md for what has been checked and what has not.]]></description>
       <enclosure url="https://github.com/lokeshreddyveer/browsersetu/releases/download/v0.2.0/BrowserSetu-0.2.0.dmg" type="application/octet-stream" sparkle:edSignature="grmp8aD3U/KjtKeEkUcI3ESkfohsFjkds81VYV6rBzRGW6/JUxDLtcQ1hg178QCZEWXFRCB4AwrzLHSqGC2VCw==" length="14528271"/>
     </item>
-                            </channel>
+                              </channel>
 </rss>
