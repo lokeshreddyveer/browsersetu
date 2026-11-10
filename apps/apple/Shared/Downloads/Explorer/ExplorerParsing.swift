@@ -90,20 +90,25 @@ struct RobotsRules: Equatable, Sendable {
     }
 
     /// Whether `pattern` matches the start of `path` (all of it when the pattern ends in `$`).
-    static func matches(_ pattern: String, _ path: String) -> Bool {
-        var p = Array(pattern), anchored = false
-        if p.last == "$" { anchored = true; p.removeLast() }
-        let s = Array(path)
-        var pi = 0, si = 0, star = -1, mark = 0
+    static func matches(_ pattern: String, _ path: String) -> Bool { match(pattern, path).matched }
+
+    /// The matcher, with the number of comparison steps it took. Greedy single-star backtracking (never exponential): the steps are at most
+    /// (pattern length + 1) x (path length + 1). Bytes are compared, which is what percent-encoded addresses are made of.
+    static func match(_ pattern: String, _ path: String) -> (matched: Bool, steps: Int) {
+        var p = Array(pattern.utf8), anchored = false
+        if p.last == UInt8(ascii: "$") { anchored = true; p.removeLast() }
+        let s = Array(path.utf8), star8 = UInt8(ascii: "*")
+        var pi = 0, si = 0, star = -1, mark = 0, steps = 0
         while si < s.count {
-            if pi < p.count, p[pi] == "*" { star = pi; mark = si; pi += 1 }
+            steps += 1
+            if pi < p.count, p[pi] == star8 { star = pi; mark = si; pi += 1 }
             else if pi < p.count, p[pi] == s[si] { pi += 1; si += 1 }
-            else if pi == p.count, !anchored { return true }
+            else if pi == p.count, !anchored { return (true, steps) }
             else if star >= 0 { pi = star + 1; mark += 1; si = mark }
-            else { return false }
+            else { return (false, steps) }
         }
-        while pi < p.count, p[pi] == "*" { pi += 1 }
-        return pi == p.count
+        while pi < p.count, p[pi] == star8 { pi += 1; steps += 1 }
+        return (pi == p.count, steps)
     }
 }
 

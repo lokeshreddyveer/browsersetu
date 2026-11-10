@@ -377,12 +377,19 @@ final class RobotsAndHTMLTests: XCTestCase {
     }
 
     func testHostileRobotsFilesAreBounded() {
+        // Deterministic: the work is COUNTED, not timed. The file is cut at 20,000 rules, and one match takes at most (pattern + 1) x (path + 1) steps, so the total is bounded
+        // by a number that does not depend on how busy the machine is.
         let big = String(repeating: "Disallow: /a*a*a*a*a*a*a*a*a*b\n", count: 30_000)
         let r = RobotsRules.parse("User-agent: *\n" + big)
-        let start = Date()
-        _ = allowed(r, "/" + String(repeating: "a", count: 3000))
-        XCTAssertLessThan(Date().timeIntervalSince(start), 5, "pattern matching does not blow up")
         XCTAssertLessThanOrEqual(r.rules.count, 20_000)
+        let path = "/" + String(repeating: "a", count: 3000)
+        let one = RobotsRules.match(r.rules[0].pattern, path)
+        XCTAssertFalse(one.matched)
+        XCTAssertLessThanOrEqual(one.steps, (r.rules[0].pattern.utf8.count + 1) * (path.utf8.count + 1), "one match is polynomial, never exponential")
+        XCTAssertLessThanOrEqual(one.steps * r.rules.count, 20_000 * 31 * 3002, "the whole file is bounded")
+        XCTAssertTrue(allowed(r, path), "no rule matches, so the path is allowed")
+        // the tiny exponential-trap shape still ends at once
+        XCTAssertLessThan(RobotsRules.match("*a*a*a*a*a*a*a*a*a*a*a*a*b", String(repeating: "a", count: 200)).steps, 27 * 201)
     }
 
     func testHTMLExtractionToleratesBrokenMarkupAndReadsOnlyAddresses() {

@@ -16,9 +16,7 @@ final class ReliabilityTests: XCTestCase {
         DiagLog.folder = folder
         defer { DiagLog.folder = nil }
         for i in 0..<(DiagLog.maxLines + 20) { DiagLog.record("test", "event \(i)") }
-        let exp = expectation(description: "written")
-        DispatchQueue.global().asyncAfter(deadline: .now() + 1.5) { exp.fulfill() }
-        wait(for: [exp], timeout: 5)
+        DiagLog.flush()          // waits for the writer queue itself: no fixed delay, so machine load cannot change the result
         let lines = DiagLog.recent(limit: 1000)
         XCTAssertEqual(lines.count, DiagLog.maxLines)
         XCTAssertTrue(lines.last?.hasSuffix("event \(DiagLog.maxLines + 19)") ?? false)
