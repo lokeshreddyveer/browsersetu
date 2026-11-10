@@ -36,20 +36,22 @@ class Base(unittest.TestCase):
         d.update(kw)
         return argparse.Namespace(**d)
 
-    def make_build(self, content=b"#!/bin/sh\necho ffmpeg\n", name="build", team=TEAM, arch="arm64"):
+    def make_build(self, content=b"#!/bin/sh\necho ffmpeg\n", name="build", team=TEAM, arch="arm64", licence=True):
         """A built package folder like release-media-tools.sh leaves: <tool>-<ver>-<arch>.zip + manifest-fragment.json."""
         b = os.path.join(self.tmp, name)
         os.makedirs(os.path.join(b, "tree"), exist_ok=True)
         exe = os.path.join(b, "tree", "ffmpeg")
         open(exe, "wb").write(content)
         os.chmod(exe, 0o755)
-        open(os.path.join(b, "tree", "COPYING.LGPLv2.1"), "w").write("lgpl")          # licence texts travel INSIDE the signed package, as in the real one
+        if licence:
+            open(os.path.join(b, "tree", "COPYING.LGPLv2.1"), "w").write("lgpl")          # licence texts travel INSIDE the signed package, as in the real one
         z = os.path.join(b, "ffmpeg-9.0.2-arm64.zip")
         with zipfile.ZipFile(z, "w") as zf:
             info = zipfile.ZipInfo("ffmpeg")
             info.external_attr = (stat.S_IFREG | 0o755) << 16
             zf.writestr(info, content)
-            zf.writestr("COPYING.LGPLv2.1", "lgpl")
+            if licence:
+                zf.writestr("COPYING.LGPLv2.1", "lgpl")
         json.dump({"sha256": C.sha256_file(z), "treeSHA256": C.tree_digest(os.path.join(b, "tree")), "size": os.path.getsize(z), "unpackedBytes": len(content),
                    "architectures": [arch], "signaturePolicy": "teamID:" + team}, open(os.path.join(b, "manifest-fragment.json"), "w"))
         return b
@@ -322,9 +324,12 @@ class ManifestTests(Base):
         self.assertTrue(C.validate_manifest(t, "ffmpeg"))
 
 
+HOSTED_FFMPEG = "https://github.com/lokeshreddyveer/browsersetu/releases/download/media-tools-ffmpeg-9.0.2/ffmpeg-9.0.2-arm64.zip"
+
+
 class AppCheckTests(Base):
-    """check-app on a fabricated .app whose tools come from a cached package."""
-    def make_app(self, version="1.0", embed=True, readme_claim=True, url="", mutate=None, js=True):
+    """check-app on a fabricated .app that carries manifests only; the packages they describe are in the (test) cache."""
+    def make_app(self, version="1.0", url="", mutate=None, plant=None, build=None, offer=True):
         app = os.path.join(self.tmp, "Test.app")
         shutil.rmtree(app, ignore_errors=True)
         res = os.path.join(app, "Contents", "Resources")
@@ -332,22 +337,17 @@ class AppCheckTests(Base):
         os.makedirs(os.path.join(app, "Contents", "MacOS"))
         open(os.path.join(app, "Contents", "MacOS", "Test"), "w").write("x")
         plistlib.dump({"CFBundleShortVersionString": version}, open(os.path.join(app, "Contents", "Info.plist"), "wb"))
-        entry = self.store()
-        for tool in C.TOOLS:
-            if tool == "yt-dlp":
-                continue
-        # only ffmpeg is fabricated; yt-dlp is stubbed by the same package under another name to keep the test small
+        entry = self.store(build)
         self.entries = {"ffmpeg": entry}
-        if embed:
-            d = os.path.join(res, "Tools", "ffmpeg")
-            os.makedirs(d)
-            subprocess.run(["/usr/bin/unzip", "-q", os.path.join(entry, "package.zip"), "-d", d], check=True)
+        if offer:
             with open(os.path.join(res, "Notices", "FFMPEG-source-offer.txt"), "w") as f:
                 f.write("offer")
         m = C.generate_manifest("ffmpeg", entry, url or None)
         if mutate:
             mutate(m)
         json.dump(m, open(os.path.join(res, "BundledFFmpeg.json"), "w"))
+        if plant:
+            plant(app)
         self.res = res
         return app
 
@@ -357,10 +357,11 @@ class AppCheckTests(Base):
         err, out = io.StringIO(), io.StringIO()
         try:
             with contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
-                rc = C.cmd_check_app(argparse.Namespace(app=app, team=TEAM, readme=readme, hosted_verified=kw.get("hosted_verified", False),
+                rc = C.cmd_check_app(argparse.Namespace(app=app, team=TEAM, readme=readme, cache=kw.get("cache", self.cache), hosted_verified=kw.get("hosted_verified", False),
                                                        sources_published=kw.get("sources_published", False), allow_unpublished_sources=kw.get("allow_unpublished", False)))
         finally:
             C.TOOLS, C.app_arch = orig_tools, orig_app_arch
+        self.out = out.getvalue()
         return rc, err.getvalue()
 
     def readme(self, text):
@@ -368,36 +369,63 @@ class AppCheckTests(Base):
         open(p, "w").write(text)
         return p
 
-    def test_a_consistent_app_passes(self):
+    def test_a_consistent_manifests_only_app_passes(self):
         rc, err = self.check(self.make_app())
         self.assertEqual(rc, 0, err)
+        self.assertIn("not bundled; manifests consistent with the verified packages", self.out)
 
-    def test_tool_not_embedded(self):
-        rc, err = self.check(self.make_app(embed=False))
+    def test_a_tool_tree_in_the_app_is_refused(self):
+        def plant(app):
+            d = os.path.join(app, "Contents", "Resources", "Tools", "ffmpeg"); os.makedirs(d)
+            open(os.path.join(d, "ffmpeg"), "w").write("x")
+        rc, err = self.check(self.make_app(plant=plant))
         self.assertEqual(rc, 1)
-        self.assertIn("not embedded", err)
+        self.assertIn("a media tool is inside the app: Contents/Resources/Tools/ffmpeg/ffmpeg", err)
 
-    def test_embedded_files_differ_from_manifest(self):
+    def test_planted_tool_executables_anywhere_in_the_app_are_refused(self):
+        for label, rel in (("yt-dlp in Helpers", "Contents/Helpers/yt-dlp"), ("yt-dlp_macos", "Contents/Resources/yt-dlp_macos"), ("ffmpeg", "Contents/MacOS/ffmpeg"),
+                           ("ffprobe", "Contents/Frameworks/ffprobe")):
+            def plant(app, rel=rel):
+                path = os.path.join(app, rel); os.makedirs(os.path.dirname(path), exist_ok=True)
+                open(path, "w").write("#!/bin/sh\n"); os.chmod(path, 0o755)
+            rc, err = self.check(self.make_app(plant=plant))
+            self.assertEqual(rc, 1, label); self.assertIn("a media tool is inside the app", err, label); self.assertIn(rel, err, label)
+
+    def test_a_helpers_ytdlp_folder_is_refused_even_when_empty(self):
+        rc, err = self.check(self.make_app(plant=lambda app: os.makedirs(os.path.join(app, "Contents", "Helpers", "yt-dlp"))))
+        self.assertEqual(rc, 1); self.assertIn("Contents/Helpers/yt-dlp", err)
+
+    def test_notices_named_like_the_tools_are_not_tools(self):
+        def plant(app):
+            open(os.path.join(app, "Contents", "Resources", "Notices", "YT-DLP-2026.10.26-NOTICE.txt"), "w").write("notice")     # not executable, not a Mach-O
+        self.assertEqual(self.check(self.make_app(plant=plant))[0], 0)
+
+    def test_the_manifest_must_equal_what_the_verified_package_generates(self):
+        for label, mutate in (("tree digest", lambda m: m.update(treeSHA256="0" * 64)), ("zip digest", lambda m: m.update(sha256="1" * 64)), ("version", lambda m: m.update(version="9.9.9")),
+                              ("size", lambda m: m.update(size=1)), ("notarization id", lambda m: m["notarization"].update(submissionID="forged"))):
+            rc, err = self.check(self.make_app(mutate=mutate))
+            self.assertEqual(rc, 1, label); self.assertIn("differs from the verified package's", err, label)
+
+    def test_a_manifest_with_no_cached_package_cannot_be_checked(self):
         app = self.make_app()
-        with open(os.path.join(self.res, "Tools", "ffmpeg", "ffmpeg"), "a") as f:
-            f.write("tamper")
-        rc, err = self.check(app)
-        self.assertEqual(rc, 1)
-        self.assertIn("tree digest", err)
+        rc, err = self.check(app, cache=os.path.join(self.tmp, "empty-cache"))
+        self.assertEqual(rc, 1); self.assertIn("no verified signed + notarized package in the cache", err)
 
-    def test_embedded_signature_problem_is_caught_in_the_built_app(self):
+    def test_the_cached_package_must_still_verify(self):
         app = self.make_app()
         self.info = dict(GOOD, adhoc=True, authorities=[])
         rc, err = self.check(app)
-        self.assertEqual(rc, 1)
-        self.assertIn("ad-hoc", err)
+        self.assertEqual(rc, 1); self.assertIn("ad-hoc", err)
 
-    def test_unhosted_download_address_is_refused_unless_verified(self):
-        url = "https://github.com/lokeshreddyveer/browsersetu/releases/download/t/ffmpeg-9.0.2-arm64.zip"
-        app = self.make_app(url=url)
+    def test_the_download_address_is_empty_or_the_hosted_pattern(self):
+        app = self.make_app(url="https://github.com/lokeshreddyveer/browsersetu/releases/download/t/ffmpeg-9.0.2-arm64.zip")
+        rc, err = self.check(app, hosted_verified=True)
+        self.assertEqual(rc, 1); self.assertIn("neither empty nor the hosted address", err)
+
+    def test_a_hosted_address_is_refused_unless_verified(self):
+        app = self.make_app(url=HOSTED_FFMPEG)
         rc, err = self.check(app)
-        self.assertEqual(rc, 1)
-        self.assertIn("--hosted-verified", err)
+        self.assertEqual(rc, 1); self.assertIn("--hosted-verified", err)
         self.assertEqual(self.check(app, hosted_verified=True)[0], 0)
 
     def test_stale_manifest_text_is_refused(self):
@@ -406,33 +434,97 @@ class AppCheckTests(Base):
         self.assertEqual(rc, 1)
         self.assertIn("unexpected key", err)
 
-    def test_missing_licence_text_or_source_offer(self):
-        app = self.make_app()
-        os.remove(os.path.join(self.res, "Tools", "ffmpeg", "COPYING.LGPLv2.1"))
-        os.remove(os.path.join(self.res, "Notices", "FFMPEG-source-offer.txt"))
-        # (the tree digest also changes, which is reported too; the licence problems must be among the reasons)
-        rc, err = self.check(app)
-        self.assertEqual(rc, 1)
-        self.assertIn("LGPL licence", err)
-        self.assertIn("source offer", err)
+    def test_missing_source_offer(self):
+        rc, err = self.check(self.make_app(offer=False))
+        self.assertEqual(rc, 1); self.assertIn("source offer", err)
 
-    def test_readme_cannot_claim_bundled_tools_the_app_does_not_have(self):
-        claim = "# R\n\n### New in 1.0\n\n- ffmpeg and yt-dlp come inside the app.\n\n## Next\n"
-        rc, err = self.check(self.make_app(embed=False), readme=self.readme(claim))
-        self.assertEqual(rc, 1)
-        self.assertIn("README says the media tools are inside the app", err)
+    def test_missing_licence_text_in_the_verified_package(self):
+        rc, err = self.check(self.make_app(build=self.make_build(licence=False)))
+        self.assertEqual(rc, 1); self.assertIn("LGPL licence", err)
 
-    def test_readme_must_state_the_javascript_limitation_when_claiming_yt_dlp(self):
-        rc, err = self.check(self.make_app(), readme=self.readme("# R\n\n### New in 1.0\n\n- yt-dlp comes bundled inside the app.\n\n## Next\n"))
-        self.assertEqual(rc, 1)
-        self.assertIn("JavaScript", err)
-        ok = "# R\n\n### New in 1.0\n\n- yt-dlp comes bundled inside the app (no JavaScript runtime: some sites may be limited).\n\n## Next\n"
+    def test_readme_cannot_claim_the_tools_are_inside_the_app(self):
+        for line in ("ffmpeg and yt-dlp come inside the app.", "yt-dlp is bundled.", "ffmpeg is embedded in the app.", "yt-dlp comes bundled inside the app (no JavaScript runtime needed)."):
+            rc, err = self.check(self.make_app(), readme=self.readme(f"# R\n\n### New in 1.0\n\n- {line}\n\n## Next\n"))
+            self.assertEqual(rc, 1, line); self.assertIn("optional downloads and the app carries none", err, line)
+
+    def test_readme_may_describe_optional_downloads(self):
+        ok = ("# R\n\n### New in 1.0\n\n- yt-dlp and ffmpeg are optional downloads you can install from Setup or Settings; they are not bundled in the app.\n"
+              "- ffmpeg is installed on request and kept in its own folder.\n\n## Next\n")
         self.assertEqual(self.check(self.make_app(), readme=self.readme(ok))[0], 0)
 
     def test_readme_without_a_section_for_this_version(self):
         rc, err = self.check(self.make_app(version="9.9"), readme=self.readme("# R\n\n### New in 1.0\n\n- x\n\n## Next\n"))
         self.assertEqual(rc, 1)
         self.assertIn("New in 9.9", err)
+
+
+class HostedPackageTests(Base):
+    """The packages are uploaded separately: the asset has its hosted name, and the bytes at the address must be the verified package."""
+    def test_hosted_address_scheme(self):
+        self.assertEqual(C.hosted_url("ffmpeg", "9.0.2", "arm64"), HOSTED_FFMPEG)
+        self.assertEqual(C.hosted_url("yt-dlp", "2026.10.26", "arm64"), "https://github.com/lokeshreddyveer/browsersetu/releases/download/media-tools-yt-dlp-2026.10.26/yt-dlp-2026.10.26-arm64.zip")
+
+    def test_the_manifest_command_gives_the_hosted_address_only_when_asked(self):
+        entry = self.store()
+        out = os.path.join(self.tmp, "m.json")
+        with contextlib.redirect_stdout(io.StringIO()):
+            C.cmd_manifest(argparse.Namespace(tool="ffmpeg", entry=entry, out=out, hosted_url=None, hosted=False))
+        self.assertEqual(json.load(open(out))["sourceURL"], "")
+        with contextlib.redirect_stdout(io.StringIO()):
+            C.cmd_manifest(argparse.Namespace(tool="ffmpeg", entry=entry, out=out, hosted_url=None, hosted=True))
+        self.assertEqual(json.load(open(out))["sourceURL"], HOSTED_FFMPEG)
+
+    def test_package_asset_has_the_hosted_name_and_the_recorded_digest(self):
+        entry = self.store()
+        out = os.path.join(self.tmp, "assets")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            C.cmd_package_asset(argparse.Namespace(tool="ffmpeg", entry=entry, out=out))
+        name, digest = buf.getvalue().split()
+        self.assertEqual(name, "ffmpeg-9.0.2-arm64.zip")
+        self.assertEqual(digest, json.load(open(os.path.join(entry, "fragment.json")))["sha256"])
+        self.assertEqual(C.sha256_file(os.path.join(out, name)), digest)
+
+    def test_package_asset_refuses_a_package_that_no_longer_verifies(self):
+        entry = self.store()
+        self.info = dict(GOOD, adhoc=True, authorities=[])
+        with self.assertRaises(C.Fail):
+            C.cmd_package_asset(argparse.Namespace(tool="ffmpeg", entry=entry, out=os.path.join(self.tmp, "assets")))
+
+    def verify_hosted(self, entry, served):
+        orig = C.fetch
+        C.fetch = served
+        err = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                rc = C.cmd_verify_hosted(argparse.Namespace(tool="ffmpeg", entry=entry, url=None))
+        finally:
+            C.fetch = orig
+        return rc, err.getvalue()
+
+    def test_verify_hosted_accepts_exactly_the_verified_bytes(self):
+        entry = self.store()
+        good = open(os.path.join(entry, "package.zip"), "rb").read()
+        asked = []
+        rc, err = self.verify_hosted(entry, lambda url: (asked.append(url), good)[1])
+        self.assertEqual((rc, asked), (0, [HOSTED_FFMPEG]), err)
+
+    def test_verify_hosted_refuses_other_bytes_or_no_answer(self):
+        entry = self.store()
+        rc, err = self.verify_hosted(entry, lambda url: b"something else")
+        self.assertEqual(rc, 1); self.assertIn("not the verified package", err)
+        def boom(url): raise OSError("404")
+        rc, err = self.verify_hosted(entry, boom)
+        self.assertEqual(rc, 1); self.assertIn("cannot read", err)
+
+    def test_the_real_fetch_reads_a_local_file_and_refuses_plain_http(self):
+        entry = self.store()
+        pkg = os.path.join(entry, "package.zip")
+        self.assertEqual(C.fetch("file://" + pkg), open(pkg, "rb").read())
+        with self.assertRaises(C.Fail):
+            C.fetch("http://github.com/x.zip")
+        rc = C.cmd_verify_hosted(argparse.Namespace(tool="ffmpeg", entry=entry, url="file://" + pkg))
+        self.assertEqual(rc, 0)
 
 
 class JSProviderCheckTests(Base):
@@ -451,7 +543,9 @@ class JSProviderCheckTests(Base):
         shutil.rmtree(app, ignore_errors=True)
         c = os.path.join(app, "Contents")
         pd = os.path.join(c, "Resources", "YtDlpPlugins", "setu", "yt_dlp_plugins", "extractor")
-        sd = os.path.join(c, "Resources", "Tools", "yt-dlp", "_internal", "yt_dlp_ejs", "yt", "solver")
+        self.tree = os.path.join(self.tmp, "verified-ytdlp-package")          # the app carries NO yt-dlp: the solver scripts come from the verified package unpacked from the cache
+        shutil.rmtree(self.tree, ignore_errors=True)
+        sd = os.path.join(self.tree, "_internal", "yt_dlp_ejs", "yt", "solver")
         os.makedirs(pd); os.makedirs(os.path.join(c, "Helpers")); os.makedirs(sd)
         open(os.path.join(sd, "lib.min.js"), "w").write(solver_lib if solver_lib is not None else self.LIB)
         open(os.path.join(sd, "core.min.js"), "w").write(solver_core if solver_core is not None else self.CORE)
@@ -475,7 +569,7 @@ class JSProviderCheckTests(Base):
         C.helper_selftest = lambda path: list(selftest)
         problems, notes = [], []
         try:
-            ok = C.check_js_provider(app, TEAM, ["arm64"], ytdlp, problems, notes)
+            ok = C.check_js_provider(app, TEAM, ["arm64"], ytdlp, problems, notes, self.tree)
         finally:
             C.entitlements, C.helper_handshake, C.ytdlp_debug_header, C.helper_selftest = orig
         return ok, problems
@@ -538,10 +632,10 @@ class JSProviderCheckTests(Base):
 
     def test_missing_solver_scripts_are_refused(self):
         app, _, _ = self.make()
-        shutil.rmtree(os.path.join(app, "Contents", "Resources", "Tools"))
+        shutil.rmtree(os.path.join(self.tree, "_internal"))
         ok, problems = self.run_check(app)
         self.assertFalse(ok)
-        self.assertIn("solver scripts are not in the embedded yt-dlp", " ".join(problems))
+        self.assertIn("solver scripts are not in the verified yt-dlp package", " ".join(problems))
 
     def test_handshake_must_match_version_and_protocol(self):
         app, _, _ = self.make()
@@ -594,7 +688,7 @@ class JSProviderCheckTests(Base):
 
     def test_solver_scripts_are_hashed_as_text_like_the_plugin_does(self):
         app, _, _ = self.make()
-        lib = os.path.join(app, "Contents", "Resources", "Tools", "yt-dlp", "_internal", "yt_dlp_ejs", "yt", "solver", "lib.min.js")
+        lib = os.path.join(self.tree, "_internal", "yt_dlp_ejs", "yt", "solver", "lib.min.js")
         open(lib, "wb").write(self.LIB.replace("\n", "\r\n").encode())        # CRLF: bytes differ; as text (universal newlines) it is the pinned script
         self.assertTrue(self.run_check(app)[0])
         open(lib, "wb").write(b"\xef\xbb\xbf" + self.LIB.encode())              # a BOM changes the text: the plugin would refuse it, so the preflight must too
@@ -613,13 +707,10 @@ class JSProviderCheckTests(Base):
         self.assertIn("does not compile", " ".join(problems))
 
     def test_readme_rules_follow_the_provider(self):
-        claim = "# R\n\n### New in 1.0\n\n- yt-dlp comes bundled inside the app.\n\n## Next\n"
-        p = os.path.join(self.tmp, "README.md"); open(p, "w").write(claim)
+        p = os.path.join(self.tmp, "README.md")
         app = os.path.join(self.tmp, "R.app")
         os.makedirs(os.path.join(app, "Contents")); plistlib.dump({"CFBundleShortVersionString": "1.0"}, open(os.path.join(app, "Contents", "Info.plist"), "wb"))
-        self.assertTrue(C.readme_claims(p, app, [], provider_ok=False), "without a verified provider the README must mention the limitation")
-        self.assertEqual(C.readme_claims(p, app, [], provider_ok=True), [], "with a verified provider no limitation text is required")
-        open(p, "w").write("# R\n\n### New in 1.0\n\n- yt-dlp is bundled; no Deno or Node is needed.\n\n## Next\n")
+        open(p, "w").write("# R\n\n### New in 1.0\n\n- yt-dlp is an optional download; no Deno or Node is needed.\n\n## Next\n")
         self.assertTrue(C.readme_claims(p, app, [], provider_ok=False), "'no Deno needed' is only allowed with a verified provider")
         self.assertEqual(C.readme_claims(p, app, [], provider_ok=True), [])
 
@@ -678,8 +769,8 @@ class OptionalDenoPipelineTests(Base):
         self.assertEqual(C.TOOLS, ("yt-dlp", "ffmpeg")); self.assertEqual(C.OPTIONAL_TOOLS, ("deno",)); self.assertIn("deno", C.ALL_TOOLS)
         script = open(os.path.join(ROOT, "scripts", "release-media-tools.sh")).read()
         self.assertIn("for t in yt-dlp ffmpeg; do", script, "`--tool all` builds exactly the embedded tools")
-        embed = open(os.path.join(ROOT, "scripts", "embed-media-tools.sh")).read()
-        self.assertIn("for t in yt-dlp ffmpeg; do", embed); self.assertNotIn("deno", embed.lower(), "the embedder never embeds Deno")
+        embed = open(os.path.join(ROOT, "scripts", "embed-media-manifests.sh")).read()
+        self.assertIn("for t in yt-dlp ffmpeg; do", embed); self.assertNotIn("deno", embed.lower(), "the manifest embedder never mentions Deno")
         rel = open(os.path.join(ROOT, "scripts", "release.sh")).read()
         self.assertNotIn("deno", rel.lower(), "a release never builds, embeds or requires Deno")
 
@@ -752,12 +843,20 @@ class ScriptTests(unittest.TestCase):
         self.assertEqual(p.returncode, 2)
         self.assertIn("notary-profile", p.stderr)
 
-    def test_embed_fails_closed_without_a_cached_package(self):
+    def test_embed_manifests_fails_closed_without_a_cached_package(self):
         app = tempfile.mkdtemp(prefix="mt-app-")
         os.makedirs(os.path.join(app, "Contents", "Resources"))
-        p = subprocess.run([os.path.join(ROOT, "scripts", "embed-media-tools.sh"), app, "--team", TEAM, "--arch", "arm64", "--cache", tempfile.mkdtemp()], capture_output=True, text=True)
+        p = subprocess.run([os.path.join(ROOT, "scripts", "embed-media-manifests.sh"), app, "--team", TEAM, "--arch", "arm64", "--cache", tempfile.mkdtemp()], capture_output=True, text=True)
         self.assertEqual(p.returncode, 1)
         self.assertIn("no valid signed + notarized", p.stderr)
+        self.assertFalse(os.path.exists(os.path.join(app, "Contents", "Resources", "BundledTools.json")), "no manifest is written for a package that is not verified")
+
+    def test_embed_manifests_removes_any_bundled_tool_and_never_adds_one(self):
+        text = open(os.path.join(ROOT, "scripts", "embed-media-manifests.sh")).read()
+        self.assertIn('rm -rf "$RES/Tools"', text)
+        for forbidden in ("unzip", "ditto", "cp -R", "package.zip"):
+            self.assertNotIn(forbidden, text, f"the manifest embedder must not copy a package into the app ({forbidden})")
+        self.assertIn("HOSTED:+--hosted", text, "the download address is only written when --hosted is given")
 
     def test_check_fails_on_an_app_with_no_tools(self):
         app = tempfile.mkdtemp(prefix="mt-app-")
@@ -774,6 +873,16 @@ class ScriptTests(unittest.TestCase):
         proj = open(os.path.join(ROOT, "apps", "apple", "project.yml")).read()
         self.assertNotIn("BUNDLE_MEDIA_TOOLS", proj)
         self.assertNotIn("ditto \"$TOOLS/bin/yt-dlp\"", proj)
+        self.assertNotIn("embed-media-tools", text)
+        self.assertFalse(os.path.exists(os.path.join(ROOT, "scripts", "embed-media-tools.sh")), "the old embedder is gone")
+        self.assertIn("embed-media-manifests.sh", text)
+
+    def test_release_script_passes_hosted_only_after_the_hosted_bytes_are_verified(self):
+        text = open(os.path.join(ROOT, "scripts", "release.sh")).read()
+        i = text.index('MEDIA_PACKAGES_HOSTED:-}" = "1"')
+        j = text.index("verify-hosted", i); k = text.index('HOSTED_FLAG="--hosted"', i)
+        self.assertLess(j, k, "verify-hosted runs before --hosted is ever passed")
+        self.assertIn("HOSTED_VERIFIED_FLAG", text)
 
 
 if __name__ == "__main__":

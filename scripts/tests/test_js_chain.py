@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Security-chain tests on a BUILT app: BrowserSetu -> yt-dlp -> provider plugin -> helper. Offline (no website is contacted).
 
-Set BS_APP to a built Browser Setu.app that went through scripts/embed-media-tools.sh and scripts/embed-js-provider.sh (for example the --verify-only build). The arguments and the environment
+Set BS_APP to a built Browser Setu.app that went through scripts/embed-media-manifests.sh and scripts/embed-js-provider.sh (for example the --verify-only build). The arguments and the environment
 are the ones the app really uses (parsed from BundledExtractor.swift and ExternalExtractor.swift, so this cannot drift from the code).
 Run:  BS_APP=<app> python3 -I -m unittest discover -s scripts/tests -p 'test_js_chain.py' -v
 """
 import os, re, shutil, signal, subprocess, tempfile, time, unittest
+from ytdlp_tree_support import ytdlp_tree
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 APP = os.environ.get("BS_APP")
@@ -30,7 +31,8 @@ class ChainTests(unittest.TestCase):
     def setUpClass(cls):
         cls.tmp = tempfile.mkdtemp(prefix="chain-")
         res = os.path.join(APP, "Contents", "Resources")
-        cls.ytdlp_dir = os.path.join(res, "Tools", "yt-dlp")
+        cls.ytdlp_dir = ytdlp_tree()           # the app carries no yt-dlp: the verified package from the cache (or BS_YTDLP_TREE)
+        if not cls.ytdlp_dir: raise unittest.SkipTest("no verified yt-dlp package (media-tools cache or BS_YTDLP_TREE)")
         cls.plugdir = os.path.join(res, "YtDlpPlugins")
         cls.base = swift_list(os.path.join(ROOT, "apps/apple/Shared/Downloads/Media/BundledExtractor.swift"), "baseArguments")
         cls.env0 = swift_env()

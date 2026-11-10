@@ -2,7 +2,7 @@
 """Browser Setu media tools: the content-addressed cache of signed + notarized packages, the manifest generator, and the built-app preflight.
 
 This is the ONE place that decides whether a package may be reused, what a shipped manifest says, and whether a built .app is releasable. The shell scripts
-(release-media-tools.sh, embed-media-tools.sh, check-media-tools.sh, release.sh) only call it. Standard library only; nothing here signs or contacts Apple except
+(release-media-tools.sh, embed-media-manifests.sh, check-media-tools.sh, release.sh) only call it. Standard library only; nothing here signs or contacts Apple except
 `lookup --online`, which asks notarytool about a submission that already exists.
 
 Cache entry:  <cache>/<tool>/<version>-<arch>-<key16>/{package.zip, fragment.json, meta.json, notarization.json}
@@ -18,8 +18,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, ".."))
 THIRD = os.path.join(ROOT, "apps", "apple", "ThirdParty")
 DEFAULT_CACHE = os.path.expanduser("~/Library/Caches/BrowserSetu/media-tools")
-TOOLS = ("yt-dlp", "ffmpeg")              # embedded in every release app: `--tool all`, the embed script and the app preflight cover exactly these
-OPTIONAL_TOOLS = ("deno",)                # prepared for a possible managed JavaScript runtime; NOT embedded, NOT built by `--tool all`, NOT checked by the app preflight
+TOOLS = ("yt-dlp", "ffmpeg")              # the optional downloads every release prepares: `--tool all`, the manifest embedder and the app preflight cover exactly these. NONE is bundled in the app.
+OPTIONAL_TOOLS = ("deno",)                # prepared for a possible managed JavaScript runtime; NOT bundled, NOT built by `--tool all`, NOT checked by the app preflight
 ALL_TOOLS = TOOLS + OPTIONAL_TOOLS
 MANIFEST_RESOURCE = {"yt-dlp": "BundledTools.json", "ffmpeg": "BundledFFmpeg.json", "deno": "BundledDeno.json"}
 ENTITLEMENTS = {"deno": os.path.join(HERE, "media-tools-entitlements", "deno.entitlements")}
@@ -315,6 +315,27 @@ def cmd_store(a):
 
 # ---------- manifests ----------
 
+HOSTED_BASE = "https://github.com/lokeshreddyveer/browsersetu/releases/download"
+
+
+def hosted_file(tool, version, arch):
+    return f"{tool}-{version}-{arch}.zip"
+
+
+def hosted_url(tool, version, arch):
+    """Where a tool's package is hosted: one immutable release per tool and version, one zip per architecture."""
+    return f"{HOSTED_BASE}/media-tools-{tool}-{version}/{hosted_file(tool, version, arch)}"
+
+
+def fetch(url):
+    """The bytes at an address (https, or file:// for tests). Replaceable in tests."""
+    import urllib.request
+    if not (url.startswith("https://") or url.startswith("file://")):
+        raise Fail(f"refusing to fetch {url}: only https is allowed")
+    with urllib.request.urlopen(url, timeout=120) as r:
+        return r.read()
+
+
 def generate_manifest(tool, entry, hosted_url=None):
     frag = load_json(os.path.join(entry, "fragment.json"))
     t = template(tool)
@@ -367,11 +388,50 @@ def validate_manifest(m, expect_tool=None):
     return p
 
 
+def entry_hosted_url(tool, entry):
+    frag = load_json(os.path.join(entry, "fragment.json"))
+    return hosted_url(tool, template(tool)["version"], frag["architectures"][0])
+
+
 def cmd_manifest(a):
     entry = a.entry
-    m = generate_manifest(a.tool, entry, a.hosted_url)
+    m = generate_manifest(a.tool, entry, entry_hosted_url(a.tool, entry) if getattr(a, "hosted", False) else a.hosted_url)
     write_json(a.out, m, indent=2)
     print(a.out)
+
+
+def cmd_package_asset(a):
+    """The file to upload as the hosted package: the cached, verified zip under its hosted name. Prints its name and sha256."""
+    problems = verify_entry(a.entry, a.tool, load_json(os.path.join(a.entry, "fragment.json"))["architectures"][0], load_json(os.path.join(a.entry, "meta.json"))["inputs"]["team"])
+    if problems:
+        raise Fail("the cached package does not verify: " + "; ".join(problems))
+    frag = load_json(os.path.join(a.entry, "fragment.json"))
+    name = hosted_file(a.tool, template(a.tool)["version"], frag["architectures"][0])
+    os.makedirs(a.out, exist_ok=True)
+    dest = os.path.join(a.out, name)
+    shutil.copy2(os.path.join(a.entry, "package.zip"), dest)
+    digest = sha256_file(dest)
+    if digest != frag["sha256"]:
+        os.remove(dest)
+        raise Fail("the copied package does not match its recorded digest")
+    print(f"{name} {digest}")
+
+
+def cmd_verify_hosted(a):
+    """After a package was uploaded: the bytes at the manifest's address must be exactly the verified package."""
+    frag = load_json(os.path.join(a.entry, "fragment.json"))
+    url = a.url or entry_hosted_url(a.tool, a.entry)
+    try:
+        data = fetch(url)
+    except Exception as e:
+        print(f"✘ {a.tool}: cannot read {url} ({type(e).__name__}: {e})", file=sys.stderr)
+        return 1
+    got = hashlib.sha256(data).hexdigest()
+    if got != frag["sha256"]:
+        print(f"✘ {a.tool}: the hosted file ({got[:12]}…) is not the verified package ({frag['sha256'][:12]}…)", file=sys.stderr)
+        return 1
+    print(f"  {a.tool}: hosted package at {url} matches the verified package")
+    return 0
 
 
 def cmd_validate_manifest(a):
@@ -417,9 +477,9 @@ def helper_handshake(path):
     return p.stdout.strip() if p.returncode == 0 else ""
 
 
-def ytdlp_debug_header(app, plugin_folder):
-    """What the embedded yt-dlp itself reports with -v, offline (an address that cannot connect): its version, the yt-dlp-ejs it carries, and the plugin directories it actually found. Replaceable in tests."""
-    exe = os.path.join(app, "Contents", "Resources", "Tools", "yt-dlp", "yt-dlp_macos")
+def ytdlp_debug_header(ytdlp_exe, plugin_folder):
+    """What the verified yt-dlp package (unpacked from the cache) itself reports with -v, offline (an address that cannot connect): its version, the yt-dlp-ejs it carries, and the plugin directories it actually found. Replaceable in tests."""
+    exe = ytdlp_exe
     env = {"PATH": "/usr/bin:/bin", "LANG": "en_US.UTF-8", "HOME": tempfile.gettempdir(), "PYTHONDONTWRITEBYTECODE": "1"}
     p = subprocess.run([exe, "--ignore-config", "--no-cache-dir", "--no-update", "--no-plugin-dirs", "--plugin-dirs", plugin_folder, "-v", "--simulate", "--skip-download",
                         "--socket-timeout", "2", "--retries", "0", "http://127.0.0.1:9/x"], capture_output=True, text=True, timeout=60, env=env, cwd=tempfile.gettempdir())
@@ -451,7 +511,7 @@ def helper_selftest(path):
     return problems
 
 
-def check_js_provider(app, team, archs, ytdlp_version, problems, notes):
+def check_js_provider(app, team, archs, ytdlp_version, problems, notes, ytdlp_tree=None):
     """True when the helper and plugin in the built app are exactly what BundledJSProvider.json pins and are signed and confined as required."""
     res = os.path.join(app, "Contents", "Resources")
     mf = os.path.join(res, "BundledJSProvider.json")
@@ -474,7 +534,7 @@ def check_js_provider(app, team, archs, ytdlp_version, problems, notes):
     if m["entitlements"] != ["com.apple.security.app-sandbox"]:
         problems.append(f"js-provider: manifest entitlements {m['entitlements']} are not exactly the App Sandbox")
     if m["pinnedYtDlpVersion"] != ytdlp_version:
-        problems.append(f"js-provider: written for yt-dlp {m['pinnedYtDlpVersion']} but the app embeds yt-dlp {ytdlp_version}; its plugin uses yt-dlp internals and must be re-checked for every yt-dlp release")
+        problems.append(f"js-provider: written for yt-dlp {m['pinnedYtDlpVersion']} but the yt-dlp manifest says {ytdlp_version}; its plugin uses yt-dlp internals and must be re-checked for every yt-dlp release")
     def safe(rel):
         return isinstance(rel, str) and rel != "" and not rel.startswith("/") and ".." not in rel.split("/") and "." not in rel.split("/") and "\0" not in rel
     if not (safe(m["helper"]) and safe(m["plugin"]) and safe(m["pluginDirectory"]) and "/" not in m["pluginDirectory"]):
@@ -523,7 +583,7 @@ def check_js_provider(app, team, archs, ytdlp_version, problems, notes):
         if compat:
             if ytdlp_version not in compat["ytDlp"]:
                 problems.append(f"js-provider: the plugin was verified for yt-dlp {compat['ytDlp']}, the app embeds {ytdlp_version}")
-            solver = os.path.join(res, "Tools", "yt-dlp", "_internal", "yt_dlp_ejs", "yt", "solver")
+            solver = os.path.join(ytdlp_tree or os.path.join(res, "Tools", "yt-dlp"), "_internal", "yt_dlp_ejs", "yt", "solver")      # the VERIFIED package, unpacked from the cache: the app carries no yt-dlp
             try:
                 # hashed as TEXT, the way the plugin hashes what yt_dlp_ejs hands it (a BOM or line-ending difference must fail HERE, not silently at run time)
                 def text_hash(name):
@@ -532,26 +592,26 @@ def check_js_provider(app, team, archs, ytdlp_version, problems, notes):
                 have = {"lib": text_hash("lib.min.js"), "core": text_hash("core.min.js")}
             except OSError:
                 have = None
-                problems.append("js-provider: the yt-dlp-ejs solver scripts are not in the embedded yt-dlp")
+                problems.append("js-provider: the yt-dlp-ejs solver scripts are not in the verified yt-dlp package")
             if have and not any(pins == have for pins in compat["ejs"].values()):
-                problems.append(f"js-provider: the embedded yt-dlp-ejs solver scripts ({have['lib'][:10]}…/{have['core'][:10]}…) are not a pairing the plugin was verified against ({list(compat['ejs'])})")
+                problems.append(f"js-provider: the verified package's yt-dlp-ejs solver scripts ({have['lib'][:10]}…/{have['core'][:10]}…) are not a pairing the plugin was verified against ({list(compat['ejs'])})")
             if m["providerVersion"] != compat["provider"] or m["helperProtocol"] != compat["helperProtocol"]:
                 problems.append("js-provider: the manifest's provider version / protocol differ from the plugin's compatibility record")
             ejs_version = next((v for v, pins in compat["ejs"].items() if have and pins == have), None)
             try:
-                header = ytdlp_debug_header(app, folder)
+                header = ytdlp_debug_header(os.path.join(ytdlp_tree or os.path.join(res, "Tools", "yt-dlp"), "yt-dlp_macos"), folder)
             except Exception as e:
                 header = ""
-                problems.append(f"js-provider: the embedded yt-dlp could not be run to read its header ({type(e).__name__})")
+                problems.append(f"js-provider: the verified yt-dlp package could not be run to read its header ({type(e).__name__})")
             if header:
                 seen = re.search(r"yt_dlp_ejs-(\S+?)(?:,|\s|$)", header)
                 if not seen or (ejs_version and seen.group(1) != ejs_version):
                     problems.append(f"js-provider: yt-dlp reports yt-dlp-ejs {seen.group(1) if seen else 'none'}, the matching pins are for {ejs_version}")
                 if ytdlp_version not in (re.search(r"yt-dlp version \S+@(\S+)", header) or [None, ""])[1]:
-                    problems.append(f"js-provider: the embedded yt-dlp does not report version {ytdlp_version}")
+                    problems.append(f"js-provider: the verified yt-dlp package does not report version {ytdlp_version}")
                 dirs = re.search(r"Plugin directories: (.*)", header)
                 if not dirs or os.path.join(folder, "setu", "yt_dlp_plugins") not in dirs.group(1):
-                    problems.append("js-provider: the embedded yt-dlp did not find the provider plugin folder")
+                    problems.append("js-provider: the verified yt-dlp package did not find the provider plugin folder")
             if os.path.isfile(helper):
                 try:
                     problems.extend("js-provider: helper behaviour: " + x for x in helper_selftest(helper))
@@ -583,93 +643,130 @@ def check_no_unreviewed_runtime(app):
     return [f"an unreviewed JavaScript runtime is in the app: {x} (0.4.1 ships none besides setu-jsc; remove it, or review and allow it deliberately)" for x in sorted(set(found))]
 
 
+TOOL_NAME_RE = re.compile(r"^(yt-dlp.*|ffmpeg|ffprobe)$", re.I)
+
+
+def check_no_tools_in_app(app):
+    """The tools are optional downloads: the built app must not carry them. Fails on any file in Resources/Tools, a Helpers/yt-dlp folder, or an executable / Mach-O file named like one of the tools."""
+    found = []
+    res = os.path.join(app, "Contents", "Resources")
+    tools = os.path.join(res, "Tools")
+    if os.path.isdir(tools):
+        for d, _, files in os.walk(tools):
+            for n in files:
+                found.append(os.path.relpath(os.path.join(d, n), app))
+    elif os.path.lexists(tools):
+        found.append("Contents/Resources/Tools")
+    for rel in ("Contents/Helpers/yt-dlp", "Contents/Helpers/ffmpeg", "Contents/Helpers/ffprobe"):
+        if os.path.lexists(os.path.join(app, rel)):
+            found.append(rel)
+    for d, dirs, files in os.walk(app):
+        for n in files:
+            full = os.path.join(d, n)
+            if TOOL_NAME_RE.match(n) and not os.path.islink(full) and (os.access(full, os.X_OK) or is_macho(full)):
+                found.append(os.path.relpath(full, app))
+    return [f"a media tool is inside the app: {x} (yt-dlp and ffmpeg are optional downloads and must not be bundled; the app carries manifests only)" for x in sorted(set(found))]
+
+
+def unpack_package(entry, dest):
+    """The verified package unpacked unchanged (zip keeps the executable bits and links, so the tree matches the manifest's tree digest)."""
+    os.makedirs(dest, exist_ok=True)
+    run(["/usr/bin/unzip", "-q", os.path.join(entry, "package.zip"), "-d", dest])
+    return dest
+
+
 def cmd_check_app(a):
-    """Fail-closed preflight on a BUILT .app. Returns 0 only if every claim the release would make about the tools is true of these bytes."""
+    """Fail-closed preflight on a BUILT .app. Returns 0 only if every claim the release would make about the tools is true: the app carries NO tool, its manifests are exactly what the verified
+    cached packages produce (with an empty download address or the hosted pattern), and the JavaScript provider is the reviewed one paired with the verified yt-dlp."""
     app = a.app
     res = os.path.join(app, "Contents", "Resources")
     problems, notes = [], []
     want_arch = app_arch(app)
     team = a.team
-    ytdlp_version = None
-    for tool in TOOLS:
-        mf = os.path.join(res, MANIFEST_RESOURCE[tool])
-        tdir = os.path.join(res, "Tools", tool)
-        if not os.path.isfile(mf):
-            problems.append(f"{tool}: {MANIFEST_RESOURCE[tool]} is missing from the app")
-            continue
-        try:
-            m = load_json(mf)
-        except ValueError as e:
-            problems.append(f"{tool}: manifest is not valid JSON ({e})")
-            continue
-        mp = validate_manifest(m, tool)
-        problems += [f"{tool}: manifest: {x}" for x in mp]
-        if mp:
-            continue
-        if m["signaturePolicy"] != f"teamID:{team}":
-            problems.append(f"{tool}: manifest signaturePolicy {m['signaturePolicy']} is not teamID:{team}")
-        if sorted(m["architectures"]) != want_arch:
-            problems.append(f"{tool}: manifest architectures {m['architectures']} do not match the app's {want_arch}")
-        if m["notarization"]["status"] != "Accepted":
-            problems.append(f"{tool}: manifest has no accepted notarization")
-        if not os.path.isdir(tdir):
-            problems.append(f"{tool}: not embedded (Resources/Tools/{tool} is missing)")
-            continue
-        got = tree_digest(tdir)
-        if got != m["treeSHA256"]:
-            problems.append(f"{tool}: embedded files ({got[:12]}…) differ from the manifest's tree digest ({m['treeSHA256'][:12]}…)")
-        exe = os.path.join(tdir, m["executable"])
-        if not (os.path.isfile(exe) and os.access(exe, os.X_OK)):
-            problems.append(f"{tool}: executable {m['executable']} is missing or not executable")
-        files = macho_files(tdir)
-        if not files:
-            problems.append(f"{tool}: no Mach-O files embedded")
-        for f in files:
-            check_macho(f, f"{tool}/{os.path.relpath(f, tdir)}", team, want_arch, problems)
-        # licences and source offers that travel with the tool
-        lic = [n for n in os.listdir(tdir) if re.match(r"(COPYING|LICENSE|THIRD_PARTY)", n, re.I)] if os.path.isdir(tdir) else []
-        if tool == "ffmpeg" and not any(n.startswith("COPYING.LGPL") for n in lic):
-            problems.append("ffmpeg: LGPL licence texts are missing from the embedded package")
-        offers = [n for n in os.listdir(os.path.join(res, "Notices"))] if os.path.isdir(os.path.join(res, "Notices")) else []
-        needle = "FFMPEG" if tool == "ffmpeg" else "YT-DLP"
-        if not any(n.upper().startswith(needle) for n in offers):
-            problems.append(f"{tool}: no source offer / notice in Resources/Notices")
-        if tool == "yt-dlp":
-            if not m.get("javascriptRuntime"):
-                problems.append("yt-dlp: manifest does not state how YouTube's JavaScript challenges are handled")
-            if not os.path.isfile(os.path.join(tdir, "THIRD_PARTY_LICENSES.txt")) and not os.path.isfile(os.path.join(res, "Notices", "YT-DLP-THIRD_PARTY_LICENSES.txt")):
-                notes.append("yt-dlp: THIRD_PARTY_LICENSES.txt is not inside the app (ships via Settings > Acknowledgements only)")
-        if m["sourceURL"]:
-            if not a.hosted_verified:
+    cache = getattr(a, "cache", None) or os.environ.get("MEDIA_TOOLS_CACHE", DEFAULT_CACHE)
+    ytdlp_version, ytdlp_tree = None, None
+    scratch = tempfile.mkdtemp(prefix="check-app-")
+    try:
+        problems += check_no_tools_in_app(app)
+        for tool in TOOLS:
+            mf = os.path.join(res, MANIFEST_RESOURCE[tool])
+            if not os.path.isfile(mf):
+                problems.append(f"{tool}: {MANIFEST_RESOURCE[tool]} is missing from the app")
+                continue
+            try:
+                m = load_json(mf)
+            except ValueError as e:
+                problems.append(f"{tool}: manifest is not valid JSON ({e})")
+                continue
+            mp = validate_manifest(m, tool)
+            problems += [f"{tool}: manifest: {x}" for x in mp]
+            if mp:
+                continue
+            if m["signaturePolicy"] != f"teamID:{team}":
+                problems.append(f"{tool}: manifest signaturePolicy {m['signaturePolicy']} is not teamID:{team}")
+            if sorted(m["architectures"]) != want_arch:
+                problems.append(f"{tool}: manifest architectures {m['architectures']} do not match the app's {want_arch}")
+            if m["notarization"]["status"] != "Accepted":
+                problems.append(f"{tool}: manifest has no accepted notarization")
+            # the package the manifest describes: it must exist in the cache and re-verify from its bytes, and the manifest must be exactly what that package generates
+            entry, key, _ = entry_dir(cache, tool, want_arch[0], team)
+            if not os.path.isdir(entry):
+                problems.append(f"{tool}: no verified signed + notarized package in the cache for these inputs, so the manifest cannot be checked (scripts/release-media-tools.sh --ensure)")
+                continue
+            ep = verify_entry(entry, tool, want_arch[0], team, key)
+            problems += [f"{tool}: cached package: {x}" for x in ep]
+            if ep:
+                continue
+            want_url = hosted_url(tool, m["version"], want_arch[0])
+            if m["sourceURL"] not in ("", want_url):
+                problems.append(f"{tool}: sourceURL {m['sourceURL']} is neither empty nor the hosted address {want_url}")
+            expected = generate_manifest(tool, entry, m["sourceURL"] or None)
+            if m != expected:
+                diff = sorted(k for k in set(m) | set(expected) if m.get(k) != expected.get(k))
+                problems.append(f"{tool}: the app's manifest differs from the verified package's in: {', '.join(diff)}")
+            if m["sourceURL"] and not a.hosted_verified:
                 problems.append(f"{tool}: manifest advertises a download address ({m['sourceURL']}) but --hosted-verified was not given; an unhosted address would offer an install that fails")
-        if tool == "yt-dlp":
-            ytdlp_version = m["version"]
-        notes.append(f"{tool}: {m['version']} embedded, {len(files)} Mach-O files verified (Team {team}, runtime, {','.join(want_arch)}), notarization {m['notarization']['submissionID']}")
-    problems += check_no_unreviewed_runtime(app)
-    provider_ok = check_js_provider(app, team, want_arch, ytdlp_version, problems, notes) if (ytdlp_version and "yt-dlp" in TOOLS) else False
-    notices = os.path.join(res, "Notices")
-    promises = any("publishes the source" in open(os.path.join(notices, n), encoding="utf-8", errors="replace").read() or "published with the release" in open(os.path.join(notices, n), encoding="utf-8", errors="replace").read()
-                   for n in (os.listdir(notices) if os.path.isdir(notices) else []))
-    if promises and not (a.sources_published or a.allow_unpublished_sources):
-        problems.append("the in-app notices promise that the corresponding source is published with this release, but --sources-published was not given. Publish the source archives (docs/compliance/media-tools-redistribution.md) and confirm with --sources-published (release.sh: MEDIA_SOURCES_PUBLISHED=1)")
-    if a.allow_unpublished_sources:
-        notes.append("source offer: NOT YET PUBLISHED (allowed only for a --verify-only build; a real release requires MEDIA_SOURCES_PUBLISHED=1)")
-    if a.readme:
-        problems += readme_claims(a.readme, app, problems, provider_ok)
+            # licences and source offers: inside the package (they travel with the tool) and in the app's Notices
+            pkg = unpack_package(entry, os.path.join(scratch, tool))
+            lic = [n for n in os.listdir(pkg) if re.match(r"(COPYING|LICENSE|THIRD_PARTY)", n, re.I)]
+            if tool == "ffmpeg" and not any(n.startswith("COPYING.LGPL") for n in lic):
+                problems.append("ffmpeg: LGPL licence texts are missing from the verified package")
+            offers = os.listdir(os.path.join(res, "Notices")) if os.path.isdir(os.path.join(res, "Notices")) else []
+            needle = "FFMPEG" if tool == "ffmpeg" else "YT-DLP"
+            if not any(n.upper().startswith(needle) for n in offers):
+                problems.append(f"{tool}: no source offer / notice in Resources/Notices")
+            if tool == "yt-dlp":
+                if not m.get("javascriptRuntime"):
+                    problems.append("yt-dlp: manifest does not state how YouTube's JavaScript challenges are handled")
+                ytdlp_version, ytdlp_tree = m["version"], pkg
+            notes.append(f"{tool}: {m['version']} not bundled; manifest matches the verified package ({'hosted address set' if m['sourceURL'] else 'no download address yet'}), notarization {m['notarization']['submissionID']}")
+        problems += check_no_unreviewed_runtime(app)
+        provider_ok = check_js_provider(app, team, want_arch, ytdlp_version, problems, notes, ytdlp_tree) if (ytdlp_version and ytdlp_tree and "yt-dlp" in TOOLS) else False
+        notices = os.path.join(res, "Notices")
+        texts = [open(os.path.join(notices, n), encoding="utf-8", errors="replace").read() for n in (os.listdir(notices) if os.path.isdir(notices) else [])]
+        promises = any("publishes the source" in t or "published with the release" in t for t in texts)
+        if promises and not (a.sources_published or a.allow_unpublished_sources):
+            problems.append("the in-app notices promise that the corresponding source is published with this release, but --sources-published was not given. Publish the source archives (docs/compliance/media-tools-redistribution.md) and confirm with --sources-published (release.sh: MEDIA_SOURCES_PUBLISHED=1)")
+        if a.allow_unpublished_sources:
+            notes.append("source offer: NOT YET PUBLISHED (allowed only for a --verify-only build; a real release requires MEDIA_SOURCES_PUBLISHED=1)")
+        if a.readme:
+            problems += readme_claims(a.readme, app, problems, provider_ok)
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
     for n in notes:
         print("  " + n)
     if problems:
         print("✘ the media tools in this app are not release-ready:", file=sys.stderr)
         for x in problems:
             print(f"  - {x}", file=sys.stderr)
-        print("  how to fix: scripts/release-media-tools.sh --ensure (builds, signs, notarizes and caches), then scripts/embed-media-tools.sh <app>.", file=sys.stderr)
+        print("  how to fix: scripts/release-media-tools.sh --ensure (builds, signs, notarizes and caches), then scripts/embed-media-manifests.sh <app>.", file=sys.stderr)
         return 1
-    print("  media tools: both embedded, signed, notarized, consistent with the manifests and the README")
+    print("  media tools: not bundled; manifests consistent with the verified packages")
     return 0
 
 
 def readme_claims(readme, app, existing_problems, provider_ok=False):
-    """README/release notes may say the tools are bundled only if the built app really has them verified."""
+    """README/release notes must describe the tools as optional downloads: a claim that they are inside the app is false and refused."""
     with open(readme) as f:
         text = f.read()
     plist = os.path.join(app, "Contents", "Info.plist")
@@ -678,12 +775,12 @@ def readme_claims(readme, app, existing_problems, provider_ok=False):
     p = []
     if not sec:
         return [f"README has no 'New in {ver}' section for this app version"]
-    claims = re.findall(r"^.*(?:yt-dlp|ffmpeg).*(?:inside the app|bundled|come inside|embedded).*$", sec.group(1), re.M | re.I)
-    tool_problems = [x for x in existing_problems if re.match(r"(yt-dlp|ffmpeg)", x)]
-    if claims and tool_problems:
-        p.append("README says the media tools are inside the app, but the app check above found problems with them")
-    if claims and not provider_ok and "javascript" not in sec.group(1).lower() and "deno" not in sec.group(1).lower():
-        p.append("README claims bundled yt-dlp but the app has no verified JavaScript provider and the README does not say that some sites (notably YouTube) may be limited without one")
+    for line in re.findall(r"^.*(?:yt-dlp|ffmpeg).*$", sec.group(1), re.M | re.I):
+        says_inside = re.search(r"inside the app|bundled|come inside|comes inside|embedded|ship(?:s|ped)? (?:with|in) the app|included in the app", line, re.I)
+        says_optional = re.search(r"optional|download|install|not (?:inside|bundled|embedded|part of|shipped)", line, re.I)
+        if says_inside and not says_optional:
+            p.append("README says the media tools are inside the app, but they are optional downloads and the app carries none")
+            break
     if re.search(r"no (deno|javascript|node)[^.\n]*(needed|required|install)|without (installing )?(deno|node)", sec.group(1), re.I) and not provider_ok:
         p.append("README says no Deno/Node is needed, but the app has no verified JavaScript provider")
     return p
@@ -705,10 +802,12 @@ def main():
     s = sub.add_parser("store"); common(s); s.add_argument("--build", required=True); s.add_argument("--submission", required=True)
     s.add_argument("--status", required=True); s.add_argument("--profile"); s.add_argument("--signer"); s.set_defaults(f=cmd_store)
     s = sub.add_parser("manifest"); s.add_argument("--tool", choices=ALL_TOOLS, required=True); s.add_argument("--entry", required=True)
-    s.add_argument("--out", required=True); s.add_argument("--hosted-url"); s.set_defaults(f=cmd_manifest)
+    s.add_argument("--out", required=True); s.add_argument("--hosted-url"); s.add_argument("--hosted", action="store_true"); s.set_defaults(f=cmd_manifest)
+    s = sub.add_parser("package-asset"); s.add_argument("--tool", choices=ALL_TOOLS, required=True); s.add_argument("--entry", required=True); s.add_argument("--out", required=True); s.set_defaults(f=cmd_package_asset)
+    s = sub.add_parser("verify-hosted"); s.add_argument("--tool", choices=ALL_TOOLS, required=True); s.add_argument("--entry", required=True); s.add_argument("--url"); s.set_defaults(f=cmd_verify_hosted)
     s = sub.add_parser("validate-manifest"); s.add_argument("file"); s.add_argument("--tool", choices=ALL_TOOLS); s.set_defaults(f=cmd_validate_manifest)
     s = sub.add_parser("plugin-compat"); s.add_argument("file"); s.set_defaults(f=lambda a: print(json.dumps(plugin_compatibility(a.file))))
-    s = sub.add_parser("check-app"); s.add_argument("app"); s.add_argument("--team", required=True); s.add_argument("--readme")
+    s = sub.add_parser("check-app"); s.add_argument("app"); s.add_argument("--team", required=True); s.add_argument("--readme"); s.add_argument("--cache", default=os.environ.get("MEDIA_TOOLS_CACHE", DEFAULT_CACHE))
     s.add_argument("--hosted-verified", action="store_true"); s.add_argument("--sources-published", action="store_true"); s.add_argument("--allow-unpublished-sources", action="store_true"); s.set_defaults(f=cmd_check_app)
     a = ap.parse_args()
     try:

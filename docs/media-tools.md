@@ -1,25 +1,27 @@
-# Media tools: how yt-dlp, ffmpeg and the JavaScript runner ship
+# Media tools: optional yt-dlp and ffmpeg downloads, and the built-in JavaScript runner
 
-Status date: 2026-11-10. This is the one description of how the Direct (DMG) build gets its media tools, how a release produces them, and what is still open. **Engineering completion is not legal approval; see "Open before public distribution".**
+Status date: 2026-11-10. This is the one description of how the Direct (DMG) build gets its media tools (optional downloads, never inside the DMG), how a release produces and hosts them, and what is still open. **Engineering completion is not legal approval; see "Open before public distribution".**
 
 ## What ships, and where
 
-| Piece | What it is | Where it lives in the app | Signed by | Size |
+| Piece | What it is | Where it lives | Signed by | Size |
 |---|---|---|---|---|
-| yt-dlp 2026.10.26 | upstream PyInstaller build, thinned to arm64, re-signed | `Contents/Resources/Tools/yt-dlp/` | our Developer ID (Team X4MH29QNRS), hardened runtime | 27.3 MB zipped, 55 MB unpacked |
-| ffmpeg + ffprobe 9.0.2 | LGPL-only minimal build from the pinned source (`scripts/build-ffmpeg-minimal.sh`) | `Contents/Resources/Tools/ffmpeg/` | same | 3.4 MB zipped, 7.2 MB unpacked |
-| setu-jsc 1.0.0 | our own JavaScript runner on Apple's JavaScriptCore (`apps/apple/Helpers/JSProvider`) | `Contents/Helpers/setu-jsc` | same, **App Sandbox entitlement only** | 84 KB |
-| yt-dlp plugin | `setu_jsc.py`, makes yt-dlp use the runner | `Contents/Resources/YtDlpPlugins/setu/yt_dlp_plugins/extractor/` | covered by the app signature | 3 KB |
+| yt-dlp 2026.10.26 | upstream PyInstaller build, thinned to arm64, re-signed. **Optional download**, installed on request | `~/Library/Application Support/BrowserSetu/MediaTools` (its own folder), never inside the app | our Developer ID (Team X4MH29QNRS), hardened runtime, notarized | 27.3 MB zipped, 55 MB unpacked |
+| ffmpeg + ffprobe 9.0.2 | LGPL-only minimal build from the pinned source (`scripts/build-ffmpeg-minimal.sh`). **Optional download** | `.../MediaTools/Components/ffmpeg` | same | 3.4 MB zipped, 7.2 MB unpacked |
+| setu-jsc 1.0.0 | our own JavaScript runner on Apple's JavaScriptCore (`apps/apple/Helpers/JSProvider`). **Inside the app** | `Contents/Helpers/setu-jsc` | same, **App Sandbox entitlement only** | 84 KB |
+| yt-dlp plugin | `setu_jsc.py`, makes yt-dlp use the runner. **Inside the app** | `Contents/Resources/YtDlpPlugins/setu/yt_dlp_plugins/extractor/` | covered by the app signature | 3 KB |
+| manifests, notices | `BundledTools.json`, `BundledFFmpeg.json` (the pins the installer checks a download against), licence texts and source offers | `Contents/Resources` | covered by the app signature | a few hundred KB |
 
-The Mac App Store and iOS targets embed none of this and show the tools as "not available in this build".
+The app contains **no** yt-dlp, ffmpeg, ffprobe or Deno binary; the release preflight fails if one is found. The Mac App Store and iOS targets carry no manifests with a download address and show the tools as "not available in this build".
 
 ## Decisions
 
-1. **Bundled, not downloaded, for the Direct build.** The two third-party tools add about 62 MB unpacked / 31 MB compressed to a 67 MB DMG, and they work offline with no hosting dependency. The app's notarization covers them.
-2. **The installer stays** (approved hosts, size, SHA-256, tree digest, architecture, Team ID, Apple's assessment, atomic activation, rollback). It is for later updates of a tool, and only offers a package once one is hosted and verified (`sourceURL` is empty until then, so no install button can fail).
-3. **One embedder.** `scripts/embed-media-tools.sh` is the only thing that puts yt-dlp and ffmpeg in an app; the Xcode project embeds nothing (it only copies the pinned templates so Debug/App Store builds can say "not available"). `scripts/embed-js-provider.sh` owns the runner.
-4. **YouTube's JavaScript challenges are solved by our own sandboxed runner, not by Deno or Node.** See below. Deno stays the documented fallback for a case the native runner genuinely cannot handle; it is not shipped and not required.
-5. **Apple Silicon only**, because the app itself is arm64-only (`release.sh` builds `ARCHS=arm64`). `embed-media-tools.sh` takes the app's own architecture and refuses a universal app until the tools are built per architecture.
+1. **Optional downloads, never bundled (final).** The DMG stays near the size of the previous release; ordinary downloads, streams, torrents and browsing need nothing extra. A person installs the tools in first-run Setup (a skippable step that states each program's version and download size), in Settings › Media (install, update, repair, remove, progress, errors, installed versions), or when a video window that needs a missing tool offers it and asks. Nothing downloads on its own.
+2. **One installer** (`MediaToolsInstall`): approved hosts, size, SHA-256 of the zip, tree digest, architecture, Team ID, Apple's assessment, a launch check, atomic activation, rollback. A manifest without a hosted, verified package (`sourceURL` empty) is never offered, so no install button can fail.
+3. **One manifest step.** `scripts/embed-media-manifests.sh` generates the manifests from the verified cache entry and copies notices; it never copies a binary. `scripts/embed-js-provider.sh` owns the runner. The Xcode project embeds no tool.
+4. **YouTube's JavaScript challenges are solved by our own sandboxed runner, not by Deno or Node.** See below. The runner is discovered through the app (verified helper and plugin pins), and handed to the installed yt-dlp with `--plugin-dirs`. Deno stays a documented, unshipped fallback.
+5. **Apple Silicon only**, because the app itself is arm64-only (`release.sh` builds `ARCHS=arm64`).
+6. **Redistribution obligations do not disappear with optional downloading.** The hosted packages are GPL/LGPL binaries distributed by the publisher: their licences, source offers and the corresponding source (a separate release, `sources-<version>-build<n>`) are published, and the source must be verified before the packages are hosted.
 
 ## The JavaScript runner
 
@@ -109,8 +111,9 @@ scripts/release.sh <version> <build> --verify-only # same pipeline up to the fin
 ```
 
 1. `scripts/release-media-tools.sh --ensure` (called by `release.sh`) reuses a cached signed + notarized package when its key is unchanged **and** it re-verifies from its bytes (zip and tree digests, every signature, Team ID, hardened runtime, Developer ID chain, exact architecture, an Accepted notarization record naming that very zip). Otherwise it builds, signs, submits to Apple, requires "Accepted", and caches. Cache: `~/Library/Caches/BrowserSetu/media-tools` (override `MEDIA_TOOLS_CACHE`). The key is the version, architecture, Team ID, the pinned upstream inputs and the packaging recipe (the `RECIPE-BEGIN..END` block of the script), so a new certificate of the same team reuses packages and a changed recipe rebuilds them. Upgrading a tool leaves the old entry in place for rollback.
-2. The app is built; `embed-media-tools.sh` and `embed-js-provider.sh` put the tools in it. Manifests are **generated** from the verified package (`scripts/media_tools_cache.py manifest`), never copied from the templates in `ThirdParty/*/MANIFEST.json`.
-3. `scripts/check-media-tools.sh <app> --team ... --readme README.md` fails the release unless the built app is consistent: manifests valid and free of stale text, embedded files equal their digests, every Mach-O Developer ID signed with the right Team/runtime/timestamp/architecture, notarization record Accepted, licence texts and source offers present, the runner and plugin match their pins and entitlements, no unhosted download address, and the README claims nothing the app does not contain.
+2. The app is built; `embed-media-manifests.sh` and `embed-js-provider.sh` add the manifests, notices and the runner (no tool binaries). Manifests are **generated** from the verified package (`scripts/media_tools_cache.py manifest`), never copied from the templates in `ThirdParty/*/MANIFEST.json`.
+3. `scripts/check-media-tools.sh <app> --team ... --readme README.md` fails the release unless the built app is consistent: **no tool binary in the app**, manifests valid, free of stale text and identical to what the verified cache entry generates, notarization record Accepted, licence texts and source offers present, the runner and plugin match their pins and entitlements, a download address only when the hosted package was downloaded back and its digest matched (`--hosted-verified`), and the README says the tools are optional downloads.
+3b. Hosting (separate, deliberate step, after the source release and legal sign-off): `media_tools_cache.py package-asset` prepares each package under its immutable, versioned asset name; it is uploaded to a GitHub release `media-tools-<tool>-<version>`; `verify-hosted` downloads it back and compares the digest; only then does `release.sh` run with `MEDIA_PACKAGES_HOSTED=1`.
 4. The app and DMG are notarized, stapled and assessed by `release.sh`.
 
 When a tool is bumped: edit its template in `ThirdParty/<tool>/MANIFEST.json` (version and upstream pins only), run `scripts/fetch-bundled-tools.sh` (yt-dlp) or `scripts/build-ffmpeg-minimal.sh` (ffmpeg), and run the release; the cache rebuilds only what changed.
