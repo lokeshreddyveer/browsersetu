@@ -79,11 +79,21 @@ final class RoundTripAndBudgetTests: XCTestCase {
         XCTAssertLessThanOrEqual(loaded, 3, "only the tab in front is loaded; the other pages wait until they are used")
     }
 
+    /// CPU time (user + system) used by this process so far.
+    static func processCPUSeconds() -> Double {
+        var ts = timespec(); clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts)
+        return Double(ts.tv_sec) + Double(ts.tv_nsec) / 1e9
+    }
+
     func testStartingAnEmptyProfileIsQuick() async throws {
+        // The budget is the app's own CPU time, not the wall clock: a busy machine (other builds, a simulator) stretches the wall clock without the app doing any more work.
         let m = model()
+        let cpuBefore = Self.processCPUSeconds()
         let began = Date()
         await m.start()
-        XCTAssertLessThan(Date().timeIntervalSince(began), 5, "an empty profile opens in a few seconds at most")
+        let cpu = Self.processCPUSeconds() - cpuBefore
+        print("EMPTY-PROFILE START: cpu \(cpu) s, wall \(Date().timeIntervalSince(began)) s")
+        XCTAssertLessThan(cpu, 3, "an empty profile starts with a few CPU-seconds of work at most")
     }
 
     /// A crash seen in the One Row tab strip: several tabs and none active left the width list with one entry, and the view read past it.
