@@ -2,7 +2,7 @@ import Foundation
 import CryptoKit
 import Darwin
 
-// The extractor program that ships inside the app (Contents/Resources/Tools/yt-dlp), described by a pinned manifest (Contents/Resources/BundledTools.json, from ThirdParty/yt-dlp/MANIFEST.json). The app
+// The extractor program (yt-dlp), installed on request into Browser Setu's own folder (Application Support/BrowserSetu/MediaTools) and never shipped inside the app, described by a pinned manifest (Contents/Resources/BundledTools.json, from ThirdParty/yt-dlp/MANIFEST.json). The app
 // trusts it only if the file's SHA-256 equals the manifest's; there is no per-person hash prompt and no executable-path screen. It is started by exactly the same launcher as a person's own
 // extractor (own session, fixed environment, output and time limits, never in a private tab), and the same per-site consent applies.
 
@@ -269,7 +269,7 @@ struct ExtractorChoice: Equatable {
             return ExtractorChoice(path: url.path, identity: id, title: url.path, bundled: false)
         }
         guard ExtractorSettings.useBundled else { throw ExtractorFailure.notConfigured }
-        guard let v = BundledExtractor.verify() else { throw ExtractorFailure.unsafeLocation(BundledExtractor.isPresent ? "the bundled extractor does not match its pinned digest" : "no extractor is bundled in this build") }
+        guard let v = BundledExtractor.verify() else { throw ExtractorFailure.unsafeLocation(BundledExtractor.isPresent ? "the installed extractor does not match its pinned digest (repair it in Settings › Media)" : "the media tools are not installed (Settings › Media can install them)") }
         return ExtractorChoice(path: v.url.path, identity: v.identity, title: "\(v.manifest.name) \(v.manifest.version)", bundled: true)
     }
 }

@@ -10,6 +10,7 @@ built app, and the SHIPPED setu-jsc helper, and the answers are compared with th
 A player that can no longer be downloaded is reported as UNVERIFIED (skipped), never as a pass.
 """
 import dataclasses, enum, importlib.util, json, os, re, subprocess, sys, tarfile, tempfile, unittest, urllib.error, urllib.request
+from ytdlp_tree_support import ytdlp_tree
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 APP, LIVE, DENO = os.environ.get("BS_APP"), os.environ.get("BS_LIVE") == "1", os.environ.get("BS_DENO")
@@ -40,7 +41,9 @@ class PlayerVersionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.plugin = load_plugin()
-        solver = os.path.join(APP, "Contents", "Resources", "Tools", "yt-dlp", "_internal", "yt_dlp_ejs", "yt", "solver")
+        tree = ytdlp_tree()
+        if not tree: raise unittest.SkipTest("no verified yt-dlp package (media-tools cache or BS_YTDLP_TREE): the app carries none")
+        solver = os.path.join(tree, "_internal", "yt_dlp_ejs", "yt", "solver")
         with open(os.path.join(solver, "lib.min.js"), encoding="utf-8") as f: cls.lib = f.read()
         with open(os.path.join(solver, "core.min.js"), encoding="utf-8") as f: cls.core = f.read()
         cls.helper = os.path.join(APP, "Contents", "Helpers", "setu-jsc")

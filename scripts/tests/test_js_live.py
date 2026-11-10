@@ -8,6 +8,7 @@ Public, openly licensed test content (the Blender Foundation's Big Buck Bunny) p
 is reported, not assumed to be a JavaScript failure (formats also vary by time and region).
 """
 import concurrent.futures as cf, os, re, subprocess, tempfile, time, unittest
+from ytdlp_tree_support import ytdlp_tree
 
 APP, LIVE, DENO = os.environ.get("BS_APP"), os.environ.get("BS_LIVE") == "1", os.environ.get("BS_DENO")
 VIDEOS = {"first-video": "https://www.youtube.com/watch?v=jNQXAC9IVRw", "big-buck-bunny": "https://www.youtube.com/watch?v=aqz-KE-bpKQ"}
@@ -18,7 +19,9 @@ class LiveTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         res = os.path.join(APP, "Contents", "Resources")
-        cls.exe = os.path.join(res, "Tools", "yt-dlp", "yt-dlp_macos"); cls.plug = os.path.join(res, "YtDlpPlugins"); cls.tmp = tempfile.mkdtemp(prefix="live-")
+        tree = ytdlp_tree()
+        if not tree: raise unittest.SkipTest("no verified yt-dlp package (media-tools cache or BS_YTDLP_TREE): the app carries none")
+        cls.exe = os.path.join(tree, "yt-dlp_macos"); cls.plug = os.path.join(res, "YtDlpPlugins"); cls.tmp = tempfile.mkdtemp(prefix="live-")
 
     def run_ytdlp(self, url, *extra, timeout=120, verbose=True):
         cmd = [self.exe, "--ignore-config", "--no-cache-dir", "--no-update", "--no-plugin-dirs", "--no-js-runtimes", *(["-v"] if verbose else []), "-F", "--no-playlist", *extra, url]

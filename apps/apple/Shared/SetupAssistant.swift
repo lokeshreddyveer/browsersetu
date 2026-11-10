@@ -18,6 +18,7 @@ struct SetupAssistantView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     #if os(macOS)
     @StateObject private var mediaTools = MediaToolsStore.shared
+    @StateObject private var ffmpegTools = MediaToolsStore.ffmpeg
     @State private var mediaOn = true
     #endif
 
@@ -383,7 +384,8 @@ struct SetupAssistantView: View {
                 .padding(.horizontal, 14).padding(.vertical, 4)
                 .setupRowSurface()
                 #if os(macOS)
-                if mediaTools.choice == .accepted { mediaStatusLine }
+                if mediaTools.choice == .accepted { mediaStatusLine(mediaTools, "Media tools") }
+                if ffmpegTools.choice == .accepted { mediaStatusLine(ffmpegTools, "Media processing") }
                 Button("Make Browser Setu the Default Browser…") { finish(); SettingsRouter.open(.general) }.buttonStyle(.bordered)
                 #endif
             }
@@ -402,30 +404,42 @@ struct SetupAssistantView: View {
 
     #if os(macOS)
     /// Continue is the confirmation: with the box ticked the download starts (and carries on while the person browses); unticked, nothing is installed and nothing asks again.
+    private var installableMediaStores: [MediaToolsStore] { [mediaTools, ffmpegTools].filter { $0.manifest?.isInstallable == true } }
+
     private func applyMediaChoice() {
-        if mediaOn, mediaTools.manifest?.isInstallable == true { if !mediaTools.isBusy, !mediaTools.isReady { mediaTools.install() } }
-        else { mediaTools.decline() }
+        let stores = installableMediaStores
+        if mediaOn, !stores.isEmpty { for s in stores where !s.isBusy && !s.isReady { s.install() } }
+        else { mediaTools.decline(); ffmpegTools.decline() }
+    }
+
+    /// "yt-dlp 2026.10.26: finds the formats of videos on more sites. 54 MB download · about 124 MB on disk"
+    private func mediaToolLine(_ store: MediaToolsStore, _ what: String) -> String? {
+        guard let m = store.manifest, m.isInstallable else { return nil }
+        let name = m.name == "ffmpeg" ? "FFmpeg" : m.name
+        return "• \(name) \(m.version): \(what). \(store.sizeSummary ?? "")"
     }
 
     private var mediaStep: some View {
         VStack(alignment: .leading, spacing: 12) {
-            heading("Advanced media downloads", "Optional. Browser Setu already saves ordinary files, streams and torrents. This adds a program that can find the formats of videos on more sites, so you can pick the quality and save the video or just its sound.")
-            if mediaTools.manifest?.isInstallable == true {
-                row("Download and install the media tools", "Browser Setu downloads \(mediaTools.manifest?.name ?? "yt-dlp") \(mediaTools.manifest?.version ?? "") from its official release page, checks it against a fingerprint built into this app, and keeps it in its own folder. \(mediaTools.sizeSummary ?? "") It runs on this Mac only when you ask for a video’s formats and allow it for that site, never in private tabs. No administrator password, Terminal or Homebrew is needed. Browsing carries on while it downloads.") {
+            heading("Advanced media downloads", "Optional, and skippable. Browser Setu already saves ordinary files, streams and torrents without anything extra. These programs are not part of the app: they are downloaded only if you leave the switch on and press Continue.")
+            let lines = [mediaToolLine(mediaTools, "finds the formats of videos on more sites, so you can pick the quality and save the video or just its sound"),
+                         mediaToolLine(ffmpegTools, "converts, merges and extracts the sound of what you download")].compactMap { $0 }
+            if !lines.isEmpty {
+                row("Download and install the media tools", "Browser Setu downloads each program from its official release page, checks it against a fingerprint built into this app, and keeps it in its own folder:\n" + lines.joined(separator: "\n") + "\nThey run on this Mac only when you ask and allow them for that site, never in private tabs. No administrator password, Terminal or Homebrew is needed. Browsing carries on while they download.") {
                     Toggle("Install advanced media downloads", isOn: $mediaOn).labelsHidden().toggleStyle(.switch).accessibilityLabel("Install advanced media downloads").accessibilityIdentifier("setup-media-toggle")
                 }
-                Text("You can change this at any time in Settings › Media.").font(.system(size: 11.5)).foregroundStyle(.secondary)
+                Text("Leave it off to skip: nothing is downloaded and you are not asked again here. You can install, update, repair or remove them at any time in Settings › Media.").font(.system(size: 11.5)).foregroundStyle(.secondary)
             } else {
                 Text("Advanced media downloads are not available in this release yet, so nothing will be downloaded now. Ordinary files, streams and torrents work without them.").font(.callout).foregroundStyle(.secondary)
             }
         }
     }
 
-    @ViewBuilder private var mediaStatusLine: some View {
-        switch mediaTools.phase {
-        case .working(let f, let t): HStack(spacing: 8) { ProgressView(value: f).frame(width: 120).accessibilityLabel("Installing media tools").accessibilityValue("\(Int(f * 100)) percent"); Text("Media tools: \(t) \(Int(f * 100))%").font(.caption).foregroundStyle(.secondary) }
-        case .ready: Label("Media tools are ready", systemImage: "checkmark.circle").font(.caption).foregroundStyle(.secondary)
-        case .failed(let m): Text("Media tools could not be installed: \(m) You can retry in Settings › Media.").font(.caption).foregroundStyle(.secondary)
+    @ViewBuilder private func mediaStatusLine(_ store: MediaToolsStore, _ label: String) -> some View {
+        switch store.phase {
+        case .working(let f, let t): HStack(spacing: 8) { ProgressView(value: f).frame(width: 120).accessibilityLabel("Installing \(label.lowercased())").accessibilityValue("\(Int(f * 100)) percent"); Text("\(label): \(t) \(Int(f * 100))%").font(.caption).foregroundStyle(.secondary) }
+        case .ready: Label("\(label) is ready", systemImage: "checkmark.circle").font(.caption).foregroundStyle(.secondary)
+        case .failed(let m): Text("\(label) could not be installed: \(m) You can retry in Settings › Media.").font(.caption).foregroundStyle(.secondary)
         default: EmptyView()
         }
     }

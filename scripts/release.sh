@@ -8,8 +8,9 @@
 #                                           the same pipeline up to and including the final signature and the media-tools preflight, into isolated folders
 #                                           (RELEASE_DERIVED / RELEASE_DIST, default a temp folder). Nothing is notarized, no DMG is made, dist/ is not touched; the result is NOT releasable.
 #
-# Media tools (yt-dlp, ffmpeg/ffprobe): scripts/release-media-tools.sh --ensure reuses the cached signed + notarized packages when their inputs are unchanged and re-verify,
-# and builds, signs, notarizes and caches them otherwise; scripts/embed-media-tools.sh puts them in the app; scripts/check-media-tools.sh refuses to continue unless the built app is consistent.
+# Media tools (yt-dlp, ffmpeg/ffprobe) are OPTIONAL DOWNLOADS, not part of the app: scripts/release-media-tools.sh --ensure reuses the cached signed + notarized packages when their inputs are unchanged
+# and re-verify, and builds, signs, notarizes and caches them otherwise; scripts/embed-media-manifests.sh puts only their manifests in the app; scripts/check-media-tools.sh refuses to continue unless
+# the built app carries no tool and its manifests match the verified packages. The packages are hosted separately (MEDIA_PACKAGES_HOSTED=1 once uploaded and verified).
 #
 # One-time setup (the same login works for every app on your team):
 #   xcrun notarytool store-credentials BrowserSetu-NOTARY --apple-id <Apple ID email> --team-id <TEAM ID>
@@ -112,8 +113,17 @@ BUILT="$DERIVED/Build/Products/Release/$APP_NAME Direct.app"
 [ -d "$BUILT" ] || fail "the build did not produce $BUILT"
 APP="$DERIVED/Build/Products/Release/$APP_NAME.app"
 mv "$BUILT" "$APP"     # the shipped app is called Browser Setu; the build target is named apart only so both builds can share a folder
-echo "▸ Embedding the signed media tools (from the verified cache)"
-scripts/embed-media-tools.sh "$APP" --team "$TEAM_ID" || fail "the media tools could not be embedded."
+echo "▸ Media-tool manifests (no tool is bundled; they are optional downloads)"
+HOSTED_FLAG=""; HOSTED_VERIFIED_FLAG=""
+if [ "${MEDIA_PACKAGES_HOSTED:-}" = "1" ]; then
+  # Only when the packages are really uploaded: the bytes at each address must be exactly the verified package, or the app would offer an install that fails.
+  for t in yt-dlp ffmpeg; do
+    ENTRY="$(python3 -I scripts/media_tools_cache.py lookup --tool "$t" --arch arm64 --team "$TEAM_ID")" || fail "no verified $t package in the cache to check the hosted copy against."
+    python3 -I scripts/media_tools_cache.py verify-hosted --tool "$t" --entry "$ENTRY" || fail "the hosted $t package is missing or is not the verified one (MEDIA_PACKAGES_HOSTED=1 requires it to be uploaded first)."
+  done
+  HOSTED_FLAG="--hosted"; HOSTED_VERIFIED_FLAG="--hosted-verified"
+fi
+scripts/embed-media-manifests.sh "$APP" --team "$TEAM_ID" $HOSTED_FLAG || fail "the media-tool manifests could not be written."
 echo "▸ Embedding the JavaScript challenge runner (setu-jsc + yt-dlp plugin)"
 scripts/embed-js-provider.sh "$APP" --identity "$SIGN_IDENTITY" --team "$TEAM_ID" || fail "the JavaScript provider could not be embedded."
 # Sparkle's helpers are signed innermost first with the same identity, hardened runtime and a timestamp, as notarization requires.
@@ -146,12 +156,12 @@ SIGNING_INFO="$(codesign -dvv "$APP" 2>&1 || true)"
 case "$SIGNING_INFO" in *"flags="*"runtime"*) ;; *) fail "the Hardened Runtime flag is missing; notarization would refuse it." ;; esac
 case "$ENTS" in *"kvs=true"*) [ -f "$APP/Contents/embedded.provisionprofile" ] || fail "the app carries the iCloud key-value entitlement but has no embedded Developer ID provisioning profile, so macOS would not launch it. Create a Developer ID profile for com.browsersetu.mac with iCloud key-value storage and embed it (see apps/apple/project.yml)." ;; esac
 
-echo "▸ Checking the media tools inside the built app"
+echo "▸ Checking the built app (no bundled tools; manifests match the verified packages)"
 SRC_FLAG=""
 if [ "${MEDIA_SOURCES_PUBLISHED:-}" = "1" ]; then SRC_FLAG="--sources-published"; elif [ "$VERIFY_ONLY" = 1 ]; then SRC_FLAG="--allow-unpublished-sources"; fi
-scripts/check-media-tools.sh "$APP" --team "$TEAM_ID" --readme README.md $SRC_FLAG || fail "the media tools in the built app are not release-ready (see above)."
+scripts/check-media-tools.sh "$APP" --team "$TEAM_ID" --readme README.md $SRC_FLAG $HOSTED_VERIFIED_FLAG || fail "the media tools in the built app are not release-ready (see above)."
 if [ "$VERIFY_ONLY" = 1 ]; then
-  echo "✔ VERIFY ONLY complete: $APP is built, signed and passes the media-tools preflight. It was NOT notarized and is NOT releasable."
+  echo "✔ VERIFY ONLY complete: $APP is built, signed and passes the media-tools preflight (no bundled tools). It was NOT notarized and is NOT releasable."
   exit 0
 fi
 
