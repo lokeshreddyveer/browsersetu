@@ -18,3 +18,4 @@ build/
 *.mobileprovision
 .env
 apps/apple/ThirdParty/*/bin/
+.release-internal/
