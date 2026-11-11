@@ -16,7 +16,7 @@ PLIST="$(ls -d "$CHECK"/mnt/*.app | head -1)/Contents/Info.plist"
 GOT_V="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST")"; GOT_B="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PLIST")"
 [ "$GOT_V" = "$VERSION" ] && [ "$GOT_B" = "$BUILD" ] || { echo "✘ $DMG holds version $GOT_V build $GOT_B, not $VERSION build $BUILD (an older build left in dist/?)"; exit 1; }
 xcrun stapler validate "$DMG" >/dev/null || { echo "✘ $DMG has no valid stapled notarization ticket"; exit 1; }
-spctl -a -t open --context context:primary-signature "$DMG" 2>&1 | grep -q accepted || { echo "✘ Gatekeeper does not accept $DMG"; exit 1; }
+spctl -a -vv -t open --context context:primary-signature "$DMG" 2>&1 | grep -q accepted || { echo "✘ Gatekeeper does not accept $DMG"; exit 1; }
 codesign --verify --deep --strict "$CHECK"/mnt/*.app || { echo "✘ the app inside $DMG does not verify"; exit 1; }
 hdiutil detach "$CHECK/mnt" -quiet
 SPARKLE_BIN="$(find build/release/SourcePackages apps/apple/build ~/Documents/iptv/macos/.build -type d -path '*artifacts/sparkle/Sparkle/bin' 2>/dev/null | head -1 || true)"
@@ -40,7 +40,7 @@ echo "▸ Verifying the published release before the update feed changes"
 VERIFY="$(mktemp -d)"
 curl -fsSL --retry 3 -o "$VERIFY/dl.dmg" "https://github.com/$REPO/releases/download/$TAG/BrowserSetu-$VERSION.dmg" || { echo "✘ the published DMG cannot be downloaded; the update feed was NOT changed"; rm -rf "$VERIFY"; exit 1; }
 [ "$(shasum -a 256 < "$VERIFY/dl.dmg" | cut -d' ' -f1)" = "$(shasum -a 256 < "$DMG" | cut -d' ' -f1)" ] || { echo "✘ the published DMG is not the notarized file; the update feed was NOT changed"; rm -rf "$VERIFY"; exit 1; }
-xcrun stapler validate "$VERIFY/dl.dmg" >/dev/null && spctl -a -t open --context context:primary-signature "$VERIFY/dl.dmg" 2>&1 | grep -q accepted || { echo "✘ the downloaded DMG fails Gatekeeper; the update feed was NOT changed"; rm -rf "$VERIFY"; exit 1; }
+xcrun stapler validate "$VERIFY/dl.dmg" >/dev/null && spctl -a -vv -t open --context context:primary-signature "$VERIFY/dl.dmg" 2>&1 | grep -q accepted || { echo "✘ the downloaded DMG fails Gatekeeper; the update feed was NOT changed"; rm -rf "$VERIFY"; exit 1; }
 rm -rf "$VERIFY"
 echo "▸ Updating the update feed"
 URL="https://github.com/$REPO/releases/download/$TAG/BrowserSetu-$VERSION.dmg"
