@@ -3,6 +3,30 @@
   <channel>
     <title>Browser Setu</title>
     <item>
+      <title>Browser Setu 0.4.2</title>
+      <pubDate>Wed, 11 Nov 2026 16:32:16 -0000</pubDate>
+      <sparkle:version>25</sparkle:version>
+      <sparkle:shortVersionString>0.4.2</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <description><![CDATA[# Browser Setu 0.4.2 (build 25)
+
+## What&#x27;s new
+- **Updates show what changed.** After an update the opening scene plays and a &quot;What&#x27;s new&quot; page follows; the setup questions are asked only on a first install.
+- **Videos have their names.** In the toolbar&#x27;s video list each video shows its own title (or its ID when the page gives none), instead of identical rows.
+- **Added video links open the video options.** A YouTube, TikTok or Instagram link you add no longer saves the web page as an HTML file; it opens what can be saved, with the offer to install the video tool if it is missing.
+- **Optional tools, plainer names.** Setup, Settings and Downloads call them &quot;Video download tool&quot; and &quot;Media processing tool&quot;.
+
+## Carried from 0.4.1
+- Video download and media processing tools are optional downloads (Settings &gt; Media, or the optional Setup step), shown with their size first; nothing downloads without your yes. The app is about 33 MB.
+- A small built-in JavaScript runner (sandboxed) answers YouTube&#x27;s puzzles; no Node or Deno is needed.
+
+## Optional downloads and licences
+- yt-dlp 2026.10.26 and ffmpeg/ffprobe 9.0.2 (Apple silicon) are separate release assets: `media-tools-yt-dlp-2026.10.26` and `media-tools-ffmpeg-9.0.2`.
+- Complete corresponding source for the open-source components, with SHA-256 list and notices: https://github.com/lokeshreddyveer/browsersetu/releases/tag/sources-0.4.1-build24 (the source of this app is the `v0.4.2` tag).
+- MP3 encoding in the app uses LAME 3.100 (LGPL-2.1), a separate library you can replace. Source requests: https://github.com/lokeshreddyveer/browsersetu/issues]]></description>
+      <enclosure url="https://github.com/lokeshreddyveer/browsersetu/releases/download/v0.4.2/BrowserSetu-0.4.2.dmg" type="application/octet-stream" sparkle:edSignature="5zOOhCBakP4YuHJh0L5ELfq5IsLDEz2KiZvBe/xMBOaoeH7iu/qIjLGa1UIgyKhZ+qTN1pgsIj2ct6smFcCSBw==" length="35039482"/>
+    </item>
+    <item>
       <title>Browser Setu 0.4.1</title>
       <pubDate>Wed, 11 Nov 2026 15:37:00 -0000</pubDate>
       <sparkle:version>24</sparkle:version>
@@ -264,5 +288,5 @@ Mac: notarized, stapled DMG (replaces the build 10 file on the same release). iP
       <description><![CDATA[First public release. A native WebKit browser for macOS with a Rust core: tabs, sidebar layouts, workspaces, content blocking, per-site privacy, saved passwords in your Keychain, web extensions, research collections, developer tools, and automatic updates. Early release: see docs/capabilities.md for what has been checked and what has not.]]></description>
       <enclosure url="https://github.com/lokeshreddyveer/browsersetu/releases/download/v0.2.0/BrowserSetu-0.2.0.dmg" type="application/octet-stream" sparkle:edSignature="grmp8aD3U/KjtKeEkUcI3ESkfohsFjkds81VYV6rBzRGW6/JUxDLtcQ1hg178QCZEWXFRCB4AwrzLHSqGC2VCw==" length="14528271"/>
     </item>
-                                </channel>
+                                  </channel>
 </rss>
