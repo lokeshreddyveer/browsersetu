@@ -34,14 +34,14 @@ enum AppRelease {
 
 /// The same text goes into docs/releases/<version>-build-<n>.md and the GitHub release notes.
 enum WhatsNewContent {
-    static let title = "What's new in Browser Setu 0.4.1"
+    static let title = "What's new in Browser Setu 0.4.2"
     struct Item: Identifiable, Equatable { let symbol: String; let heading: String; let text: String; var id: String { heading } }
     static let items: [Item] = [
-        Item(symbol: "arrow.down.circle", heading: "Video tools are your choice", text: "The video download and media processing tools are optional downloads now, not part of the app. Install them from Settings > Media whenever you want video and audio downloads. You see the size first and nothing downloads without your yes."),
-        Item(symbol: "bolt.shield", heading: "A smaller app", text: "The download is about 33 MB, the same size as before the video tools were added."),
-        Item(symbol: "play.rectangle", heading: "YouTube works with nothing extra installed", text: "A small built-in JavaScript runner, sandboxed and verified, answers YouTube's puzzles for the video download tool."),
+        Item(symbol: "play.rectangle", heading: "Videos have their names", text: "In the toolbar's video list, each video shows its own title, so you can tell them apart. A video link you add opens the video options instead of saving a web page."),
+        Item(symbol: "sparkles", heading: "Updates show what changed", text: "After an update you see the opening scene and this page. The setup questions are asked only on a first install."),
+        Item(symbol: "arrow.down.circle", heading: "Video tools are your choice", text: "The video download and media processing tools are optional downloads, not part of the app. Install them from Settings > Media whenever you want video and audio downloads. You see the size first and nothing downloads without your yes."),
+        Item(symbol: "bolt.shield", heading: "A smaller app", text: "The download is about 33 MB."),
         Item(symbol: "checkmark.seal", heading: "Checked before it runs", text: "Every tool is checked (hash, developer signature, Apple notarization, processor type) before it is installed, and can be repaired or removed in Settings."),
-        Item(symbol: "wrench.and.screwdriver", heading: "Fixes", text: "Explorer reads huge or hostile robots.txt files in bounded time, and a fresh profile starts quickly."),
     ]
 }
 

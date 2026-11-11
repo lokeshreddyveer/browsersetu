@@ -3,7 +3,7 @@
 A native, security-first web browser for **macOS** and **iPhone/iPad**. It renders with the system's own WebKit, keeps everything on your device, and
 puts a small Rust core (tabs, address-bar logic, permission and navigation rules, per-profile SQLite storage) under a SwiftUI interface.
 
-> **Status: release candidate, in the production-hardening phase (0.4.1, build 24).** It is a real, working browser with a large automated test suite (about 750 tests), but
+> **Status: release candidate, in the production-hardening phase (0.4.2, build 25).** It is a real, working browser with a large automated test suite (about 750 tests), but
 > it is **not yet called production grade**: that needs the evidence in [`docs/RELEASE-BAR.md`](docs/RELEASE-BAR.md) to be complete and recorded. [`docs/capabilities.md`](docs/capabilities.md)
 > lists every feature as *Checked*, *Built* (compiled, not exercised end to end) or *Parked* (switched off), with the evidence and the limits. Read both before you rely on anything.
 
@@ -12,6 +12,13 @@ puts a small Rust core (tabs, address-bar logic, permission and navigation rules
 - **Mac (Apple Silicon, macOS 14 or later):** the notarized DMG on the [Releases](../../releases) page. The downloadable build updates itself (see
   [Updates](#updates)).
 - **iPhone and iPad (iOS 17 or later):** TestFlight. Ask the author for an invitation.
+
+### New in 0.4.2
+
+- **Updates play the opening scene and then show what changed**, instead of the setup questions; setup is asked only on a first install. A profile that already got past the opening scene counts as an existing install.
+- **Videos in the toolbar list are told apart by their own titles** (the page's link title, or the video's ID when the page gives none), instead of a list of identical "video" rows.
+- **A pasted or added video link (YouTube, TikTok, Instagram) opens the video options** (what can be saved, and the offer to install the video tool if it is missing) instead of saving the web page as an HTML file.
+- **The optional tools are called "Video download tool" and "Media processing tool"** in Setup, Settings and Downloads. The licence notices and Acknowledgements still name the programs, as their licences require.
 
 ### New in 0.4.1
 
