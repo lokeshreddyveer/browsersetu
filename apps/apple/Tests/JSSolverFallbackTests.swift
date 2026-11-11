@@ -137,11 +137,11 @@ final class JSSolverFallbackTests: XCTestCase {
         let none: Result<ManagedDeno.Verified, ManagedDeno.Unavailable> = .failure(.notOffered)
         let r = JSSolver.report(contents: root, team: team, nativeSignatureCheck: { _, _ in true }, deno: none)
         XCTAssertTrue(r.native.hasPrefix("unavailable"), "no provider in this folder"); XCTAssertTrue(r.managedDeno.contains("planned, not part of this release"))
-        XCTAssertTrue(r.effective.hasPrefix("none"), r.effective); XCTAssertTrue(r.diagnostics.contains("1. built-in solver") && r.diagnostics.contains("2. managed Deno") && r.diagnostics.contains("3. no solver"))
+        XCTAssertTrue(r.effective.hasPrefix("none"), r.effective); XCTAssertTrue(r.diagnostics.contains("1. built-in solver") && r.diagnostics.contains("2. fallback runtime") && r.diagnostics.contains("3. no solver"))
         XCTAssertTrue(r.diagnostics.contains("never given any of this automatically") && r.diagnostics.contains("PATH is never searched"))
         let withDeno = JSSolver.report(contents: root, team: team, nativeSignatureCheck: { _, _ in true }, deno: .success(.init(url: root, version: "2.9.8")))
-        XCTAssertEqual(withDeno.effective, "the managed Deno", "tier 2 is only ever the one in use when tier 1 is unavailable")
-        XCTAssertTrue(withDeno.managedDeno.hasPrefix("available (Deno 2.9.8"))
+        XCTAssertEqual(withDeno.effective, "the fallback runtime", "tier 2 is only ever the one in use when tier 1 is unavailable")
+        XCTAssertTrue(withDeno.managedDeno.hasPrefix("available (fallback runtime 2.9.8"))
     }
 
     // MARK: a yt-dlp the person chose is never given any of it

@@ -1119,7 +1119,8 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
         let r = await LinkPageExtractor.collect(from: webView)
         // The pictures too, from the same page, in the same isolated world; only addresses are read (see GalleryExtractor).
         let pictures = await GalleryExtractor.collect(from: webView)
-        return PageLinkScan(links: r.links.map { ($0.href, $0.marked) }, truncated: r.truncated || pictures.truncated, images: pictures.candidates)
+        return PageLinkScan(links: r.links.map { ($0.href, $0.marked) }, truncated: r.truncated || pictures.truncated, images: pictures.candidates,
+                            labels: Dictionary(r.links.filter { !$0.label.isEmpty }.map { ($0.href, $0.label) }, uniquingKeysWith: { a, _ in a }))
     }
 
     /// The media on the page, read once when asked. See MediaPageExtractor.

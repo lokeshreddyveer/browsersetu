@@ -45,8 +45,8 @@ enum ManagedDeno {
             case .teamMismatch: "it was signed by a different team than this app"
             case .signatureInvalid: "its code signature is not valid"
             case .wrongArchitecture: "it does not run on this Mac's processor"
-            case .tooOld(let v): "version \(v) is older than yt-dlp supports"
-            case .notVerifiedForThisYtDlp: "it was not verified with the yt-dlp release this app carries"
+            case .tooOld(let v): "version \(v) is older than the video tool supports"
+            case .notVerifiedForThisYtDlp: "it was not verified with the video tool release this app carries"
             }
         }
     }
@@ -153,17 +153,17 @@ enum JSSolver {
         }
         let managed: String, denoUsable: Bool
         switch denoResult {
-        case .success(let d): managed = "available (Deno \(d.version), verified)"; denoUsable = true
+        case .success(let d): managed = "available (fallback runtime \(d.version), verified)"; denoUsable = true
         case .failure(let why): managed = (why == .notOffered ? "not available: \(why.summary) (planned, not part of this release)" : "not used: \(why.summary)"); denoUsable = false
         }
-        let effective = nativeUsable ? "the built-in solver" : denoUsable ? "the managed Deno" : "none: some YouTube formats may be missing"
+        let effective = nativeUsable ? "the built-in solver" : denoUsable ? "the fallback runtime" : "none: some YouTube formats may be missing"
         let text = """
         YouTube JavaScript puzzles, in order of use:
           1. built-in solver:  \(native)
-          2. managed Deno:     \(managed)
-          3. no solver:        yt-dlp continues without solving; some formats may be missing or a video cannot be read
+          2. fallback runtime: \(managed)
+          3. no solver:        the video tool continues without solving; some formats may be missing or a video cannot be read
         Used now: \(effective)
-        A yt-dlp you chose yourself (Settings > Media) is never given any of this automatically; PATH is never searched.
+        A program you chose yourself (Settings > Media) is never given any of this automatically; PATH is never searched.
         """
         return Report(native: native, managedDeno: managed, effective: effective, diagnostics: text)
     }

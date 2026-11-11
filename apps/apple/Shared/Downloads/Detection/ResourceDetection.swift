@@ -252,7 +252,12 @@ extension PageResourceSummary {
     /// Page links classified, bounded, deduplicated; media counts joined from the media summary.
     @MainActor
     static func build(scan: PageLinkScan, media: MediaPageSummary, pageHost: String?) -> PageResourceSummary {
-        var found = scan.links.compactMap { ResourceClassifier.classify(link: $0.href, marked: $0.marked, pageHost: pageHost) }
+        var found = scan.links.compactMap { l -> DetectedResource? in
+            guard var r = ResourceClassifier.classify(link: l.href, marked: l.marked, pageHost: pageHost) else { return nil }
+            // A video card is named by its own title when the page gave one, so a list of videos is not a list of identical rows.
+            if r.provider != nil, let t = scan.labels[l.href], !t.isEmpty { r.filename = t }
+            return r
+        }
         // The page's pictures (an <img> is not a link, so a gallery of posters used to show nothing in the toolbar). After the links, so a link to the same file keeps its own detail; the list limit applies to all.
         for address in scan.images {
             guard let url = URL(string: address), url.scheme == "http" || url.scheme == "https", let host = url.host, !host.isEmpty, !LinkClassifier.isNamespacePage(url) else { continue }

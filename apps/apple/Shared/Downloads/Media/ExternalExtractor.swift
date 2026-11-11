@@ -24,7 +24,7 @@ enum JSChallengeProviderAdvice {
         let t = stderr.lowercased()
         return ["javascript runtime", "n challenge", "challenge solving failed", "signature solving failed", "js challenge"].contains { t.contains($0) }
     }
-    static let text = "YouTube hides some video addresses behind a small JavaScript puzzle. Browser Setu's built-in solver could not solve it for this page, or is not available in this copy of the app, so some formats may be missing or this video cannot be read. YouTube changes this often: try again later and check for a Browser Setu update. You can also choose a yt-dlp you installed yourself in Settings > Media. Other websites are not affected."
+    static let text = "YouTube hides some video addresses behind a small JavaScript puzzle. Browser Setu's built-in solver could not solve it for this page, or is not available in this copy of the app, so some formats may be missing or this video cannot be read. YouTube changes this often: try again later and check for a Browser Setu update. You can also choose a video tool program you installed yourself in Settings > Media. Other websites are not affected."
 }
 
 enum ExtractorFailure: Error, Equatable, LocalizedError, Sendable {

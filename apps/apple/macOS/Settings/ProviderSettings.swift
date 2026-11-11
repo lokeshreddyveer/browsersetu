@@ -163,7 +163,7 @@ struct ExtractorSettingsView: View {
                 }
             }
             if ExternalExtractor.isSandboxed { Button("Open Scripts Folder") { if let u = ExternalExtractor.scriptsFolder { NSWorkspace.shared.open(u) } }.controlSize(.small) }
-            Text("The program is third-party software that you choose and keep up to date; this browser does not install or update it. When you allow it for a video, it is started on this Mac with that video's web address and nothing else (no cookies, sign-ins or other pages), and it may contact websites itself. It runs with your Mac permissions. It must print the video's formats as JSON in the form yt-dlp's --dump-single-json uses. It is never used in private tabs.").settingsNote()
+            Text("The program is third-party software that you choose and keep up to date; this browser does not install or update it. When you allow it for a video, it is started on this Mac with that video's web address and nothing else (no cookies, sign-ins or other pages), and it may contact websites itself. It runs with your Mac permissions. It must print the video's formats as JSON in the form the common video tools use (--dump-single-json). It is never used in private tabs.").settingsNote()
         }
     }
     private var healthText: String {
@@ -224,16 +224,16 @@ struct ManagedMediaToolsSection: View {
                 let solver = JSSolver.report()
                 LabeledContent("YouTube compatibility") {
                     if !useBundled {
-                        Text("Not in use: the bundled yt-dlp is switched off").foregroundStyle(.secondary)       // the solver belongs to the bundled yt-dlp; a yt-dlp you chose never receives it
+                        Text("Not in use: the video download tool is switched off").foregroundStyle(.secondary)       // the solver belongs to the installed video tool; a program you chose never receives it
                     } else {
                         switch JSChallengeProvider.status() {
                         case .builtIn(let v): Text("Built in · JavaScript solver \(v), sandboxed").foregroundStyle(.secondary)
                         case .unavailable(let why): Text("Built-in solver unavailable: \(why.summary)").foregroundStyle(.secondary)
                         }
                     }
-                }.accessibilityIdentifier("js-provider-status").help(useBundled ? solver.diagnostics : "A yt-dlp you chose yourself is never given Browser Setu's solver.")
+                }.accessibilityIdentifier("js-provider-status").help(useBundled ? solver.diagnostics : "A program you chose yourself is never given Browser Setu's solver.")
                 Text("Some YouTube videos need a small JavaScript puzzle solved before their addresses are known. Browser Setu does it with a helper built into the app that cannot reach the internet, your files or your browsing data. If it is ever unavailable, downloads still work but some YouTube formats may be missing. A managed fallback is planned and is not part of this release. Other websites do not need any of this, and no website is guaranteed to work.").font(.caption).foregroundStyle(.secondary)
-                Text("Components: \(m.name) \(m.version) (Unlicense source; the packaged program combines Python, OpenSSL, curl-impersonate and other open-source parts under their own licences, including GPL-3.0-or-later and LGPL). Licence texts are in the package.").settingsNote()
+                Text("Components: \(MediaToolLabel.name(for: m.name)) \(m.version). The packaged program combines open-source parts under their own licences, including GPL-3.0-or-later and LGPL. Licence texts, the parts list and the source are under Acknowledgements and in the package.").settingsNote()
             } else {
                 Text("Advanced media downloads are not available in this release yet. Ordinary files, streams and torrents are not affected, and you can still point Browser Setu at a program you installed yourself.").font(.system(size: 11.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("extractor-bundled-absent")
             }
@@ -257,7 +257,7 @@ struct ManagedMediaToolsSection: View {
         switch store.phase { case .ready: "Download and Repair\(size)"; case .updateAvailable: "Download and Update\(size)"; default: "Download and Install\(size)" }
     }
     private var dialogMessage: String {
-        let name = "\(m?.name ?? "The extractor") \(m?.version ?? "")"
+        let name = "\(m.map { MediaToolLabel.name(for: $0.name) } ?? "The video download tool") \(m?.version ?? "")"
         switch store.phase {
         case .ready: return "Browser Setu downloads \(name) again, checks it, and replaces the installed copy only if every check passes."
         case .updateAvailable: return "Browser Setu downloads \(name), checks it, and switches to it only if every check passes. The current version keeps working until then."
@@ -306,7 +306,7 @@ struct ProcessingToolSettingsView: View {
         .confirmationDialog(store.phase.isFailed ? "Try installing again?" : "Install the media processing tool?", isPresented: $confirmInstall) {
             Button("Download and Install\(store.sizeSummary.map { " (\($0))" } ?? "")") { store.install() }
             Button("Not Now", role: .cancel) {}
-        } message: { Text("Browser Setu downloads FFmpeg \(m?.version ?? "") from its release page, checks it against a fingerprint built into this app, and keeps it in its own folder. No administrator password is needed.") }
+        } message: { Text("Browser Setu downloads the media processing tool \(m?.version ?? "") from its release page, checks it against a fingerprint built into this app, and keeps it in its own folder. No administrator password is needed.") }
         .confirmationDialog("Remove the media processing tool?", isPresented: $confirmRemove) {
             Button("Remove", role: .destructive) { store.remove() }
             Button("Cancel", role: .cancel) {}
@@ -318,7 +318,7 @@ struct ProcessingToolSettingsView: View {
         case .checking: Text("Checking…").foregroundStyle(.secondary)
         case .notInstalled: Text(m?.isInstallable == true ? "Not installed" : "Not available in this build yet").foregroundStyle(.secondary)
         case .working(let f, let t): Text("\(t) \(Int(f * 100))%").foregroundStyle(.secondary)
-        case .ready(let v): Text("Installed · FFmpeg \(v)").foregroundStyle(.secondary)
+        case .ready(let v): Text("Installed · Media processing tool \(v)").foregroundStyle(.secondary)
         case .failed(let why): Text(why).font(.system(size: 11.5)).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
         case .updateAvailable(let i): Text("Update available · installed \(i)").foregroundStyle(.secondary)
         }

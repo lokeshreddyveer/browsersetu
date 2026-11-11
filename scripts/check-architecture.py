@@ -29,6 +29,35 @@ def tracked():
         return []
 
 
+UI_FILES = ("apps/apple/Shared/SetupAssistant.swift", "apps/apple/Shared/Intro/WhatsNew.swift", "apps/apple/Shared/Downloads/Media/ExternalExtractor.swift",
+            "apps/apple/Shared/Downloads/Media/JSChallengeProvider.swift", "apps/apple/Shared/Downloads/Media/ManagedJSRuntime.swift", "apps/apple/Shared/Downloads/Media/MediaToolsInstaller.swift",
+            "apps/apple/macOS/Chrome/ToolbarExtras.swift")
+UI_DIRS = ("apps/apple/macOS/Settings/", "apps/apple/macOS/Downloads/")
+NAME = re.compile(r"yt-dlp|ytdlp|ffmpeg|ffprobe|\bdeno\b", re.I)
+LITERAL = re.compile(r'"(?:[^"\\\n]|\\.)*"')
+# strings the app compares program output with (not shown to anyone)
+OUTPUT_COMPARISONS = ('contains("ffmpeg version', 'contains("ffprobe version')
+
+
+def ui_name_leaks():
+    """The programs' own names are never shown in Setup, Settings or Downloads (the licence notices and Acknowledgements are the only places that name them)."""
+    out = []
+    files = [f for f in tracked() if f in UI_FILES or f.startswith(UI_DIRS)]
+    for rel in files:
+        if not rel.endswith(".swift"):
+            continue
+        for n, line in enumerate(read(rel).splitlines(), 1):
+            code = line.strip()
+            if code.startswith("//") or "accessibilityIdentifier" in code or any(k in code for k in OUTPUT_COMPARISONS):
+                continue
+            code = re.sub(r"\s//.*$", "", code)
+            for lit in LITERAL.findall(code):
+                body = lit[1:-1]
+                if NAME.search(body) and (" " in body):          # a sentence; a bare identifier such as "ffmpeg" is internal
+                    out.append(f"{rel}:{n}: a tool name in text people can see: {body[:90]}")
+    return out
+
+
 def check(root_files=None):
     problems = []
     # 1. the record exists, is final, and is discoverable
@@ -80,6 +109,7 @@ def check(root_files=None):
     i_rel, i_app = pub.find("gh release"), pub.find("appcast")
     if i_rel < 0 or i_app < 0 or not any(pub.find(k) > i_rel for k in ("appcast.xml", "generate_appcast", "git push")):
         problems.append("scripts/publish-release.sh must publish and verify the GitHub release before updating the appcast")
+    problems.extend(ui_name_leaks())
     return problems
 
 

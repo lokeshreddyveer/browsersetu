@@ -97,6 +97,8 @@ enum LinkRoute: Equatable {
     case download(URL)
     /// The preview of a stream playlist (Add Download's second step): it reads the playlist only after the person asks, and fetches no media until they choose Download.
     case mediaPreview(URL)
+    /// A video provider's watch page, reel or short: not a file. It opens the video sheet (what can be saved, and the offer to install a missing tool); fetching it as a file would save its HTML.
+    case videoPage(URL)
     case refused(String)
 }
 
@@ -116,6 +118,7 @@ enum LinkRouter {
             return .mediaPreview(url)
         case .httpResource, .webpage, .torrentURL:
             guard let url = URL(string: link.original), DownloadSchedule.canSchedule(url) else { return .refused("That web address cannot be downloaded.") }
+            if link.kind != .torrentURL, let m = ProviderRecognizer.recognize(url), m.mediaID != nil, [.video, .short, .reel].contains(m.kind), !m.isEmbed { return .videoPage(url) }
             return .download(url)
         case .unsupported(let why), .invalid(let why): return .refused(why)
         }
@@ -141,7 +144,7 @@ extension LinkGrabberStore {
                 // Typed or pasted by the person is theirs; anything that arrived from a page, the clipboard or a crawl keeps the page-derived limits however it was approved.
                 let origin: DownloadRequestOrigin = link.provenance == .pasted ? .user : .page
                 if coordinator.scheduleDownload(url: url, at: Date(), origin: origin) != nil { out.started += 1; done.insert(link.id) } else { out.refused += 1 }
-            case .preview, .previewLocalTorrent, .mediaPreview:
+            case .preview, .previewLocalTorrent, .mediaPreview, .videoPage:
                 // A private collection never opens a preview: the preview belongs to the ordinary profile's download list.
                 if isPrivate { out.refused += 1; continue }
                 if out.previewed == nil { out.previewed = link.id; openPreview(LinkRouter.route(link)); done.insert(link.id) }

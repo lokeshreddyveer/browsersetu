@@ -550,6 +550,6 @@ struct ProcessingToolOffer: View {
         .confirmationDialog(store.phase.isFailed ? "Try installing again?" : "Install the media processing tool?", isPresented: $confirm) {
             Button("Download and Install\(store.sizeSummary.map { " (\($0))" } ?? "")") { store.install() }
             Button("Not Now", role: .cancel) {}
-        } message: { Text("Browser Setu downloads FFmpeg from its release page, checks it against a fingerprint built into this app, and keeps it in its own folder. It works only on files on this Mac. No administrator password is needed.") }
+        } message: { Text("Browser Setu downloads the media processing tool from its release page, checks it against a fingerprint built into this app, and keeps it in its own folder. It works only on files on this Mac. No administrator password is needed.") }
     }
 }

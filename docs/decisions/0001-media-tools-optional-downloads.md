@@ -13,6 +13,7 @@ Status: **ACCEPTED AND FINAL.** Decided by the owner, 2026-11-10. This record ta
 8. **Updates preserve user data**: profiles, downloads, settings, Keychain and browser data. No clean uninstall or reset unless the owner explicitly asks. A new install plays the opening scene and then setup; an update plays the opening scene and shows What's new, never setup.
 9. **Release order**: build, sign, notarize, staple, verify, publish the GitHub release, verify it by downloading it back, and only then update the live Sparkle appcast.
 10. **Bundled-versus-optional is not to be revisited** unless the owner explicitly requests a change.
+11. **The programs' own names are never shown in Setup, Settings or Downloads.** The app calls them "Video download tool" and "Media processing tool" (`MediaToolLabel`). Only the licence notices, Acknowledgements and the hosted release pages name them, because the licences require it. `scripts/check-architecture.py` fails if a sentence in those screens names them.
 
 ## Rules that follow
 - A tool-version upgrade replaces package details (version, hashes, URLs) only. It never moves a tool into the app.
@@ -24,3 +25,4 @@ It is not the place for version numbers, hashes or procedures. Those are in `doc
 
 ## History
 - 2026-11-10: accepted (optional downloads; native JavaScriptCore helper bundled).
+- 2026-11-11: decision 11 added at the owner's explicit request (no tool names in Setup, Settings or Downloads).

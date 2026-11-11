@@ -1,8 +1,8 @@
 import Foundation
 import WebKit
 
-/// "Collect Download Links from This Page": runs once, when asked, on the page that is open. It reads the address of each link (the `href` of an `<a>`) and nothing else: no form
-/// values, no text, no passwords, no other part of the page. It runs in the browser's own script world, so the page cannot see or change it, and it is not installed in any page.
+/// "Collect Download Links from This Page": runs once, when asked, on the page that is open. It reads the address of each link (the `href` of an `<a>`) and the link's own `title` or `aria-label` attribute (at most 140 characters, so a list of videos can be told apart): no form
+/// values, no page text, no passwords, no other part of the page. It runs in the browser's own script world, so the page cannot see or change it, and it is not installed in any page.
 @MainActor
 enum LinkPageExtractor {
     static let maxElements = 5000
@@ -24,13 +24,15 @@ enum LinkPageExtractor {
       const proto = h.slice(0, colon + 1).toLowerCase();
       if (!ok.includes(proto) || seen.has(h)) continue;
       seen.add(h);
-      found.push({ href: h, dl: a.hasAttribute('download') });
+      // The link's own title or label (an attribute the page wrote for it, never the page's text), so two video cards are told apart.
+      let t = ''; try { t = (a.getAttribute('title') || a.getAttribute('aria-label') || '').replace(/\\s+/g, ' ').trim().slice(0, 140); } catch (e) {}
+      found.push({ href: h, dl: a.hasAttribute('download'), t: t });
       if (found.length >= maxResults) { cut = true; break; }
     }
     return { links: found, cut: cut };
     """
 
-    struct Found: Equatable { var href: String; var marked: Bool }
+    struct Found: Equatable { var href: String; var marked: Bool; var label: String = "" }
     struct Result: Equatable { var links: [Found]; var truncated: Bool }
 
     /// The raw addresses on the page. Cancelling the surrounding task stops the wait; the page script itself is bounded and short.
@@ -38,7 +40,7 @@ enum LinkPageExtractor {
         let answer = try? await webView.callAsyncJavaScript(script, arguments: ["maxElements": maxElements, "maxResults": maxResults], contentWorld: .defaultClient) as? [String: Any]
         guard !Task.isCancelled, let answer else { return Result(links: [], truncated: false) }
         let raw = (answer["links"] as? [[String: Any]]) ?? []
-        let links = raw.compactMap { d -> Found? in (d["href"] as? String).map { Found(href: $0, marked: (d["dl"] as? Bool) ?? false) } }
+        let links = raw.compactMap { d -> Found? in (d["href"] as? String).map { Found(href: $0, marked: (d["dl"] as? Bool) ?? false, label: (d["t"] as? String) ?? "") } }
         return Result(links: Array(links.prefix(maxResults)), truncated: (answer["cut"] as? Bool) ?? false)
     }
 
