@@ -1,5 +1,7 @@
 # Downloads: capability-driven architecture, Stage A decision record
 
+> **SUPERSEDED where it discusses bundling yt-dlp or ffmpeg.** Those tools are optional downloads, never bundled: see `docs/decisions/0001-media-tools-optional-downloads.md`. The rest is kept as history.
+
 Status: **plan only**. No code was changed for this record. Source of truth: the repository as it stands today (about 427 uncommitted paths, nothing committed since the Downloads work began) plus `docs/media-downloads.md`. Everything marked *unverified* below was not tested or could not be confirmed from an authoritative page.
 
 ## 1. Current implementation inventory

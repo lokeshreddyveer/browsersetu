@@ -60,11 +60,11 @@ targets:
         copy:
           destination: frameworks
     postBuildScripts:
-      - name: Media tools manifests (templates only; binaries are embedded by scripts/embed-media-tools.sh)
+      - name: Media tools manifests (templates only; no tool binary is ever embedded, see docs/decisions/0001)
         basedOnDependencyAnalysis: false
         script: |
           set -e
-          # The ONE embedder is scripts/embed-media-tools.sh (release.sh runs it on the built app). This phase embeds no executables, so there is no second system with different rules.
+          # The ONE manifest writer is scripts/embed-media-manifests.sh (release.sh runs it on the built app); no tool executable is ever embedded (docs/decisions/0001). This phase embeds no executables, so there is no second system with different rules.
           # Builds that skip it (Debug, tests, App Store, iOS) carry the pinned templates only and show the tools as "not available in this build" (Debug also accepts the ad-hoc upstream fixture).
           DEST="$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH"
           mkdir -p "$DEST/Resources"
@@ -179,11 +179,11 @@ targets:
         copy:
           destination: frameworks
     postBuildScripts:
-      - name: Media tools manifests (templates only; binaries are embedded by scripts/embed-media-tools.sh)
+      - name: Media tools manifests (templates only; no tool binary is ever embedded, see docs/decisions/0001)
         basedOnDependencyAnalysis: false
         script: |
           set -e
-          # The ONE embedder is scripts/embed-media-tools.sh (release.sh runs it on the built app). This phase embeds no executables, so there is no second system with different rules.
+          # The ONE manifest writer is scripts/embed-media-manifests.sh (release.sh runs it on the built app); no tool executable is ever embedded (docs/decisions/0001). This phase embeds no executables, so there is no second system with different rules.
           # Builds that skip it (Debug, tests, App Store, iOS) carry the pinned templates only and show the tools as "not available in this build" (Debug also accepts the ad-hoc upstream fixture).
           DEST="$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH"
           mkdir -p "$DEST/Resources"

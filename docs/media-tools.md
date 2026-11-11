@@ -1,5 +1,7 @@
 # Media tools: optional yt-dlp and ffmpeg downloads, and the built-in JavaScript runner
 
+Architecture: **`docs/decisions/0001-media-tools-optional-downloads.md` is authoritative and final**; this file holds the implementation details (versions, manifests, hosting, verification) and never overrides it.
+
 Status date: 2026-11-10. This is the one description of how the Direct (DMG) build gets its media tools (optional downloads, never inside the DMG), how a release produces and hosts them, and what is still open.
 
 ## What ships, and where

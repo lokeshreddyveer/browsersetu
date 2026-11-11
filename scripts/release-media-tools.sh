@@ -1,7 +1,7 @@
 #!/bin/bash
 # Builds the publisher's media-tools packages (yt-dlp, ffmpeg + ffprobe): thin, sign every Mach-O inside-out with Developer ID, verify, zip, notarize, and keep the result in a persistent
 # content-addressed cache so an unchanged tool is NEVER signed or notarized twice. Manifests are not edited by hand: they are generated from the cached, verified package
-# (scripts/media_tools_cache.py manifest) when the app is assembled (scripts/embed-media-tools.sh).
+# (scripts/media_tools_cache.py manifest) when the app is assembled (scripts/embed-media-manifests.sh; no tool is embedded in the app).
 #
 #   scripts/release-media-tools.sh --ensure --identity <40-hex certificate SHA-1> --team TEAMID --notary-profile PROFILE [--tool yt-dlp|ffmpeg|all] [--cache DIR]
 #       Reuses the cached package if its key (version, architecture, Team, unsigned tree, packaging recipe) is unchanged AND it re-verifies from its bytes
