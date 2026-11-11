@@ -513,6 +513,7 @@ def helper_selftest(path):
 
 def check_js_provider(app, team, archs, ytdlp_version, problems, notes, ytdlp_tree=None):
     """True when the helper and plugin in the built app are exactly what BundledJSProvider.json pins and are signed and confined as required."""
+    app = os.path.abspath(app)      # a relative path (release.sh builds into build/release) would break once yt-dlp runs from another working directory
     res = os.path.join(app, "Contents", "Resources")
     mf = os.path.join(res, "BundledJSProvider.json")
     before = len(problems)
