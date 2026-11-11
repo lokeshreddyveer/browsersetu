@@ -508,6 +508,9 @@ final class BrowserModel: ObservableObject {
     /// The first-launch film (Shared/Intro) is on screen, covering the whole window; setup follows it. Only a brand-new install sees it.
     @Published var showIntro = false
     func finishIntro() { saveSetting("intro_done", "1"); showIntro = false }
+    /// After an update the film is followed by "What's new" (Shared/Intro/WhatsNew.swift), never by the setup questions.
+    @Published var showWhatsNew = false
+    func finishWhatsNew() { saveSetting("whatsnew_seen_version", AppRelease.current); showWhatsNew = false }
     /// Pop-ups: whether pages are stopped from opening windows without a click, and the sites that may.
     @Published var blockPopups = true { didSet { saveSetting("block_popups", blockPopups ? "1" : "0") } }
     @Published var popupAllowedHosts: Set<String> = [] { didSet { saveSetting("popup_allowed_hosts", popupAllowedHosts.sorted().joined(separator: ",")) } }

@@ -25,12 +25,15 @@ struct FirstLaunchGate<Content: View>: View {
         ZStack {
             if model.showIntro {
                 FirstLaunchIntro { model.finishIntro() }.transition(.opacity)
+            } else if model.showWhatsNew {
+                WhatsNewView { model.finishWhatsNew() }.transition(.opacity)
             } else {
                 content().transition(.opacity)
             }
         }
         .background(IntroPalette.ink)
         .animation(.easeInOut(duration: 0.7), value: model.showIntro)
+        .animation(.easeInOut(duration: 0.7), value: model.showWhatsNew)
     }
 }
 
