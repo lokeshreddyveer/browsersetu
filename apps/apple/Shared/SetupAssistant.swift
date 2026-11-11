@@ -412,10 +412,10 @@ struct SetupAssistantView: View {
         else { mediaTools.decline(); ffmpegTools.decline() }
     }
 
-    /// "yt-dlp 2026.10.26: finds the formats of videos on more sites. 54 MB download · about 124 MB on disk"
+    /// "Video download tool 2026.10.26: finds the formats of videos on more sites. 54 MB download · about 124 MB on disk"
     private func mediaToolLine(_ store: MediaToolsStore, _ what: String) -> String? {
         guard let m = store.manifest, m.isInstallable else { return nil }
-        let name = m.name == "ffmpeg" ? "FFmpeg" : m.name
+        let name = MediaToolLabel.name(for: m.name)
         return "• \(name) \(m.version): \(what). \(store.sizeSummary ?? "")"
     }
 

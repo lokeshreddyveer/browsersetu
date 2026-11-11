@@ -17,6 +17,13 @@ enum LaunchPlan: Equatable {
     }
 }
 
+/// The names people see for the optional tools. The programs' own names are never shown in Setup, Settings or Downloads (only in the licence notices and Acknowledgements, which must name them).
+enum MediaToolLabel {
+    static let video = "Video download tool"
+    static let processing = "Media processing tool"
+    static func name(for tool: String) -> String { tool == "ffmpeg" ? processing : video }
+}
+
 enum AppRelease {
     /// "0.4.1 (24)": the marketing version and the build, so a new build of the same version is also an update.
     static var current: String {
@@ -30,9 +37,9 @@ enum WhatsNewContent {
     static let title = "What's new in Browser Setu 0.4.1"
     struct Item: Identifiable, Equatable { let symbol: String; let heading: String; let text: String; var id: String { heading } }
     static let items: [Item] = [
-        Item(symbol: "arrow.down.circle", heading: "Video tools are your choice", text: "ffmpeg and yt-dlp are optional downloads now, not part of the app. Install them from Settings > Media whenever you want video and audio downloads. You see the size first and nothing downloads without your yes."),
+        Item(symbol: "arrow.down.circle", heading: "Video tools are your choice", text: "The video download and media processing tools are optional downloads now, not part of the app. Install them from Settings > Media whenever you want video and audio downloads. You see the size first and nothing downloads without your yes."),
         Item(symbol: "bolt.shield", heading: "A smaller app", text: "The download is about 33 MB, the same size as before the video tools were added."),
-        Item(symbol: "play.rectangle", heading: "YouTube works without Node or Deno", text: "A small built-in JavaScript runner, sandboxed and verified, answers YouTube's puzzles for yt-dlp."),
+        Item(symbol: "play.rectangle", heading: "YouTube works with nothing extra installed", text: "A small built-in JavaScript runner, sandboxed and verified, answers YouTube's puzzles for the video download tool."),
         Item(symbol: "checkmark.seal", heading: "Checked before it runs", text: "Every tool is checked (hash, developer signature, Apple notarization, processor type) before it is installed, and can be repaired or removed in Settings."),
         Item(symbol: "wrench.and.screwdriver", heading: "Fixes", text: "Explorer reads huge or hostile robots.txt files in bounded time, and a fresh profile starts quickly."),
     ]

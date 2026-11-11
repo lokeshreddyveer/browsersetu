@@ -69,7 +69,7 @@ enum BatchSubmitter {
                 guard inFlight.insert(flight).inserted else { result.alreadyDownloading += 1; result.handled.insert(link.id); continue }
                 reserved.append(flight)
                 eligible.append((link, url))
-            case .preview, .previewLocalTorrent, .mediaPreview: result.needsOwnApproval.append(link.name)
+            case .preview, .previewLocalTorrent, .mediaPreview, .videoPage: result.needsOwnApproval.append(link.name)
             case .refused(let why): result.refused.append("\(link.name): \(why)")
             }
         }

@@ -1325,6 +1325,12 @@ final class BrowserModel: ObservableObject {
         case .preview(let text): addDownloadPrefill = text; addDownloadPrefillOrigin = .page; ensureDownloadsShown()
         case .previewLocalTorrent(let url): pendingTorrentFile = url; ensureDownloadsShown()
         case .mediaPreview(let url): addDownloadPrefill = url.absoluteString; addDownloadPrefillOrigin = .page; ensureDownloadsShown()
+        case .videoPage(let url):
+            #if os(macOS)
+            openVideoSheet(forPage: url, isPrivate: active?.leavesNoTrace ?? false)
+            #else
+            addDownloadPrefill = url.absoluteString; addDownloadPrefillOrigin = .page; ensureDownloadsShown()
+            #endif
         case .download, .refused: break
         }
     }

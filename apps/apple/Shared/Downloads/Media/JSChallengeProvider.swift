@@ -36,7 +36,7 @@ enum JSChallengeProvider {
             case .manifestInvalid: "its description in the app is not valid"
             case .appHasNoTeamID: "this copy of the app is not signed by a developer team"
             case .teamMismatch: "it was signed by a different team than this app"
-            case .ytDlpMismatch: "it was checked for a different yt-dlp release than this app carries"
+            case .ytDlpMismatch: "it was checked for a different video tool release than this app carries"
             case .pathsOutsideTheApp: "its description points outside the app"
             case .helperMissing: "the helper is missing or cannot run"
             case .helperChanged: "the helper no longer matches what was shipped"

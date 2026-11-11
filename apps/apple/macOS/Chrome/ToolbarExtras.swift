@@ -254,7 +254,10 @@ struct ResourcePopover: View {
 
     private func statusText(_ r: DetectedResource) -> String {
         if case .notAFile(let why) = r.availability { return why }
-        if let p = r.provider { return "\(p.displayName) · not resolved yet" }
+        if let p = r.provider {
+            let id = URL(string: r.url).flatMap { ProviderRecognizer.recognize($0)?.mediaID }.map { " · " + String($0.prefix(14)) } ?? ""
+            return "\(p.displayName) · not resolved yet\(id)"
+        }
         if r.isManifest { return "Stream playlist · qualities are read first" }
         return [r.ext.isEmpty ? nil : r.ext.uppercased(), r.sizeText, r.host, r.confidence == .low ? "uncertain" : nil].compactMap { $0 }.joined(separator: " · ")
     }
