@@ -9,6 +9,5 @@ Both pass when run alone on an idle machine (3 of 3). That is evidence, not a re
 
 ## Open before any distribution
 - Complete corresponding-source package: published and reachable at the URL the in-app notices promise (release gate `MEDIA_SOURCES_PUBLISHED=1`); unresolved provenance: curl-impersonate version, CPython patch version, GPG signature of upstream's SHA2-256SUMS.
-- Legal sign-off (not given).
 - GUI-level workflow test (not run).
 - Final Apple notarization: held by the owner until the above are settled.

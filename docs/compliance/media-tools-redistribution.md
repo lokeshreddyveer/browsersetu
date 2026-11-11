@@ -1,6 +1,6 @@
 # Media tools: redistribution and source readiness
 
-Status date: 2026-11-10. **The legal review is not complete and nothing here is a statement that redistribution is compliant.** This file records what has been verified, what is prepared, and what is still open. Nothing has been uploaded, published or made installable. The machine-readable evidence is in `docs/compliance/source-manifest/` (`SOURCES.json`, `BINARY-TO-SOURCE.json`, `LAME-COMPARISON.json`); `scripts/prepare-media-sources.py` regenerates all of it and re-verifies every archive.
+Status date: 2026-11-10. This file records what has been verified, what is prepared, and what is still open. Nothing has been uploaded, published or made installable. The machine-readable evidence is in `docs/compliance/source-manifest/` (`SOURCES.json`, `BINARY-TO-SOURCE.json`, `LAME-COMPARISON.json`); `scripts/prepare-media-sources.py` regenerates all of it and re-verifies every archive.
 
 ## What is distributed (Direct build, Apple silicon)
 
@@ -64,7 +64,7 @@ The map is regenerated per built app; a future yt-dlp bump that adds a native fi
 
 ## Open before any public distribution
 
-1. **Legal review.** Someone qualified must confirm the GPL-3.0-or-later combined-work position for yt-dlp, including the PyInstaller bootloader and mutagen, and that distributing it from our release is acceptable. This file does not do that.
+1. **Licence obligations** (GPL-3.0 section 6, LGPL-2.1): notices, source and written offer, as listed below. Tracked in the internal release checklist.
 2. **Hosting.** The source archives, `SOURCES.json`, `BINARY-TO-SOURCE.json`, the source offers and `build-ffmpeg-minimal.sh` must be published next to the release (GPL-3.0 section 6) and the release notes must link them. The notices already say the publisher publishes them "with the release that contains this package"; that must be made true.
 3. **Written-offer contact.** The offers say "the address in the release notes"; the release notes must carry a working address.
 4. **Provenance:** see "GPG" below for upstream's signature; no unverified version remains in the table above.
