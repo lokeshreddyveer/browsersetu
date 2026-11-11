@@ -92,6 +92,9 @@ else
 fi
 rm -rf "$DIST" "$DERIVED"; mkdir -p "$DIST"
 
+# The permanent architecture decision (docs/decisions/0001): documents, manifests, build files and scripts must not contradict it.
+python3 -I scripts/check-architecture.py || fail "the repository contradicts docs/decisions/0001-media-tools-optional-downloads.md (see above)."
+
 # The signed + notarized media-tool packages come first: reused from the cache when unchanged and still valid, otherwise built, signed, notarized and cached. Fails the release before any app build.
 echo "▸ Media tools: ensuring signed + notarized packages (yt-dlp, ffmpeg)"
 scripts/release-media-tools.sh --ensure --identity "$SIGN_IDENTITY" --team "$TEAM_ID" --notary-profile "$NOTARY_PROFILE" --tool all --online || fail "the media-tool packages are not ready (see above)."

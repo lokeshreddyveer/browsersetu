@@ -10,7 +10,7 @@ Three different things are kept apart, and the result says which one happened:
 | **Remux** (change container) | Puts the same encoded tracks in another container. No decoding | Only after the output was read back and its codecs matched the source's |
 | **Convert / exact trim / WAV** | Decodes and encodes again | Never |
 
-A request the system cannot do is **refused with the reason**; it is never quietly done another way. No FFmpeg or other library is bundled: everything uses AVFoundation, Quick Look and the system's own encoders.
+A request the system cannot do is **refused with the reason**; it is never quietly done another way. No FFmpeg or other library is bundled: everything uses AVFoundation, Quick Look and the system's own encoders. (The separate, optional ffmpeg download is described in `docs/decisions/0001-media-tools-optional-downloads.md`.)
 
 ## Preview
 
