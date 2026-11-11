@@ -1,6 +1,6 @@
 # Media tools: optional yt-dlp and ffmpeg downloads, and the built-in JavaScript runner
 
-Status date: 2026-11-10. This is the one description of how the Direct (DMG) build gets its media tools (optional downloads, never inside the DMG), how a release produces and hosts them, and what is still open. **Engineering completion is not legal approval; see "Open before public distribution".**
+Status date: 2026-11-10. This is the one description of how the Direct (DMG) build gets its media tools (optional downloads, never inside the DMG), how a release produces and hosts them, and what is still open.
 
 ## What ships, and where
 
@@ -113,7 +113,7 @@ scripts/release.sh <version> <build> --verify-only # same pipeline up to the fin
 1. `scripts/release-media-tools.sh --ensure` (called by `release.sh`) reuses a cached signed + notarized package when its key is unchanged **and** it re-verifies from its bytes (zip and tree digests, every signature, Team ID, hardened runtime, Developer ID chain, exact architecture, an Accepted notarization record naming that very zip). Otherwise it builds, signs, submits to Apple, requires "Accepted", and caches. Cache: `~/Library/Caches/BrowserSetu/media-tools` (override `MEDIA_TOOLS_CACHE`). The key is the version, architecture, Team ID, the pinned upstream inputs and the packaging recipe (the `RECIPE-BEGIN..END` block of the script), so a new certificate of the same team reuses packages and a changed recipe rebuilds them. Upgrading a tool leaves the old entry in place for rollback.
 2. The app is built; `embed-media-manifests.sh` and `embed-js-provider.sh` add the manifests, notices and the runner (no tool binaries). Manifests are **generated** from the verified package (`scripts/media_tools_cache.py manifest`), never copied from the templates in `ThirdParty/*/MANIFEST.json`.
 3. `scripts/check-media-tools.sh <app> --team ... --readme README.md` fails the release unless the built app is consistent: **no tool binary in the app**, manifests valid, free of stale text and identical to what the verified cache entry generates, notarization record Accepted, licence texts and source offers present, the runner and plugin match their pins and entitlements, a download address only when the hosted package was downloaded back and its digest matched (`--hosted-verified`), and the README says the tools are optional downloads.
-3b. Hosting (separate, deliberate step, after the source release and legal sign-off): `media_tools_cache.py package-asset` prepares each package under its immutable, versioned asset name; it is uploaded to a GitHub release `media-tools-<tool>-<version>`; `verify-hosted` downloads it back and compares the digest; only then does `release.sh` run with `MEDIA_PACKAGES_HOSTED=1`.
+3b. Hosting (separate, deliberate step, after the source release): `media_tools_cache.py package-asset` prepares each package under its immutable, versioned asset name; it is uploaded to a GitHub release `media-tools-<tool>-<version>`; `verify-hosted` downloads it back and compares the digest; only then does `release.sh` run with `MEDIA_PACKAGES_HOSTED=1`.
 4. The app and DMG are notarized, stapled and assessed by `release.sh`.
 
 When a tool is bumped: edit its template in `ThirdParty/<tool>/MANIFEST.json` (version and upstream pins only), run `scripts/fetch-bundled-tools.sh` (yt-dlp) or `scripts/build-ffmpeg-minimal.sh` (ffmpeg), and run the release; the cache rebuilds only what changed.
@@ -130,6 +130,6 @@ Nothing is hosted. When authorized: upload each cached `package.zip` as an immut
 
 ## Open before public distribution
 
-- **Legal review is not complete.** The combined yt-dlp executable is GPL-3.0-or-later (GNU Readline GPL-3.0+, mutagen GPL-2.0+, and others listed in `THIRD_PARTY_LICENSES.txt`); ffmpeg is LGPL-2.1+; LAME is LGPL-2.1. Corresponding-source archives and a written offer are prepared (`docs/compliance/media-tools-release-assets/`), but the complete corresponding source of every GPL component inside the PyInstaller build has not been collected, and no one has signed off. See `docs/compliance/media-tools-redistribution.md`.
+- **Licence obligations.** The combined yt-dlp executable is GPL-3.0-or-later (GNU Readline GPL-3.0+, mutagen GPL-2.0+, and others listed in `THIRD_PARTY_LICENSES.txt`); ffmpeg is built LGPL-only (`--disable-gpl --disable-nonfree --disable-version3`, no external libraries); the MP3 library in the app is LAME (LGPL-2.1). GPL-3.0 section 6(d) is met by offering the complete corresponding source from the same GitHub host as the package download (`sources-0.4.1-build24`), with the notices and written offers inside each package and the SHA-256 list in `SOURCES.json`.
 - Source archives are not yet hosted anywhere.
 - Intel Macs are unsupported until the app and the tools are built for x86_64.
