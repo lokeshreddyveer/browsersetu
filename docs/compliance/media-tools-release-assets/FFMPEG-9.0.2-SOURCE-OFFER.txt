@@ -15,7 +15,7 @@ Corresponding source (what you need to rebuild these programs)
   Source archive   https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz
   Size             12,040,788 bytes
   SHA-256          8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e
-  Build script     build-ffmpeg-minimal.sh (published next to this file; the exact script used)
+  Build script     build-ffmpeg-minimal.sh (the exact script used), published with the source archive at https://github.com/lokeshreddyveer/browsersetu/releases/tag/sources-0.4.1-build24
   Configure line   --arch=arm64 --cc=clang --extra-cflags='-mmacosx-version-min=13.0' --extra-ldflags='-mmacosx-version-min=13.0' --disable-everything --disable-autodetect --disable-gpl
                    --disable-nonfree --disable-version3 --disable-doc --disable-debug --disable-network --disable-ffplay --disable-avdevice --disable-swscale --enable-ffmpeg --enable-ffprobe
                    --enable-static --disable-shared --enable-pic --enable-protocol='file,pipe' --enable-demuxer='matroska,mov,ogg,mp3,flac,wav,aac,ac3,eac3,opus'
@@ -32,7 +32,7 @@ How to rebuild (and replace) the programs
      installed yourself (Settings > Media), so you are not tied to the copy we distribute.
 
 Written offer
-  If any of the above is unavailable to you, write to the address in the Browser Setu release notes and the corresponding source, the build script and these instructions will be provided to you for at least
+  If any of the above is unavailable to you, write to https://github.com/lokeshreddyveer/browsersetu/issues  and the corresponding source, the build script and these instructions will be provided to you for at least
   three years after this version was last distributed, for no more than the cost of copying.
 
 No warranty

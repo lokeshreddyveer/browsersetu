@@ -8,7 +8,7 @@ What this is
   combined executable is distributed under the GNU General Public License, version 3 or later. The full texts of the component licences are in the package (_internal/THIRD_PARTY_LICENSES.txt, and the per-package
   licence files under _internal) and in this Notices folder (YT-DLP-THIRD_PARTY_LICENSES.txt).
   Upstream's licence list is written for all of its platform builds and also names GNU Readline, libintl, libidn2, libunistring and the GCC runtime. We found none of those in the files of this macOS build (its
-  readline module links the macOS system library libedit; the compiled curl-impersonate library contains curl, BoringSSL and nghttp2). They are mentioned only so that nothing is hidden: the licence review is not finished.
+  readline module links the macOS system library libedit; the compiled curl-impersonate library contains curl, BoringSSL and nghttp2). They are mentioned so that nothing is hidden.
 
 Changes made by the publisher to the upstream release package (yt-dlp_macos.zip, sha256 20d98fa608998eff87d1d35a6e9fb65e4b874639a6cc89addc19da3becde3ef1)
   1. Architecture: the upstream universal (x86_64 + arm64) programs were thinned with lipo to arm64 only. Nothing was recompiled and no source was changed.
@@ -18,7 +18,7 @@ Changes made by the publisher to the upstream release package (yt-dlp_macos.zip,
   These are the only differences between this zip and the upstream release asset.
 
 Corresponding source
-  Browser Setu publishes the source of everything below with the release that contains this package, as a list of archives with their SHA-256 (SOURCES.json) and a file-by-file map from every program in this
+  Browser Setu publishes the source of everything below at https://github.com/lokeshreddyveer/browsersetu/releases/tag/sources-0.4.1-build24 (next to the package download), as a list of archives with their SHA-256 (SOURCES.json) and a file-by-file map from every program in this
   package to the source it was built from (BINARY-TO-SOURCE.json). Each archive was fetched from its official location and checked against an independent digest where one exists (the digest PyPI publishes for
   that release file, or the SHA2-256SUMS of the yt-dlp release); SOURCES.json says which.
   yt-dlp               https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.26/yt-dlp.tar.gz   (6,019,106 bytes, sha256 21f942d258d25cc4e60b4982a25c423460f0bebb835f38e6dfd1fcb140087f95,
@@ -37,7 +37,7 @@ Corresponding source
                        CPython 3.14.7 lists them, and they come from their own projects (see THIRD_PARTY_LICENSES.txt).
   Written offer        As THIRD_PARTY_LICENSES.txt says: if you cannot obtain source for a bundled component, the yt-dlp maintainers will provide it (maintainers@yt-dlp.org). The Browser Setu publisher also
                        offers, for at least three years after this version was last distributed and for no more than the cost of copying, the corresponding source of the GPL/LGPL components of this exact zip;
-                       ask at the address in the Browser Setu release notes.
+                       ask at https://github.com/lokeshreddyveer/browsersetu/issues .
 
 Your rights
   You may use, copy, modify and redistribute this software under the licences above. To run a modified version, build your own from the source above and use it: Browser Setu can be pointed at a program you
