@@ -35,6 +35,13 @@ else
   gh release create "$TAG" "${ASSETS[@]}" --repo "$REPO" --title "Browser Setu $VERSION" --notes "$NOTES"
 fi
 
+# The release is checked as a user would get it BEFORE the update feed offers it (docs/decisions/0001, rule 9): download the DMG back and compare it with the file that was notarized.
+echo "▸ Verifying the published release before the update feed changes"
+VERIFY="$(mktemp -d)"
+curl -fsSL --retry 3 -o "$VERIFY/dl.dmg" "https://github.com/$REPO/releases/download/$TAG/BrowserSetu-$VERSION.dmg" || { echo "✘ the published DMG cannot be downloaded; the update feed was NOT changed"; rm -rf "$VERIFY"; exit 1; }
+[ "$(shasum -a 256 < "$VERIFY/dl.dmg" | cut -d' ' -f1)" = "$(shasum -a 256 < "$DMG" | cut -d' ' -f1)" ] || { echo "✘ the published DMG is not the notarized file; the update feed was NOT changed"; rm -rf "$VERIFY"; exit 1; }
+xcrun stapler validate "$VERIFY/dl.dmg" >/dev/null && spctl -a -t open --context context:primary-signature "$VERIFY/dl.dmg" 2>&1 | grep -q accepted || { echo "✘ the downloaded DMG fails Gatekeeper; the update feed was NOT changed"; rm -rf "$VERIFY"; exit 1; }
+rm -rf "$VERIFY"
 echo "▸ Updating the update feed"
 URL="https://github.com/$REPO/releases/download/$TAG/BrowserSetu-$VERSION.dmg"
 python3 - appcast.xml "$VERSION" "$BUILD" "$URL" "$SIGN" "$NOTES" <<'PY'
