@@ -2,7 +2,33 @@
   "app": "Browser Setu.app",
   "files": 108,
   "unmapped": [],
-  "sourcesWithoutAnyRecord": [],
+  "sourcesWithoutAnyRecord": [
+    "boringssl",
+    "brotli",
+    "brotli-c",
+    "c-ares",
+    "cffi",
+    "charset-normalizer",
+    "curl",
+    "curl-impersonate",
+    "curl_cffi",
+    "ffmpeg",
+    "lame",
+    "mutagen",
+    "nghttp2",
+    "nghttp3",
+    "ngtcp2",
+    "openssl",
+    "pycryptodomex",
+    "pyinstaller",
+    "python",
+    "websockets",
+    "yt-dlp",
+    "yt-dlp-ejs",
+    "yt-dlp-git-tag",
+    "zlib",
+    "zstd"
+  ],
   "externalSources": {},
   "components": {
     "FFmpeg program": 2,
@@ -21,7 +47,7 @@
   "map": [
     {
       "path": "Resources/Tools/ffmpeg/ffmpeg",
-      "sha256": "62482bb271ac9483919519d1da6b0647bcf27c432151efaa4d6d65fca53d5f88",
+      "sha256": "18599975d0e3e77fea2d9dbb344deb3085acb498c849092d87f70e29277af976",
       "size": 3679136,
       "component": "FFmpeg program",
       "sources": [
@@ -31,7 +57,7 @@
     },
     {
       "path": "Resources/Tools/ffmpeg/ffprobe",
-      "sha256": "8ece5bd148c8968c889666622e5784bb65af85151e2b6dbf11395ff1da692760",
+      "sha256": "8ec3d0ac02d2447d92b132379332c9dc46885b311f6f6fa7eafba6d82ff6b6f3",
       "size": 3486848,
       "component": "FFmpeg program",
       "sources": [
@@ -41,7 +67,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Cipher/_ARC4.abi3.so",
-      "sha256": "2b36301d8ee4001d179537addc68a4890ca91ba4133f16c7a34bfb171ba6f923",
+      "sha256": "de7865217de59a0ea0b4d2e22d2617897f5351f0fbcb6d002b2f18f06798150a",
       "size": 68496,
       "component": "PyCryptodome extensions",
       "sources": [
@@ -51,7 +77,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Cipher/_Salsa20.abi3.so",
-      "sha256": "752e845886bcb6a13bc639e6229b2aedf25fc5bd928f81c550c85ff3ac08ad45",
+      "sha256": "e9dfa61933fbb70780c712f9c6a7b128755114209f748f21a71e19a8670074ea",
       "size": 68880,
       "component": "PyCryptodome extensions",
       "sources": [
@@ -61,7 +87,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Cipher/_chacha20.abi3.so",
-      "sha256": "e8d59782473779aedf5c381180ec35c2b0753fbea2f2a91c2df4bc34666c1ff8",
+      "sha256": "d493dde80d38c1a601bcfff85e19399aae72895ca5fe514d0787165d3be74857",
       "size": 68960,
       "component": "PyCryptodome extensions",
       "sources": [
@@ -71,7 +97,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Cipher/_pkcs1_decode.abi3.so",
-      "sha256": "2eb8b19b3155436f34178a9ca13c5a6697b132f4f868066a4c9a7971bd78e54d",
+      "sha256": "28f4c44cee84752bae7c35c7c79d7709212ea89aeb8d6f951ae0356b9bab62be",
       "size": 68544,
       "component": "PyCryptodome extensions",
       "sources": [
@@ -81,7 +107,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Cipher/_raw_aes.abi3.so",
-      "sha256": "b1daec3bc537d70d7d0acbefe209429f00936d47cf7eb5ff344fb967e5cc0dd9",
+      "sha256": "b079381d0d25b498fae65975f8909e9675342259ca43ea7a10fd47094c233748",
       "size": 85520,
       "component": "PyCryptodome extensions",
       "sources": [
@@ -91,7 +117,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Cipher/_raw_arc2.abi3.so",
-      "sha256": "d105c7a45a2b89791d536154cda485114fcc02cc9eff107f3eac2a4646933ffb",
+      "sha256": "74b8c17bf82641bde37d0cbeca62ebee6833feb091ec0c2b21d2cbf353def6a9",
       "size": 68832,
       "component": "PyCryptodome extensions",
       "sources": [
@@ -101,7 +127,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Cipher/_raw_blowfish.abi3.so",
-      "sha256": "b546d1b14361e527c5c4af2414ee71c5258d5c3defacb31a3c4b669e3815e1c9",
+      "sha256": "6522b893ccf9d76a237f787d2c673405d99635d8a22f2c925321fbc5cc62c202",
       "size": 68992,
       "component": "PyCryptodome extensions",
       "sources": [
@@ -111,7 +137,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Cipher/_raw_cast.abi3.so",
-      "sha256": "49f15f229dddd6e1ee1ac35364e5add6c65152c7b268be523c4397f7ce4057cb",
+      "sha256": "f02aa1e5ec6d37403f065039339096c56b977d9f5730ce55b0af8be94c01701c",
       "size": 69296,
       "component": "PyCryptodome extensions",
       "sources": [
@@ -121,7 +147,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Cipher/_raw_cbc.abi3.so",
-      "sha256": "af27f90405bbeca280075811b744e584da711bf76e6850a53127de65f15096f8",
+      "sha256": "b67cf9de7055dfc38738f88817662ec4df3dacc912f0196fa67320d6e490ea1c",
       "size": 68848,
       "component": "PyCryptodome extensions",
       "sources": [
@@ -131,7 +157,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Cipher/_raw_cfb.abi3.so",
-      "sha256": "543d5d606e38d61132dbfcf98fefcab2c20f1fee14094594563f59cf44d65afb",
+      "sha256": "bffa78f7568b81fc84a68492e3c8a36d329a326fe3f24e9b1bfdd1d65c702198",
       "size": 69088,
       "component": "PyCryptodome extensions",
       "sources": [
@@ -141,7 +167,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Cipher/_raw_ctr.abi3.so",
-      "sha256": "38dca6280231808ab94108ec7fc0d17ebc9b52d62410a2dc04eab3669ae10b54",
+      "sha256": "b4b194d83ad60766250bc27b3192a91f1ecf5f52763007148ad628a5099b58b8",
       "size": 69104,
       "component": "PyCryptodome extensions",
       "sources": [
@@ -151,7 +177,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Cipher/_raw_des.abi3.so",
-      "sha256": "ed8669500969015707bcc9aa9727b496e09239d6833f178942386d5268995ba2",
+      "sha256": "e2affd97accfcaaf4ff5eb69f145f85adc1c0db9ea07fedcce9fa535c74888c8",
       "size": 102304,
       "component": "PyCryptodome extensions",
       "sources": [
@@ -161,7 +187,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Cipher/_raw_des3.abi3.so",
-      "sha256": "714a77b0ce213977685326a2b1e9885b6fee1559981de489bae5b631b84c5d7b",
+      "sha256": "33094045c58d3fe1c83f9b5af2fac275f0671bec8e814169078f36c09483b6a9",
       "size": 102320,
       "component": "PyCryptodome extensions",
       "sources": [
@@ -171,7 +197,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Cipher/_raw_ecb.abi3.so",
-      "sha256": "7f44316a1f5916cc51d7f70dc59aa6a5198ea4d529bb4a414cf29ba93c70d2e4",
+      "sha256": "67cf84aa1370a6a61a3fbbd01985a248e268e8c06ebb6b382d599df1ed9f6232",
       "size": 35616,
       "component": "PyCryptodome extensions",
       "sources": [
@@ -181,7 +207,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Cipher/_raw_eksblowfish.abi3.so",
-      "sha256": "af1ecea27ddde184474f730c2209ceefdf4ecc4123e720fb534e9582d7ca6b6d",
+      "sha256": "26435da1542e75ca64534905e949c5525de7e164cd8f063bccb299890b8b9fad",
       "size": 69200,
       "component": "PyCryptodome extensions",
       "sources": [
@@ -191,7 +217,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Cipher/_raw_ocb.abi3.so",
-      "sha256": "43a265ffb3a890dfc9385631b052cda3dff58e8bdb9d939afba5bb54b3f2515d",
+      "sha256": "225ab0d26b8e86dad7733f6d8378f20fcc81259db1de2f8a12f520acf08d3eb1",
       "size": 69312,
       "component": "PyCryptodome extensions",
       "sources": [
@@ -201,7 +227,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Cipher/_raw_ofb.abi3.so",
-      "sha256": "0d348d93e82290ff0f96195b3c5830f15b5c7c8af4e8a208b53d9b54e5e82d64",
+      "sha256": "1ed59987ce716e44a2cef08d140be2232ad48342635dbfd6606a2a92ddac1cea",
       "size": 68800,
       "component": "PyCryptodome extensions",
       "sources": [
@@ -211,7 +237,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Hash/_BLAKE2b.abi3.so",
-      "sha256": "695f785f37fe30b46fe1861e47909fa8c8646ee0a7133f385b0e32891fd55fbd",
+      "sha256": "e5b7aca5c5b69c2c251644fb6b367a848fd7c53ce4b3216e0a4e0277ab848446",
       "size": 69200,
       "component": "PyCryptodome extensions",
       "sources": [
@@ -221,7 +247,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Hash/_BLAKE2s.abi3.so",
-      "sha256": "db7bd391d524fd2a16dce42229518094e03a519495f9df5cd1e33af9a50f6f51",
+      "sha256": "7d2d343c69e56454c8ed97dd3778c7a1913800237e4118400caeb5e2e8c1363f",
       "size": 69200,
       "component": "PyCryptodome extensions",
       "sources": [
@@ -231,7 +257,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Hash/_MD2.abi3.so",
-      "sha256": "1cfbae09d8936246212f51ff918c95b703f631118716a13c3b0ab96ea62c268a",
+      "sha256": "20fef8c0da712edc816dbb0997026acd3b2dfdc06628685d0b92a034c6b9553d",
       "size": 69104,
       "component": "PyCryptodome extensions",
       "sources": [
@@ -241,7 +267,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Hash/_MD4.abi3.so",
-      "sha256": "8af6305e3275fc963afa0b6112fc405075cb580914f45775916629bc8709f2b9",
+      "sha256": "0149c3c2185a343747c816985da4c7eaef3ddb3e56fcfd54d19842b6ec52564f",
       "size": 69120,
       "component": "PyCryptodome extensions",
       "sources": [
@@ -251,7 +277,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Hash/_MD5.abi3.so",
-      "sha256": "fad233c7c7198ed56cbde81b8e36b3460b3cf53cc863d119fe2c16dac9c4f6ac",
+      "sha256": "97a3efb09263b5c8c97d5fc041c0ac9eab735829de6e394e5d0be76d68e76a3a",
       "size": 69824,
       "component": "PyCryptodome extensions",
       "sources": [
@@ -261,7 +287,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Hash/_RIPEMD160.abi3.so",
-      "sha256": "1cdb9aa7bacb30003e3a1ad8ebe6c8a5ad44127bc4295fa2b09690cc414aeafc",
+      "sha256": "85cb65367e6a17bd3d74f71ad12324dc0f9c8982265ff2e8be40a54c94fa6f96",
       "size": 69072,
       "component": "PyCryptodome extensions",
       "sources": [
@@ -271,7 +297,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Hash/_SHA1.abi3.so",
-      "sha256": "467f474712f5a5e9dcfe118b95145b10f30690870b60387413c9d9e09f13a3cd",
+      "sha256": "10f83777dfe1f56d6062d7458a230c8150add85b0f527fdbeea419a20e19f594",
       "size": 69824,
       "component": "PyCryptodome extensions",
       "sources": [
@@ -281,7 +307,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Hash/_SHA224.abi3.so",
-      "sha256": "a672184078fbd627993dd0b1a061729ea148b7e87ac0c63d64595c0125da14c5",
+      "sha256": "76c668f272c461389c13ee18d024ae855541ec64a4ebfe89f737e2da14ae1ece",
       "size": 69840,
       "component": "PyCryptodome extensions",
       "sources": [
@@ -291,7 +317,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Hash/_SHA256.abi3.so",
-      "sha256": "f1303c9e8bce092bc3d5e35f2651ac9e51e6643fd78e1bf5b84838ac61deb7a7",
+      "sha256": "3c8c096dbe3891bd82acd73184d43f7a31d72fd6c8674256ac36dcb7c6e895b1",
       "size": 69840,
       "component": "PyCryptodome extensions",
       "sources": [
@@ -301,7 +327,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Hash/_SHA384.abi3.so",
-      "sha256": "649cf06ff584d8be77ae5583813ca38ae1b2e22ecdcfdbe5a36afb702b08a0ca",
+      "sha256": "8bc33c798c5bf40bc7295f99ab39c6880ee4a4a1611645b044c578f54b719662",
       "size": 69840,
       "component": "PyCryptodome extensions",
       "sources": [
@@ -311,7 +337,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Hash/_SHA512.abi3.so",
-      "sha256": "e8aeaec5bbbf846427558d7512a330ac055391a2eb9b00ff1197416c912a15bb",
+      "sha256": "761ef3eda18ec155273bb20d32f58046112c6a8250a9123f1cfea0c881d25fe9",
       "size": 69856,
       "component": "PyCryptodome extensions",
       "sources": [
@@ -321,7 +347,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Hash/_ghash_portable.abi3.so",
-      "sha256": "6d127078e821be959800876bb169db7f67c89fc0db5c6deeae2dfad2dc68a160",
+      "sha256": "a757d61882f670bd36bab76461d0876e47458f817e9024892abedc3691a788c1",
       "size": 68720,
       "component": "PyCryptodome extensions",
       "sources": [
@@ -331,7 +357,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Hash/_keccak.abi3.so",
-      "sha256": "9587902dde2dfa69b6a0a331370d6fe20832785429d848ac6e514fd358efde01",
+      "sha256": "c46551d5e870e4c06150b5b2b79f80102631f92fd3bd65df4adbcdd9f99c6d0b",
       "size": 69888,
       "component": "PyCryptodome extensions",
       "sources": [
@@ -341,7 +367,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Hash/_poly1305.abi3.so",
-      "sha256": "da42d93703a792620316decae4bc70e43ff30aab5108e1b6f6dd6ffd4b02d168",
+      "sha256": "f42a0ba15403acf1716d0daa3083ccb788b5114cd66a9cc0a6b8f4cdf26d3207",
       "size": 69424,
       "component": "PyCryptodome extensions",
       "sources": [
@@ -351,7 +377,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Math/_modexp.abi3.so",
-      "sha256": "385d5576778afa62094d3096ba447f8b81248d6689f2b182e9f4f8264211fa6f",
+      "sha256": "acfdf314f3add1f6ce316cefd3b043021717158a14e964e5ca046ee849c937f1",
       "size": 92096,
       "component": "PyCryptodome extensions",
       "sources": [
@@ -361,7 +387,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Protocol/_scrypt.abi3.so",
-      "sha256": "5c95c3b4a47186395dca4c90f671b12b300e12f627bf57a851a6252217e041e6",
+      "sha256": "58890c0349022900659202b02d721cce3cc567a1dfae01c679098fc1b726d21f",
       "size": 68480,
       "component": "PyCryptodome extensions",
       "sources": [
@@ -371,7 +397,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/PublicKey/_curve25519.abi3.so",
-      "sha256": "8e3f437fe533db05ac746e3ab689d56a4699e6850b6b614aa5cfddad75b4481f",
+      "sha256": "9909cf9b53547f0f00e2fa2d93ea751878a7f40b187ce046713b4640124bb488",
       "size": 70640,
       "component": "PyCryptodome extensions",
       "sources": [
@@ -381,7 +407,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/PublicKey/_curve448.abi3.so",
-      "sha256": "4c87fa224dfa60cd1a1e9e075df12a7339cb3154176ecd62407adbed2437ad47",
+      "sha256": "ba67ea07b27d0abd49f93d7ba77ce875cde206655d52f42eb779882bf4d927d7",
       "size": 92928,
       "component": "PyCryptodome extensions",
       "sources": [
@@ -391,7 +417,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/PublicKey/_ec_ws.abi3.so",
-      "sha256": "5eb2875abcdb43baf500d2e56d00220e7c010eb105a4ff619b0ffc5659401060",
+      "sha256": "6b6026b5f17678ea0e0f32154b1760ecf96f33ef0657d59abe5f0abdddaf69fa",
       "size": 752928,
       "component": "PyCryptodome extensions",
       "sources": [
@@ -401,7 +427,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/PublicKey/_ed25519.abi3.so",
-      "sha256": "896d6750e077f82969211cc989252af0254d3d4d7c0d6ca50487e479df2df8b4",
+      "sha256": "fdb48b101e9644b268b6b20c6a4fd1fc6aeddfc4369ff91f72cf12ce2244f1ab",
       "size": 71376,
       "component": "PyCryptodome extensions",
       "sources": [
@@ -411,7 +437,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/PublicKey/_ed448.abi3.so",
-      "sha256": "756c34630d2cc8ee4448734c2573f5e4f4ed229d33d0f72d255ebb8afd780be9",
+      "sha256": "477ecb0be0940af02fbe51fbd1f9615146e4a371470d5530e42f610eda61d5ad",
       "size": 93616,
       "component": "PyCryptodome extensions",
       "sources": [
@@ -421,7 +447,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Util/_cpuid_c.abi3.so",
-      "sha256": "678ad4bf3cee855c2571f31c95e0efb967f9064d2688a7d0689916e52b04430f",
+      "sha256": "1dbee6e6557067f36b7fbb2c1d0f56a4b1e6f97e6ca61460f80c6ce787616508",
       "size": 35376,
       "component": "PyCryptodome extensions",
       "sources": [
@@ -431,7 +457,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Cryptodome/Util/_strxor.abi3.so",
-      "sha256": "4e945a428e7e72a3f4c561f92617f0c9c0fa167abfb07489412eb3ff2c3c199c",
+      "sha256": "177c9d3f0e46930702ceac3beccfd95ae2172527d0db268199397211ac233a9a",
       "size": 35344,
       "component": "PyCryptodome extensions",
       "sources": [
@@ -441,7 +467,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Python",
-      "sha256": "20bec5af862e78bcb61ac23e19ed74505d350abf9082a3a97f7190357511a8a0",
+      "sha256": "d05223b2e19f5cf41e87c64fb64e06f6eb7e8f648f2bff5e8c431a00687033e7",
       "size": 7162144,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -451,7 +477,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/Python.framework/Versions/3.14/Python",
-      "sha256": "e95e80bce1e5196db010b9de683329f62eceba69b056baa8d1cf29fdda2e6187",
+      "sha256": "56f825484dfbcfdb47e5f5d3951e5a3bb9caf1cc94bf9b94932eac42aa916185",
       "size": 7162208,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -461,7 +487,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/_brotli.cpython-314-darwin.so",
-      "sha256": "749c3762c29c686d8b7f7bbf8eeaf830322f67bce3bbb3b3117651100237cc9b",
+      "sha256": "286fa3d75dee7844aeb1e06ff28909e519b44dd0c01a59ebaa63debb7726cfa8",
       "size": 949920,
       "component": "Brotli Python binding",
       "sources": [
@@ -471,7 +497,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/_cffi_backend.cpython-314-darwin.so",
-      "sha256": "8b85bea93ba7c55435aa4cd0c3174e56a69349c05d6da7b37346da7f54cf0694",
+      "sha256": "0474db3cfcfd99df3478001f02002576e20d8046c8da65420dacb1812ddbce11",
       "size": 246432,
       "component": "cffi",
       "sources": [
@@ -481,7 +507,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/charset_normalizer/cd.cpython-314-darwin.so",
-      "sha256": "978d4e7fc1d6250c206c74578e549d830d9ea01e3183ad82eef779e260837bda",
+      "sha256": "8b10e41a0f025fbbe69a65b825895c8b6293d53e138290a09b067b3485a6c35f",
       "size": 185376,
       "component": "charset-normalizer extensions",
       "sources": [
@@ -491,7 +517,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/charset_normalizer/md.cpython-314-darwin.so",
-      "sha256": "c7b19e91ad101723bc4dbb138892b8a704295baca376ef5fde1688f673c09215",
+      "sha256": "d013c5e34824f59c53efc071f73e72ebd9e8d7af12f1145c8dbcd1aecde22da5",
       "size": 306752,
       "component": "charset-normalizer extensions",
       "sources": [
@@ -501,7 +527,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/curl_cffi/_wrapper.abi3.so",
-      "sha256": "d875b623b9842af808d8075938d8809512829bd69dabe019c95feb479d156165",
+      "sha256": "08938a594290e7b5d3c5eb7dfb23391a40f5400f56ae9fffb8fc2d81b65ed615",
       "size": 6753072,
       "component": "curl_cffi wrapper (statically contains curl-impersonate, curl, BoringSSL, nghttp2)",
       "sources": [
@@ -521,7 +547,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/libcrypto.3.dylib",
-      "sha256": "6faee28df743117916b06fa8869c39e5d5db045cf93af7a3c96f409473402281",
+      "sha256": "e1898ee8281f4ccb908fe6a12583069d95b0860cdb8ca7c1e349923fc54c0c13",
       "size": 4956320,
       "component": "OpenSSL 3",
       "sources": [
@@ -531,7 +557,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/libssl.3.dylib",
-      "sha256": "373b4bf1d5f190371adbed1c9acb215d58ef326ece5a531b980ce19813e25216",
+      "sha256": "d4a69f92099b28b508784df25e1873ee4a55d519e74b841032f3e2cdc574e3ec",
       "size": 1014304,
       "component": "OpenSSL 3",
       "sources": [
@@ -541,7 +567,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/libzstd.1.dylib",
-      "sha256": "5fa5295845d60218ee848b4d32d899858235736f0e9e817a8804762fc7c47410",
+      "sha256": "cbf7fba3e7e2f5a1b626b83a3cc09476f5dcac29329f267bdbf7a0f978d9e8f1",
       "size": 2032016,
       "component": "Zstandard",
       "sources": [
@@ -551,7 +577,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_asyncio.cpython-314-darwin.so",
-      "sha256": "ce99c0bd117015622852705cde9a1b5dc5dd0d9a1e19b752336d0242a9b6990d",
+      "sha256": "c680325dce26859c87d2b388e43b650ddf3dc7da75506a27c045327d0be1fdfc",
       "size": 131568,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -561,7 +587,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_bisect.cpython-314-darwin.so",
-      "sha256": "f7ce1ab50961ca34eb74342628836e03c91c4ab03458a163f8840fb34fad4374",
+      "sha256": "d30ae406d69f5189694e6669ed202c252e0a237f595e09a12df28085a964e04f",
       "size": 72192,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -571,7 +597,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_blake2.cpython-314-darwin.so",
-      "sha256": "cd24fc1af8432474e0cc60cc9d2ed7a26cae9cb333b6c17e634fba9b875406e9",
+      "sha256": "d7d2e7d8f511db28b709b81c5cc8ac8de935d6947aa64998f4488abdb2cea18e",
       "size": 91808,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -581,7 +607,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_bz2.cpython-314-darwin.so",
-      "sha256": "06512ba01ee5c7cd931b58e88d2a414c7027848d2f5c93e3ae3de467566ba1a6",
+      "sha256": "8f2b34af310a5eee157260e1250943bea4e04470c3d9d5519b781a7a1845918c",
       "size": 74880,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -591,7 +617,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_codecs_cn.cpython-314-darwin.so",
-      "sha256": "afa65d3a5c100240f7195cf55ba7ed7baf97d44c3344c3816be4d8bed5ba07f5",
+      "sha256": "3330d686092d1f29ff4044deda6c065c317def508b7179395988b5a84b61bd9b",
       "size": 187392,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -601,7 +627,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_codecs_hk.cpython-314-darwin.so",
-      "sha256": "2ac70d396181465655cefb957d8c4e4963244a150fa233c1bbcfe50868065c2c",
+      "sha256": "74897cefa986c09034fb6fde0b340af786272720c5f72111397032b01114759c",
       "size": 186960,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -611,7 +637,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_codecs_iso2022.cpython-314-darwin.so",
-      "sha256": "16e0de2b5c1882684b40518c465ba5f43aedddc4feb45bad7e3f616d37a33aeb",
+      "sha256": "c2bf8caf8f2c00c3ce6a5cdb1d759b304f5c667a946820187afc7aece168d251",
       "size": 76080,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -621,7 +647,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_codecs_jp.cpython-314-darwin.so",
-      "sha256": "78236b2c2bb8197f5c243e8ae13ab1380668c4c909af40371009471525449682",
+      "sha256": "790bfcab2c4cbb1332f119edc1578eb03352eee3d50b53e93804f7cb7f319d1f",
       "size": 303408,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -631,7 +657,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_codecs_kr.cpython-314-darwin.so",
-      "sha256": "97329073f6a9339a4ceb4b5d70981a44581c162f6b3df508e86bc96e5d9aa4f2",
+      "sha256": "244fe57d5244d222e3d360d905b18b316172c35b84147cfa28c15049f43a9218",
       "size": 170832,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -641,7 +667,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_codecs_tw.cpython-314-darwin.so",
-      "sha256": "0eae96553228a242859a7b882602c08985a2b68fd3f92b931c93abcb339dc9c3",
+      "sha256": "024db001f1fcc5d3bf6caf6e1e6020edf5629bbb35bbf907b753d2ea244cf93c",
       "size": 170000,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -651,7 +677,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_csv.cpython-314-darwin.so",
-      "sha256": "7257bfcde18f3bb00751a0c4181a85b586177106df6f7e588a4921dd20d0b66c",
+      "sha256": "7409312a8f7f50ef2282b27f3dd559a71dcf9001d7c742170fd4af79fd8c93f5",
       "size": 94464,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -661,7 +687,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_ctypes.cpython-314-darwin.so",
-      "sha256": "2c927a6ef3f3e8d540b1b34712dfbeb79e85eac1b99e6249bd38dec18ec369d7",
+      "sha256": "df79a822836b46ff51b4c7885af470821af78050d6a9b69cfd8d739db965f58c",
       "size": 203936,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -671,7 +697,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_decimal.cpython-314-darwin.so",
-      "sha256": "9e91d9fbe1f2382a52478dff8ca97f2faabc48adc3942c9700a30e9411203b49",
+      "sha256": "b828a659c1cd0b6dd21f42a1780dd4bcd1e6c310cfce069af498b14a8bd31fec",
       "size": 356960,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -681,7 +707,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_elementtree.cpython-314-darwin.so",
-      "sha256": "5ab50c253f7442dc2e8b97b44a7c92b44d7b3f4e3ece9dbcaaa69d6fb7da6782",
+      "sha256": "1a8020978e9441d0fb342e515fe861916fd278cdb3375a1f55a2ba71461c6942",
       "size": 126960,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -691,7 +717,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_hashlib.cpython-314-darwin.so",
-      "sha256": "ced0a1a803db26309a7c052dd4ab99bbcc42b7bcf26fa8520040f22185e42213",
+      "sha256": "30de62f1a7221c42d1d515191d41bec007c5cf66759f0f500cc79ba667bbbc69",
       "size": 104656,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -701,7 +727,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_heapq.cpython-314-darwin.so",
-      "sha256": "b53f80fe395fe82b0f6b20a785af0f3990917e6bebfbd3918505f49c93d95e42",
+      "sha256": "f26e8a2a5d333f0762814735b36fb3ebba57fc85e2dcc5dbe02427e638b3b354",
       "size": 71760,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -711,7 +737,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_hmac.cpython-314-darwin.so",
-      "sha256": "dcbbb144cc9986979045d6cadc398b51a11cdc80b55af75f8a12f43c1be87883",
+      "sha256": "01406d4a9e50929c269de05f35424a502ca94092a138ab9968b948813ece094d",
       "size": 153744,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -721,7 +747,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_interpqueues.cpython-314-darwin.so",
-      "sha256": "3febd34c57706e3813a9c4a8d185c5d5d9e4151fbd8549f6429014a4c9d9fea3",
+      "sha256": "f1ce3a9bf4642bcbde66127c8770f6cc1abad7b51919b8a405a2c137217f2971",
       "size": 79296,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -731,7 +757,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_interpreters.cpython-314-darwin.so",
-      "sha256": "2f6bdd6422805aee5e2c7238eff13e18f38f2be1420f9456509b4afd70de4d91",
+      "sha256": "bd20ca9e9580101b15157ad75d0cbdee1fb4fc7856694c058c437ba6496443ce",
       "size": 98688,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -741,7 +767,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_json.cpython-314-darwin.so",
-      "sha256": "cd80e61bcc21f1f6b774735f6e4ad25027ef6354e833b9d24633e0d4c289257e",
+      "sha256": "242a08722b33fc37f565063be20ee7c10d8f79f1e9a0461d05c73a2506e17a2b",
       "size": 93024,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -751,7 +777,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_lzma.cpython-314-darwin.so",
-      "sha256": "6cf2beaf1d9ca9d530c436fbfd2864918e85362f14a30289985a2f5190dedcea",
+      "sha256": "038d0049643b5b653e08d4bcf591bce7eddeff5fb21454914e1539b6f58559f9",
       "size": 274880,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -761,7 +787,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_md5.cpython-314-darwin.so",
-      "sha256": "c40ad4bc961824ab13d7a1eabd7fdd4dfa19e0493f8d9bf0d1e9863edb024068",
+      "sha256": "fb25d2f81f7be680c08b6e6e6cdde293c9a68a4887b197721964b7735c61ba72",
       "size": 73744,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -771,7 +797,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_multibytecodec.cpython-314-darwin.so",
-      "sha256": "c58e24ab1e9ed2e076b7621d14db7298442deba138150662e70d20f9e64ec9f8",
+      "sha256": "a0932f3d4d8624acec88873a9bb800390b9d8a3d911beb79f2ced81e501dad5c",
       "size": 101840,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -781,7 +807,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_multiprocessing.cpython-314-darwin.so",
-      "sha256": "c731a08e255993022f51cdbd97794aa68380b5531c04967f49a7a4660ccc78b7",
+      "sha256": "3544270a48e1bc0db22a75fc2007aaa322ac18cbfd735253f6860168ea3c4984",
       "size": 75840,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -791,7 +817,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_pickle.cpython-314-darwin.so",
-      "sha256": "8eb50d8443cb762a2293310f8e60b2399ba2de6392f019ded49a629cc90aa586",
+      "sha256": "6917d1a6a6ee603cdd2984290d388d1cb91cbd5301a6a2fa7b8f36ff784fb966",
       "size": 177984,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -801,7 +827,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_posixshmem.cpython-314-darwin.so",
-      "sha256": "b7ffa29bad10b3fd1cce540cecd94328ae2cbf05819343898df3054150bd4136",
+      "sha256": "617a0927d16e54143bf7c4a9298b137f4eaa89046ee4c4a6e871c7a4327b8dc0",
       "size": 70400,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -811,7 +837,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_posixsubprocess.cpython-314-darwin.so",
-      "sha256": "25d48215e96d300ab3264e8d3eda4c6a32e7a1091ff3af3a7260336d371de070",
+      "sha256": "e44219a80ab494d30a3fcd619f8c5b35a585c21cc1b8c8adc0d8fa4c6aeb1b74",
       "size": 73632,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -821,7 +847,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_queue.cpython-314-darwin.so",
-      "sha256": "f3e90414c40064d2aae8c621f75554a411bfd19b6fda0f53060ce88608ec9809",
+      "sha256": "6ca6028f4044f4ffec72da319baf158fb402f30afc6c84b25ad414bf884e3e00",
       "size": 74144,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -831,7 +857,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_random.cpython-314-darwin.so",
-      "sha256": "4d63af76d4b24d147d7c3ceac42a6589f47c5c79c72bf16878e97a46fd767fa7",
+      "sha256": "418117c49e8eb5fe5a38b32c7d8f4ab0adffd4a87a3d6152015204ba6ed67a37",
       "size": 73440,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -841,7 +867,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_scproxy.cpython-314-darwin.so",
-      "sha256": "be2b05c6732bac11c4effed3f4caec101b6541b59ff96f27169795fbedaf1ba2",
+      "sha256": "e62540f12a6b122f36bb5104031e66746776619b07021c4330acc2de346afd5c",
       "size": 71920,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -851,7 +877,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_sha1.cpython-314-darwin.so",
-      "sha256": "069a2b0f6e478dfb14d5747b7d4802f4571ccd1c254b94e8ed324e7004c67e3b",
+      "sha256": "4bdb88bdcf900ae0489702c078e24de156556e5f434faa4dd43d72e232bdbc11",
       "size": 73664,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -861,7 +887,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_sha2.cpython-314-darwin.so",
-      "sha256": "7f5af3a19d0a931f895b036971b70b6c7ae751fe8cdbfb368336b8b352148846",
+      "sha256": "f98477059af65111bdd1d17bc04ed6cfeeebbd270a467a7760f34561ab203053",
       "size": 92768,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -871,7 +897,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_sha3.cpython-314-darwin.so",
-      "sha256": "c3febe0d82575db6be980c5fe363c900492eb4cf1531b344d21eb46f33c3196d",
+      "sha256": "6a1d6a3a06e5e0815fb4601815fd8d79e6ed11d971f78d6efe18463104ec3b95",
       "size": 76688,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -881,7 +907,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_socket.cpython-314-darwin.so",
-      "sha256": "ed6b11c559d89147a6a1546d52128644db37c364d7447a27608328c7a38f536c",
+      "sha256": "58775519d4daba3949018f87a9aff754eacbd60cd9b906e590f680d635740cbe",
       "size": 142112,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -891,7 +917,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_sqlite3.cpython-314-darwin.so",
-      "sha256": "5d9394069d01ac8c866f5147456e9b55182a367e80e029d42b972151b4a71560",
+      "sha256": "bcd879bf079b9d8f2f172022ee2efbd19185b903b7c5d9627336776c7b2dd72b",
       "size": 1263056,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -901,7 +927,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_ssl.cpython-314-darwin.so",
-      "sha256": "110c7e9eb3488014ebbaca74068dc99dcf331f8108b255b8a39a8242b7e946f2",
+      "sha256": "c07b81ac1324c03ea14568f16e2e52e8658671d1c24d277f67084eccc6e7fc51",
       "size": 237984,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -911,7 +937,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_statistics.cpython-314-darwin.so",
-      "sha256": "eba86cef46a00c7d5ae84cb7d5d47dd3cbf8c5d7bb1e8ef399b63ad230e90faa",
+      "sha256": "9f6705c6cb05eba7da9a17c8a152159f35f1e1708825f1ea3bea16a92d3e2d06",
       "size": 69264,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -921,7 +947,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_struct.cpython-314-darwin.so",
-      "sha256": "b0b7d115924099d4ccab8b2884ad568e8f3243bf86a086c38320d9223925cd49",
+      "sha256": "1dfebbd6bc34f84dd63947d577dfc40c52c0df5aabcaf240bf4d845a94ae9188",
       "size": 104416,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -931,7 +957,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_uuid.cpython-314-darwin.so",
-      "sha256": "26d6ad40092cdd3092a610cd8f1b68cedecca959613be5458a9bd2e07dfc5e31",
+      "sha256": "200480491b32e7c489b14dcba7710af8a7fb45356083e4794a59c48eb5e9224f",
       "size": 69072,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -941,7 +967,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/_zstd.cpython-314-darwin.so",
-      "sha256": "090b1cd26a7001943d61d98bd79e10e6406f72f6c78d4b702966522191150bdf",
+      "sha256": "cb869e20c13b5f86827e3cd9b94db6b6d8a928c32191146e9fb62e0cb305a7aa",
       "size": 120848,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -951,7 +977,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/array.cpython-314-darwin.so",
-      "sha256": "bdd7caca85fcf8d1d7bffac71edacee8db5e6175e9639b6961d44f89555c9cd7",
+      "sha256": "14147ffe9e333cb88eb72721c652e287fab9c3b32780547c3626eeff933748dc",
       "size": 122192,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -961,7 +987,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/binascii.cpython-314-darwin.so",
-      "sha256": "08a1578cccdd297d50d86e0861030f30ea1c3f42153e2408e5c37d813a9c6160",
+      "sha256": "5c5986214db6b36780d04ba584dd3071ff08cd23560f913663fa96c1c7ca2fd6",
       "size": 74496,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -971,7 +997,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/fcntl.cpython-314-darwin.so",
-      "sha256": "c6defab43ffdab2cd690c02def43cb133c5a45b3915c9d9d25c10715a968f70f",
+      "sha256": "e8158ed43de6781d553d528aae48afe2905e38c3b7880a012ae0f0f9649284ab",
       "size": 72144,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -981,7 +1007,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/grp.cpython-314-darwin.so",
-      "sha256": "9d9f6d90be78d9f0e4bbb22da0eaa2456f770b509f463cd5d0e47912632109e7",
+      "sha256": "d36ee56aaf767a4bc36ec1bdde2d5e9a741b87d399e540ac69348b76d56dccef",
       "size": 72384,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -991,7 +1017,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/math.cpython-314-darwin.so",
-      "sha256": "b7ec93effc7b87f6d9b4b59384bc39a12beef37114ef8b0e13e21712e4d37409",
+      "sha256": "efccfe505cd628e30bd9a27f474e8a2d1b517ff859aa1d9e9911fca3e1060549",
       "size": 117360,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -1001,7 +1027,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/mmap.cpython-314-darwin.so",
-      "sha256": "a8aff7a75a6f10519438c764f8a38c21d411c02eb99e2fbb7cbe76c68983ff14",
+      "sha256": "8b226ca0b1732be3404a1431fe07c46f01b2fd2b2ee8e932072b66ff3c536091",
       "size": 77264,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -1011,7 +1037,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/pyexpat.cpython-314-darwin.so",
-      "sha256": "835105f91acca295218d3998a244469c0af9bedb547e85943ca0660f305cb910",
+      "sha256": "a361317416ea38423f350005e62d9f750cf7e86910d408f504b63349c2b0c8c4",
       "size": 253104,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -1021,7 +1047,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/readline.cpython-314-darwin.so",
-      "sha256": "fa585c195ad592c35e5079a6cafbf4a4bbf93cf707d78f92e84f878468494046",
+      "sha256": "0b3cc7a9e8118ccefa15ce251708fcf076933105e1dde0512423ac95690a7155",
       "size": 83168,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -1031,7 +1057,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/resource.cpython-314-darwin.so",
-      "sha256": "7950b78626e2a9d427cd3ee42438b96a86ab1d625839fde1989e0c6f6ae52105",
+      "sha256": "4ebc6ca90f3a7e238c1669b454311bbe144795c53b277a3620d9f77e8a441ccb",
       "size": 72720,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -1041,7 +1067,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/select.cpython-314-darwin.so",
-      "sha256": "66271d2943845ae842c5970eb2413a15e8dfe6a62155760f4dcf3986ab5ba5c4",
+      "sha256": "292b257910e64bde48857405033145e0b6b05fc4c7f53965d0af2d22ef886051",
       "size": 96128,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -1051,7 +1077,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/termios.cpython-314-darwin.so",
-      "sha256": "70a95556fad01dd90687c950cd11a6ce0f1f61b50b26bcacab7fc803642fba3c",
+      "sha256": "ec3399e7021e74afca4272e66aff8ef8bbd2652b11f01b84c79a132ab9078042",
       "size": 73936,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -1061,7 +1087,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/unicodedata.cpython-314-darwin.so",
-      "sha256": "0e172f6ddf3efab87a4651ee4a9b84cca9ce8df674fb915ed95f629248cc366a",
+      "sha256": "de35658ad66845a186e9c1a8b2185014f114d930366fa933c277ba79b42443f5",
       "size": 801088,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -1071,7 +1097,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/python3.14/lib-dynload/zlib.cpython-314-darwin.so",
-      "sha256": "27de2c94da6f7b52a4c690286f9d5980f1dae1a63cf9fc411cf1eef36d4f5c4f",
+      "sha256": "c5869b8550ef1ec5148e50e7ad20078baac723063d7d58939d95843b4377abd2",
       "size": 98992,
       "component": "CPython runtime and its extension modules",
       "sources": [
@@ -1081,7 +1107,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/_internal/websockets/speedups.cpython-314-darwin.so",
-      "sha256": "255105fa0f767e3b24b206a64dc1f36b79d8b80f582ccd1a4735a32165da15f4",
+      "sha256": "42cd0d5724778b4468208ad0643720d1814139140f334ca44312f028799c3f34",
       "size": 69376,
       "component": "websockets speedups",
       "sources": [
@@ -1091,7 +1117,7 @@
     },
     {
       "path": "Resources/Tools/yt-dlp/yt-dlp_macos",
-      "sha256": "c75358b7ed77a785f349b6e0f4b14812b9749995170c2b4f402135dbcf4096d9",
+      "sha256": "37103f7589781875a4f70f4c09755872ccbb69cc7cdc88a71aab200641a26886",
       "size": 10501792,
       "component": "yt-dlp executable (PyInstaller bootloader + archive of yt-dlp and its Python dependencies)",
       "sources": [
@@ -1105,8 +1131,8 @@
     },
     {
       "path": "Frameworks/libmp3lame.dylib",
-      "sha256": "c4103e3c7b77501a20e3f4f69f8d9e568af31a5dd186df36e82e9bc89e083ab4",
-      "size": 276048,
+      "sha256": "c20be51e542e65a6703da90679ad5973ddbc98cb7dfbf5873cea4dc8e8df1ee1",
+      "size": 276704,
       "component": "LAME MP3 encoder library",
       "sources": [
         "lame"

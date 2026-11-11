@@ -6,6 +6,9 @@ enum LaunchPlan: Equatable {
     case update              // film, then "What's new"
     case none                // straight to the browser
 
+    /// A profile that finished setup, or that already got past the opening film, is an existing install.
+    static func established(setupDone: Bool, introDone: Bool) -> Bool { setupDone || introDone }
+
     /// Pure, so it can be tested. `setupDone`: the person finished (or skipped) the setup questions once. `seenVersion`: the version whose "What's new" they were last shown.
     static func decide(setupDone: Bool, seenVersion: String?, current: String, forced: Bool, skipFilm: Bool, scripted: Bool, secondaryWindow: Bool) -> LaunchPlan {
         if secondaryWindow || scripted || forced || skipFilm { return .none }

@@ -89,7 +89,12 @@ if [ "$VERIFY_ONLY" = 1 ]; then
 else
   DERIVED="build/release"
   DIST="dist"
+  # A production build comes from ONE immutable source revision: a clean tree whose commit is already on the remote, so the tag, the metadata and the binary name the same code.
+  [ -z "$(git status --porcelain)" ] || fail "the working tree is not clean; commit (or discard) every change before a production build. A release must come from one exact commit."
+  git fetch -q origin 2>/dev/null || true
+  [ -n "$(git branch -r --contains HEAD 2>/dev/null)" ] || fail "commit $(git rev-parse --short HEAD) is not on the remote yet; push it first so the release's source is public and immutable."
 fi
+RELEASE_COMMIT="$(git rev-parse HEAD)"
 rm -rf "$DIST" "$DERIVED"; mkdir -p "$DIST"
 
 # The permanent architecture decision (docs/decisions/0001): documents, manifests, build files and scripts must not contradict it.
@@ -189,5 +194,15 @@ xcrun stapler validate "$DMG"
 spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG" 2>&1 | tail -2
 python3 scripts/generate-sbom.py "$DIST" --version "$VERSION" >/dev/null
 echo "▸ SBOM and build metadata written to $DIST"
+# Record exactly what was built from what: the commit (the tree was clean), the DMG's hash and size, next to the SBOM.
+[ "$(git rev-parse HEAD)" = "$RELEASE_COMMIT" ] && [ -z "$(git status --porcelain)" ] || fail "the source changed while the release was being built; the artifacts do not match one commit."
+python3 - "$DIST" "$DMG" "$RELEASE_COMMIT" <<'PY' || fail "the artifact hashes could not be recorded."
+import hashlib, json, os, sys
+dist, dmg, commit = sys.argv[1:4]
+p = os.path.join(dist, "build-metadata.json"); m = json.load(open(p))
+assert m.get("source_commit") == commit and m.get("source_dirty") is False, "build metadata does not describe a clean build of " + commit
+m["artifacts"] = {os.path.basename(dmg): {"sha256": hashlib.sha256(open(dmg, "rb").read()).hexdigest(), "bytes": os.path.getsize(dmg)}}
+json.dump(m, open(p, "w"), indent=2); open(p, "a").write("\n")
+PY
 echo "✔ $DMG is signed, notarized and stapled"
 shasum -a 256 "$DMG"

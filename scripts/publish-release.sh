@@ -24,6 +24,15 @@ SPARKLE_BIN="$(find build/release/SourcePackages apps/apple/build ~/Documents/ip
 SIGN="$("$SPARKLE_BIN/sign_update" --account browsersetu "$DMG")"        # sparkle:edSignature="…" length="…"
 TAG="v$VERSION"
 
+# The tag must name the commit the DMG was built from (recorded by release.sh), not whatever main is now.
+META=dist/build-metadata.json
+SRC_COMMIT="$(python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); assert m["source_dirty"] is False; print(m["source_commit"])' "$META" 2>/dev/null)" || { echo "✘ $META is missing or describes a dirty build; only a clean production build can be published"; exit 1; }
+python3 - "$META" "$DMG" <<'PY' || { echo "✘ the DMG does not match the hash recorded in $META"; exit 1; }
+import hashlib, json, os, sys
+m = json.load(open(sys.argv[1])); d = sys.argv[2]
+assert m["artifacts"][os.path.basename(d)]["sha256"] == hashlib.sha256(open(d, "rb").read()).hexdigest()
+PY
+git merge-base --is-ancestor "$SRC_COMMIT" origin/main || { echo "✘ the build commit $SRC_COMMIT is not on origin/main"; exit 1; }
 ASSETS=("$DMG"); [ -f dist/sbom.cdx.json ] && ASSETS+=(dist/sbom.cdx.json dist/build-metadata.json)
 if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
   # The same version again with a newer build: its files and notes are replaced; installed copies see the higher build number in the update feed.
@@ -32,7 +41,7 @@ if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
   gh release edit "$TAG" --repo "$REPO" --title "Browser Setu $VERSION" --notes "$NOTES"
 else
   echo "▸ Creating release $TAG"
-  gh release create "$TAG" "${ASSETS[@]}" --repo "$REPO" --title "Browser Setu $VERSION" --notes "$NOTES"
+  gh release create "$TAG" "${ASSETS[@]}" --repo "$REPO" --target "$SRC_COMMIT" --title "Browser Setu $VERSION" --notes "$NOTES"
 fi
 
 # The release is checked as a user would get it BEFORE the update feed offers it (docs/decisions/0001, rule 9): download the DMG back and compare it with the file that was notarized.

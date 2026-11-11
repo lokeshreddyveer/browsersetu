@@ -18,5 +18,11 @@ final class LaunchPlanTests: XCTestCase {
         XCTAssertEqual(plan(setupDone: true, seen: nil, skip: true), .none)
         XCTAssertEqual(plan(setupDone: true, seen: nil, forced: true), .none)
     }
+    func testAProfileThatSawTheFilmIsAnExistingInstall() {
+        XCTAssertTrue(LaunchPlan.established(setupDone: false, introDone: true))
+        XCTAssertTrue(LaunchPlan.established(setupDone: true, introDone: false))
+        XCTAssertFalse(LaunchPlan.established(setupDone: false, introDone: false))
+        XCTAssertEqual(plan(setupDone: LaunchPlan.established(setupDone: false, introDone: true), seen: nil), .update)
+    }
     func testWhatsNewListIsNotEmpty() { XCTAssertFalse(WhatsNewContent.items.isEmpty); XCTAssertTrue(WhatsNewContent.title.contains("0.4.1")) }
 }
