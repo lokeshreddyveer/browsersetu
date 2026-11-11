@@ -200,12 +200,14 @@ extension BrowserModel {
         let scripted = UserDefaults.standard.string(forKey: "UIState") != nil || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
         // `-BrowserSetuShowSetup YES` on the command line shows the questions once more without touching anything saved.
         let forced = UserDefaults.standard.bool(forKey: "BrowserSetuShowSetup")
-        showSetup = !isSecondary && !scripted && (forced || get("setup_done") != "1")
+        // A profile that finished setup, or that already got past the opening film, is an existing install: it is never asked the questions again.
+        let established = LaunchPlan.established(setupDone: get("setup_done") == "1", introDone: get("intro_done") == "1")
+        showSetup = !isSecondary && !scripted && (forced || !established)
         // The film plays once, on a brand-new install, before the questions: not when setup was asked for again, not for an existing profile, not once seen or skipped.
         let skipIntro = ProcessInfo.processInfo.environment["BS_SKIP_INTRO"] == "1"
-        showIntro = showSetup && !forced && !skipIntro && get("setup_done") != "1" && get("intro_done") != "1"
+        showIntro = showSetup && !forced && !skipIntro && !established
         // An update plays the film again, then shows what changed; the setup questions are never asked again.
-        let plan = LaunchPlan.decide(setupDone: get("setup_done") == "1", seenVersion: get("whatsnew_seen_version"), current: AppRelease.current, forced: forced, skipFilm: skipIntro, scripted: scripted, secondaryWindow: isSecondary)
+        let plan = LaunchPlan.decide(setupDone: established, seenVersion: get("whatsnew_seen_version"), current: AppRelease.current, forced: forced, skipFilm: skipIntro, scripted: scripted, secondaryWindow: isSecondary)
         if plan == .update { showIntro = true; showWhatsNew = true }
         else if plan == .newInstall, get("whatsnew_seen_version") == nil { try? core.setSetting(key: "whatsnew_seen_version", value: AppRelease.current) }      // a new install has seen this version's news
         // A first installation always starts in dark appearance, whatever the system is set to. The choice is written once (so it stays until the person changes it, in the
