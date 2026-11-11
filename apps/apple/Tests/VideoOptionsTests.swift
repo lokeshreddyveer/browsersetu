@@ -31,7 +31,7 @@ final class VideoOptionsTests: XCTestCase {
     }
 
     func testDirectVideoOffersOriginalOnly() {
-        let o = VideoOptions.options(for: candidate("https://x.org/clip.webm", element: "video", hasVideo: true), encoders: (true, false))
+        let o = VideoOptions.options(for: candidate("https://x.org/clip.webm", element: "video", hasVideo: true), encoders: (true, false), processing: false)      // independent of any tool installed on this Mac
         XCTAssertEqual(o.first?.title, "Video with sound · WEBM"); XCTAssertEqual(o.first?.provenance, "Source quality")
         XCTAssertFalse(o.first { $0.kind == .audioM4A }!.isAvailable)
     }

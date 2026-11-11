@@ -199,20 +199,29 @@ final class ExtractorBroker {
             entries[k] = Entry(task: task, result: nil, at: now)
             Task { @MainActor [weak self] in
                 let r = await task.result
-                guard let self, self.entries[k]?.task == task else { return }
-                switch r {
-                case .success: self.entries[k] = Entry(task: nil, result: r, at: Date())
-                case .failure(let e):
-                    if Self.isNotAnAnswer(e) { self.entries[k] = nil }          // asking again is the right response to these
-                    else { self.entries[k] = Entry(task: nil, result: r, at: Date()) }
-                }
+                self?.settle(k, task, r)
             }
         }
         entries[k]?.waiters += 1
         let ticket = Ticket()
         func leave() { guard !ticket.left else { return }; ticket.left = true; if var e = entries[k] { e.waiters = max(0, e.waiters - 1); entries[k] = e; if e.waiters == 0, e.task != nil { e.task?.cancel(); entries[k] = nil } } }
         defer { leave() }
-        return try await withTaskCancellationHandler { try await task.value } onCancel: { Task { @MainActor in leave() } }
+        let outcome: Result<NormalizedMediaSource, Error>
+        do { outcome = .success(try await withTaskCancellationHandler { try await task.value } onCancel: { Task { @MainActor in leave() } }) } catch { outcome = .failure(error) }
+        // Recorded BEFORE the caller is given the answer: a second question asked right after must find it (a separate task used to record it a moment later, so a quick second look could run the program again).
+        settle(k, task, outcome)
+        return try outcome.get()
+    }
+
+    /// Remembers what the program answered for this question, once, whoever gets there first.
+    private func settle(_ k: String, _ task: Task<NormalizedMediaSource, Error>, _ r: Result<NormalizedMediaSource, Error>) {
+        guard entries[k]?.task == task else { return }
+        switch r {
+        case .success: entries[k] = Entry(task: nil, result: r, at: Date())
+        case .failure(let e):
+            if Self.isNotAnAnswer(e) { entries[k] = nil }          // asking again is the right response to these
+            else { entries[k] = Entry(task: nil, result: r, at: Date()) }
+        }
     }
 
     private func prune(now: Date) {

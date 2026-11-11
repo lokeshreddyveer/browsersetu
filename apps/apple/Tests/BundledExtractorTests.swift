@@ -5,15 +5,20 @@ import AVFoundation
 /// The bundled extractor (the real yt-dlp executable shipped inside the app) and the versioned media contract. These start the actual program; nothing here is a stand-in.
 /// The base app does not embed the tool (it is installed on request), so tests that need the real program point the extractor at the pinned copy in ThirdParty (fetch-bundled-tools.sh).
 enum RealTool {
-    static func use() {
-        guard !BundledExtractor.isPresent else { return }
+    /// Points the tests at the video tool unpacked in ThirdParty/yt-dlp/bin. The tool is an OPTIONAL DOWNLOAD (docs/decisions/0001), so a checkout without it skips these tests with the reason; the shipped packages
+    /// are exercised by MediaToolsPackageScenarioTests (BS_SIGNED_PACKAGES) and HostedPackagesLiveTests (BS_LIVE_HOSTED).
+    static func use() throws {
+        if !BundledExtractor.isPresent { useFolder() }
+        try XCTSkipUnless(BundledExtractor.verify() != nil, "the video tool is not unpacked in ThirdParty/yt-dlp/bin (optional download; see MediaToolsPackageScenarioTests and HostedPackagesLiveTests)")
+    }
+    private static func useFolder() {
         BundledExtractor.helpersFolder = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("ThirdParty/yt-dlp/bin", isDirectory: true)
     }
 }
 
 @MainActor
 final class BundledExtractorTests: XCTestCase {
-    override func setUp() async throws { try await super.setUp(); RealTool.use() }
+    override func setUp() async throws { try await super.setUp(); try RealTool.use() }
     func need() throws -> BundledExtractor.Verified {
         try XCTUnwrap(BundledExtractor.verify(), "the bundled extractor is missing or does not match its pinned digest (run scripts/fetch-bundled-tools.sh)")
     }
@@ -148,7 +153,7 @@ final class BundledExtractorTests: XCTestCase {
 /// The real program, a real page, a real download, a real probe. The sample clip is the public W3Schools test video (the same one the page-listing tests use); the tests skip if it cannot be fetched.
 @MainActor
 final class BundledExtractorFlowTests: MediaCase {
-    override func setUp() async throws { try await super.setUp(); RealTool.use() }
+    override func setUp() async throws { try await super.setUp(); try RealTool.use() }
     func keep(_ file: URL, as name: String) {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("dx08-keep")
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

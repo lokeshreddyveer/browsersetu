@@ -68,10 +68,10 @@ enum VideoOptions {
     }
 
     /// The list for a candidate: the same planner every other list uses (a stream with a read manifest lists its real renditions).
-    static func options(for c: MediaCandidate, encoders: (m4a: Bool, mp3: Bool) = (LocalEncoders.m4a, LocalEncoders.mp3)) -> [OutputOption] {
+    static func options(for c: MediaCandidate, encoders: (m4a: Bool, mp3: Bool) = (LocalEncoders.m4a, LocalEncoders.mp3), processing: Bool = DownloadPlanner.processingReady) -> [OutputOption] {
         guard let source = NormalizedMediaSource(candidate: c) else { return [] }
         if c.kind.isStream && c.manifest == nil { return [] }
-        return DownloadPlanner.options(for: source, manifest: c.manifest, encoders: encoders).map(\.option)
+        return DownloadPlanner.options(for: source, manifest: c.manifest, encoders: encoders, processing: processing).map(\.option)
     }
 
     /// The state a candidate is in, derived from what is known and never from a domain name alone.

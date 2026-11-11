@@ -12,7 +12,7 @@ final class ResponsivenessTests: XCTestCase {
         return ms
     }
 
-    override func setUp() async throws { RealTool.use(); try RealFFmpeg.use() }
+    override func setUp() async throws { try RealTool.use(); try RealFFmpeg.use() }
     override func tearDown() async throws { RealFFmpeg.reset(); BundledExtractor.helpersFolder = nil; BundledExtractor.forgetCache() }
 
     func testWhatTheScreensAskWhileDrawingIsCheapEvenWithTheLargeTree() async throws {
