@@ -90,7 +90,7 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
     init(info: TabInfo, model: BrowserModel, restoredURL: URL? = nil, popupConfiguration: AnyObject? = nil) {
         id = info.id
         isPrivate = info.private
-        title = info.title
+        title = TabController.displaySafeTitle(info.title)
         group = info.group
         pinned = info.pinned
         workspace = info.workspace
@@ -360,8 +360,27 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
     // MARK: Engine events
 
     func engineTitleChanged(_ title: String) {
-        if !title.isEmpty { self.title = title }
+        let clean = TabController.displaySafeTitle(title)
+        if !clean.isEmpty { self.title = clean }
         if !isPrivate { owner?.extensionCenter.tabChanged(self) }
+    }
+
+    /// A page title as the chrome shows it: control characters and the invisible direction overrides a page could use to disguise its name (U+202A–202E,
+    /// U+2066–2069, U+200E/F) are removed, runs of white space are folded to one, and it is capped at 300 characters. The page itself is not changed.
+    nonisolated static func displaySafeTitle(_ raw: String) -> String {
+        let banned: Set<Unicode.Scalar> = Set((0x202A...0x202E).compactMap(Unicode.Scalar.init) + (0x2066...0x2069).compactMap(Unicode.Scalar.init) + [Unicode.Scalar(0x200E)!, Unicode.Scalar(0x200F)!])
+        var scalars = String.UnicodeScalarView()
+        var lastWasSpace = false
+        for scalar in raw.unicodeScalars {
+            if banned.contains(scalar) { continue }
+            let isSpace = scalar.properties.isWhitespace || scalar.properties.generalCategory == .control
+            if isSpace { if !lastWasSpace && !scalars.isEmpty { scalars.append(" ") }; lastWasSpace = true; continue }
+            lastWasSpace = false
+            scalars.append(scalar)
+        }
+        var out = String(scalars).trimmingCharacters(in: .whitespaces)
+        if out.count > 300 { out = String(out.prefix(300)) + "…" }
+        return out
     }
 
     func engineURLChanged(_ url: URL) {

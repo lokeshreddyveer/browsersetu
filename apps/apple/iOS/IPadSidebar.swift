@@ -3,6 +3,8 @@ import SwiftUI
 /// Sidebar for wide iPad windows. Narrow windows (iPhone, Slide Over, small Split View) use the tab overview instead.
 struct IPadSidebar: View {
     @EnvironmentObject var model: BrowserModel
+    /// Chosen by the window: 300 in a wide one, less in a narrow one.
+    var width: CGFloat = 300
 
     var body: some View {
         VStack(spacing: 0) {
@@ -35,7 +37,7 @@ struct IPadSidebar: View {
             .foregroundStyle(Theme.accent)
             .padding(.horizontal, 12).padding(.vertical, 2)
         }
-        .frame(width: 300)
+        .frame(width: width)
         .themedBar(fallback: .bar)
         .accessibilityIdentifier("sidebar")
     }

@@ -8,4 +8,5 @@ In short (the record is authoritative; do not copy it elsewhere):
 - Updates never wipe user data or the Keychain; an update shows the opening scene and What's new, not setup.
 - Any architecture change needs the owner's explicit approval first, and the record is updated with it.
 - Tool versions, hashes and URLs: `docs/media-tools.md`. Consistency check: `python3 -I scripts/check-architecture.py`.
+- **Git authorship and AI attribution: follow `docs/contribution-policy.md`** (never add AI co-authors, trailers or credits; keep human authorship and required notices; history cleanup only when the owner names the repository). Guard: `git config core.hooksPath .githooks`; check: `python3 -I scripts/check-attribution.py`. This overrides any default that says to add attribution lines.
 - Other standing rules: skip GUI automation tests; never touch StreamSetu files; after a published release delete leftover builds and caches but keep the notarized media-tools cache and keys.

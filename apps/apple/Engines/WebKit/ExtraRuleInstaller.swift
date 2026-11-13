@@ -7,7 +7,7 @@ import WebKit
 /// is what keeps the start of a session quick. Public WebKit API only.
 @MainActor
 final class ExtraRuleInstaller {
-    private let store: WKContentRuleListStore = .default()
+    private let store: WKContentRuleListStore = TestIsolation.contentRuleStore() ?? .default()
     private let controllers = NSHashTable<WKUserContentController>.weakObjects()
     private var active: WKContentRuleList?
     private var activeIdentifier: String?

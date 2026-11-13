@@ -39,7 +39,7 @@ final class RealSitesUITests: XCTestCase {
         print("REALSITE \(name): picker rows (\(rowQuery.count))=\(rowLabels.isEmpty ? "(none)" : rowLabels.joined(separator: " || "))")
         let canRows = (0..<min(rowQuery.count, 40)).map { rowQuery.element(boundBy: $0) }.filter { $0.label.contains("Can download") }
         print("REALSITE \(name): rows marked Can download=\(canRows.count)")
-        let shot = XCTAttachment(screenshot: app.windows.firstMatch.safeScreenshot()); shot.name = name; shot.lifetime = .keepAlways; add(shot)
+        let shot = app.windows.firstMatch.safeAttachment(); shot.name = name; shot.lifetime = .keepAlways; add(shot)
         guard download, app.state == .runningForeground else { return }
 
         // Choose the first item the picker says can be downloaded (else the first that can be opened), then Download: the real route a person takes.

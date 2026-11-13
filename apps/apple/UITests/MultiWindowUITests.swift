@@ -17,7 +17,7 @@ final class MultiWindowUITests: XCTestCase {
 
     override func tearDown() {
         if testRun?.hasSucceeded == false, app != nil {
-            let shot = XCTAttachment(screenshot: app.safeScreenshot()); shot.name = "at-failure"; shot.lifetime = .keepAlways; add(shot)
+            let shot = app.safeAttachment(); shot.name = "at-failure"; shot.lifetime = .keepAlways; add(shot)
         }
         app?.terminate()
     }

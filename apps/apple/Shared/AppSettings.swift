@@ -129,9 +129,11 @@ func displayHost(_ url: URL?) -> String {
     return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
 }
 
+/// The letter on a site's tile: the first letter of its host. With no host (a local page, a blank tab) it is empty and the tile shows a neutral globe instead:
+/// a letter taken from the page's own title could imitate another site's tile.
 func tileLetter(title: String, url: String) -> String {
-    let source = displayHost(URL(string: url)).isEmpty ? title : displayHost(URL(string: url))
-    return String(source.first ?? "•").uppercased()
+    let host = displayHost(URL(string: url))
+    return host.isEmpty ? "" : String(host.first!).uppercased()
 }
 
 // MARK: - Double-click on the top bar
@@ -145,17 +147,65 @@ enum DoubleClickAction: String, CaseIterable, Identifiable {
 // MARK: - Layout presets
 
 enum LayoutPreset: String, CaseIterable, Identifiable {
-    case classic, sidebar, minimal, floating, inline, custom
+    case classic, classicReversed, sidebar, minimal, minimalReversed, floating, inline, custom
+    /// Vertical tabs with a separate, full top toolbar (the sidebar has no address field).
+    case hybrid
+    /// Webpage first: no toolbar, no pill and no edge sidebar at rest; ⌘L, the tab switcher and a small handle bring what is needed, and it can always be left.
+    case canvas
+    /// Split browsing: a compact tab rail, the full toolbar acting on the focused panel, and two pages side by side.
+    case researchDesk
+    /// Workspaces first: every workspace listed at the top of the sidebar, the selected one's tabs below it, and the full toolbar.
+    case workspaceDeck
     var id: String { rawValue }
-    var title: String { self == .inline ? "One Row" : rawValue.capitalized }
+    var title: String {
+        switch self {
+        case .inline: "One Row"
+        case .classicReversed: "Classic Reversed"
+        case .minimalReversed: "Minimal Reversed"
+        case .researchDesk: "Research Desk"
+        case .workspaceDeck: "Workspace Deck"
+        default: rawValue.capitalized
+        }
+    }
+    /// The groups the layouts are shown under in Settings and the Layout menu (the gallery sections of the design pack, doc 07): Everyday (tabs across the top),
+    /// Organized (tabs down the side), Immersive (just the page), Productivity (workflows) and Advanced (Custom).
+    enum Family: String, CaseIterable, Identifiable {
+        case horizontal = "Everyday", vertical = "Organized", immersive = "Immersive", workflow = "Productivity", own = "Advanced"
+        var id: String { rawValue }
+    }
+    /// The layout has a tab sidebar (docked, as a rail, or at the window edge), so the rail and edge settings apply to it. The others only have the Library sidebar.
+    /// Whether the layout is offered in the pickers. Custom is kept (its saved choices, the way back to it, anyone using it) but not offered for now; a window already on it still lists it.
+    var isOffered: Bool { self != .custom }
+    var hasTabSidebar: Bool { family == .vertical || family == .workflow || self == .floating || self == .custom }
+    var family: Family {
+        switch self {
+        case .classic, .classicReversed, .minimal, .minimalReversed, .inline: .horizontal
+        case .sidebar, .hybrid: .vertical
+        case .floating, .canvas: .immersive
+        case .researchDesk, .workspaceDeck: .workflow
+        case .custom: .own
+        }
+    }
+    /// The layouts whose tabs are the docked vertical navigator under (or beside) a separate top toolbar, sharing its sidebar policy (pin, hide to the edge, rail).
+    var docksTabNavigator: Bool { self == .hybrid || self == .researchDesk || self == .workspaceDeck }
+    /// The layouts whose sidebar is pinned or hidden to the window edge by the person (the Sidebar layout and the docked-navigator family).
+    var usesSidebarPin: Bool { self == .sidebar || docksTabNavigator }
+    /// The tab strip sits above the toolbar instead of below it. The layout's own tabs, toolbar and behavior; only the order of the two rows differs.
+    var tabsOnTop: Bool { self == .classicReversed || self == .minimalReversed }
     var summary: String {
         switch self {
         case .classic: "Horizontal tabs, standard toolbar"
+        case .classicReversed: "Classic with the tabs above the toolbar"
         case .sidebar: "Vertical tabs; the address bar and navigation live in the sidebar, docked or sliding in from the edge"
-        case .minimal: "Compact tabs, no sidebar"
+        case .minimal: "Compact tabs: the tab in front shows its title, the others only their icons"
+        case .minimalReversed: "Minimal with the tabs above the toolbar"
         case .floating: "No top bar. A pill shows the site; click it, or press ⌘L, to type an address. Tabs slide in from the edge"
         case .inline: "Everything on one line: the tabs beside the address field and the buttons"
         case .custom: "Choose each option yourself"
+        case .hybrid: "Vertical tabs in the sidebar, the address bar and buttons in a full toolbar above the page"
+        case .canvas: "Just the page. ⌘L for an address, ⇧⌘A for tabs; a small handle at the top for everything else"
+        case .researchDesk: "Two pages side by side; the toolbar works on the one you clicked, the tabs in a compact rail"
+        case .workspaceDeck: "Your workspaces listed in the sidebar, the chosen one's tabs below them, a full toolbar above the page"
         }
     }
 }
@@ -283,8 +333,8 @@ enum PhonePreset: String, CaseIterable, Identifiable {
         switch self {
         case .bottomBar: "Like Safari: the address and the buttons in one bar along the bottom. While you read it shrinks to a slim strip with just the site, and returns when you scroll back"
         case .topBar: "Like Safari: the address and the buttons in one bar along the top. While you read it shrinks to a slim strip with just the site, and returns when you scroll back"
-        case .compactBottom: "One slim row along the bottom: back, the address, your tabs and the menu. While you read it shrinks to a small capsule with just the site, and returns when you scroll back"
-        case .compactTop: "One slim row along the top: back, the address, your tabs and the menu. While you read it shrinks to a small capsule with just the site, and returns when you scroll back"
+        case .compactBottom: "One slim row along the bottom: back, the address and the menu (Show All Tabs is in the menu, and swiping up on the bar opens your tabs). While you read it shrinks to a small capsule with just the site, and returns when you scroll back"
+        case .compactTop: "One slim row along the top: back, the address and the menu (Show All Tabs is in the menu, and swiping up on the bar opens your tabs). While you read it shrinks to a small capsule with just the site, and returns when you scroll back"
         case .immersive: "The page fills the screen. Only one small pill, for the address, while you scroll. Stop for a moment and the + (new tab), reload and your tabs fan out of it along an arc, and fold back in when you scroll"
         case .custom: "Choose the style, where the address bar goes, what happens as you read, and which pills show"
         }
@@ -335,18 +385,24 @@ struct ResolvedLayout: Equatable {
 /// Presets change appearance only; they never touch profiles, privacy or data.
 func resolveLayout(preset: LayoutPreset, customTabLayout: TabLayout, customSidebarVisible: Bool, customSingleToolbar: Bool = false) -> ResolvedLayout {
     switch preset {
-    case .classic: ResolvedLayout(tabLayout: .separate, sidebarVisible: false)
+    case .classic, .classicReversed: ResolvedLayout(tabLayout: .separate, sidebarVisible: false)
     case .sidebar: ResolvedLayout(tabLayout: .sidebar, sidebarVisible: true, singleToolbar: true)
-    case .minimal: ResolvedLayout(tabLayout: .compact, sidebarVisible: false)
+    case .minimal, .minimalReversed: ResolvedLayout(tabLayout: .compact, sidebarVisible: false)
     // Tabs are vertical and live in the sidebar, which stays out of sight until the pointer reaches the window's edge.
     case .floating: ResolvedLayout(tabLayout: .sidebar, sidebarVisible: false)
     // Tabs are drawn inside the toolbar itself, so no separate tab row is shown.
     case .inline: ResolvedLayout(tabLayout: .compact, sidebarVisible: false)
     // Without vertical tabs there is nowhere for the address bar to live, so single toolbar implies the sidebar layout.
     case .custom: ResolvedLayout(tabLayout: customSingleToolbar ? .sidebar : customTabLayout, sidebarVisible: customSidebarVisible, singleToolbar: customSingleToolbar)
+    // The docked vertical navigator beside the page, under a separate toolbar (the same composition as Custom with vertical tabs and a separate toolbar).
+    case .hybrid, .researchDesk, .workspaceDeck: ResolvedLayout(tabLayout: .sidebar, sidebarVisible: true)
+    // No sidebar at rest and none at the edge: the tabs are reached through the switcher.
+    case .canvas: ResolvedLayout(tabLayout: .sidebar, sidebarVisible: false)
     }
 }
 
+/// The one standard sidebar width: the default, what the sidebar snaps to while it is dragged, and what Reset Appearance and Layout sets. Saved widths are never changed by it.
+let sidebarStandardWidth: Double = 260
 let sidebarWidthRange: ClosedRange<Double> = 190...340
 let sidebarRailWidth: Double = 60
 

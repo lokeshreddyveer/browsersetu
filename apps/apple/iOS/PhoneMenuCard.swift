@@ -37,6 +37,8 @@ struct PhoneMenuContent: View {
             Button { model.shareActivePage() } label: { Label("Share", systemImage: "square.and.arrow.up") }.disabled(tab.isBlank)
         }
         Section {
+            // The compact bars have no tabs button: this is their way to every open tab (and it is here in the others too).
+            Button { model.openTabsView() } label: { Label("Show All Tabs", systemImage: "square.on.square") }
             Button { _ = model.newTab() } label: { Label("New Tab", systemImage: "plus.square") }
             Button { model.openTab(url: nil, isPrivate: true) } label: { Label("New Private Tab", systemImage: "plus.square.on.square") }
         }
@@ -63,6 +65,15 @@ struct PhoneMenuContent: View {
             Menu { ToolsMenuItems(model: model) } label: { Label("Tools", systemImage: "wrench.and.screwdriver") }
             moreMenu
             extensionsMenu
+            // Workspaces from the menu, not only from the overview (which hides them in private browsing).
+            if !model.workspaces.isEmpty {
+                Menu {
+                    Button { model.switchWorkspace("") } label: { Label("Personal", systemImage: model.activeWorkspace.isEmpty ? "checkmark" : "person") }
+                    ForEach(model.workspaces) { ws in
+                        Button { model.switchWorkspace(ws.name) } label: { Label(ws.name, systemImage: ws.name == model.activeWorkspace ? "checkmark" : ws.icon) }
+                    }
+                } label: { Label("Workspaces", systemImage: "square.grid.2x2") }
+            }
             Button { model.sheet = .webApps } label: { Label("Web Apps…", systemImage: "app.dashed") }
             if !model.userScripts(matching: tab.url).isEmpty {
                 Menu { SiteScriptsList(url: tab.url) } label: { Label("Scripts on This Site", systemImage: "curlybraces") }

@@ -34,7 +34,7 @@ struct MacRootView: View {
     private var onLeft: Bool { model.sidebarPosition == .left }
     private var pinned: Bool { model.sidebarVisible && !model.focusMode }
     private var peekEnabled: Bool {
-        !model.focusMode && !model.floatingAddressVisible && (model.sidebarRail || !model.sidebarVisible) &&
+        model.layoutPreset != .canvas && !model.focusMode && !model.floatingAddressVisible && (model.sidebarRail || !model.sidebarVisible) &&
             (LayoutRules.sidebarAutoHides(preset: model.layoutPreset, sidebarAutoHide: model.sidebarAutoHide) || model.effectiveTabLayout == .sidebar)
     }
     private var topInset: CGFloat { (model.singleToolbar || floatingLayout) ? LayoutMetrics.sidebarTopBarless : (columnBar ? LayoutMetrics.sidebarTopColumnBar : LayoutMetrics.sidebarTopWithBar) }
@@ -44,7 +44,32 @@ struct MacRootView: View {
         if model.topBarFieldWidth > 0 { return model.topBarFieldWidth }
         return ToolbarPriority(fitting: window, leadingInset: toolbarInset, extras: model.toolbarExtrasCount, visible: model.toolbarVisibility).fieldWidth(window: window, leadingInset: toolbarInset)
     }
-    private var toolbarInset: CGFloat { LayoutMetrics.toolbarLeadingInset(fullScreen: model.windowFullScreen) }
+    /// Classic Reversed: the tab strip is the top row (and carries the traffic lights' room); a hidden strip (one tab, if the person asked for that) puts the toolbar back at the top.
+    private var stripOnTop: Bool { model.layoutPreset.tabsOnTop && stripLayout && !model.focusMode && !model.stripHiddenForSingleTab }
+    /// The layouts that have a horizontal strip to put on top: Classic's and Minimal's. (Minimal's never hides for a single tab; `stripHiddenForSingleTab` is Classic's rule only.)
+    private var stripLayout: Bool { model.effectiveTabLayout == .separate || model.effectiveTabLayout == .compact }
+    private var chrome: LayoutMetrics.ChromeInsets { LayoutMetrics.chromeInsets(tabsOnTop: model.layoutPreset.tabsOnTop, fullScreen: model.windowFullScreen, stripShown: stripOnTop) }
+    private var toolbarInset: CGFloat { chrome.toolbar }
+    /// Where the toolbar beside a vertical-tabs sidebar starts. A docked left sidebar is wide enough to cover the window's buttons; the icon rail (60 pt) is not (the buttons reach 70 pt), so the toolbar keeps what the rail leaves of their room.
+    private var barLeadingInset: CGFloat {
+        guard pinned && onLeft else { return toolbarInset }
+        return model.sidebarRail ? max(0, toolbarInset - CGFloat(sidebarRailWidth)) : 0
+    }
+    /// The bottom edge of the toolbar as drawn, read in this view's own space (not stored in the model). The suggestions hang from it when the toolbar is the second row.
+    @State private var toolbarBottom: CGFloat?
+    private var suggestionsTop: CGFloat {
+        if model.singleRow { return InlineBar.height }
+        guard model.layoutPreset.tabsOnTop else { return LayoutMetrics.toolbarHeight }
+        // Until the toolbar has reported, the rows above it: the strip (when shown) and the toolbar's own height.
+        return toolbarBottom ?? (LayoutMetrics.toolbarHeight + (stripOnTop ? stripRowHeight : 0))
+    }
+    /// The width the docked sidebar (or its icon rail) really takes: one rule for the page column, the toolbar that peeks in at full screen and the suggestions under the address field.
+    private func dockedSidebarWidth(window: CGFloat) -> CGFloat {
+        guard pinned else { return 0 }
+        return model.sidebarRail ? CGFloat(sidebarRailWidth) : min(model.sidebarWidth, window * 0.42)
+    }
+    /// Vertical tabs with a separate toolbar: the toolbar belongs to the page column, beside the sidebar, also when it peeks in at full screen.
+    private var peeksInColumn: Bool { model.effectiveTabLayout == .sidebar && !model.singleToolbar && !model.topBarHidden }
     private var topBarVisible: Bool { !model.focusMode && !model.singleToolbar && !model.autoHidesToolbar && !model.topBarHidden }
     /// The Floating layout: no bar, just the pill and the search button over the page.
     private var floatingLayout: Bool { model.topBarHidden && !model.focusMode }
@@ -63,12 +88,15 @@ struct MacRootView: View {
     private var foldedAway: Bool { model.chromeCollapsed && model.canCollapseChrome }
     /// While reading in the Floating layout the pill slides up out of the way (the Search pill stays).
     private var pillScrolledAway: Bool { floatingLayout && model.canFoldPill && model.chromeCollapsed }
-    private var barHeight: CGFloat { model.singleRow ? InlineBar.height : LayoutMetrics.toolbarHeight + (model.stripHiddenForSingleTab ? 0 : model.density.stripHeight) }
+    /// The strip's row. Above the toolbar it is as tall as the toolbar row, so its tabs and the window's buttons share the toolbar's centre line (the strip itself keeps its own height, centred in it).
+    private var stripRowHeight: CGFloat { model.layoutPreset.tabsOnTop ? max(model.density.stripHeight, LayoutMetrics.toolbarHeight) : model.density.stripHeight }
+    private var barHeight: CGFloat { model.singleRow ? InlineBar.height : LayoutMetrics.toolbarHeight + (model.stripHiddenForSingleTab ? 0 : stripRowHeight) }
     private var cardLeading: CGFloat { pinned && onLeft ? 0 : WindowInset.gap }
     private var cardTrailing: CGFloat { pinned && !onLeft ? 0 : WindowInset.gap }
 
     var body: some View {
-        content.scrollIndicators(.hidden)
+        content
+            .scrollIndicators(.hidden)
     }
 
     private var content: some View {
@@ -83,10 +111,11 @@ struct MacRootView: View {
                             .frame(height: foldedAway ? 0 : barHeight)
                             .transaction { $0.animation = nil }
                             // The one change of room that is animated: the strip leaving or returning as the tab count changes.
-                            .animation(.easeOut(duration: 0.2), value: model.stripHiddenForSingleTab)
+                            .motion(.easeOut(duration: 0.2), value: model.stripHiddenForSingleTab)
                             .overlay(alignment: .top) {
-                                VStack(spacing: 0) { TopBar(leadingInset: toolbarInset); tabRow }
-                                    .background { if let tab = model.active { ToolbarTintLayer(tab: tab) } }
+                                VStack(spacing: 0) { chromeRows }
+                                    // The toolbar is the window's own colour, the same as the 4 pt margin around the page card, so no lighter band ends in a thin line above the page.
+                                    // (The page-colour tint of the toolbar, `ToolbarTintLayer`, is no longer drawn here; it was this bar's only use of it.)
                                     .overlay { PrivateWindowTintLayer() }
                                     .frame(height: barHeight, alignment: .top)
                                     .offset(y: foldedAway ? -barHeight : 0)
@@ -95,21 +124,25 @@ struct MacRootView: View {
                                     .accessibilityHidden(foldedAway)
                             }
                             .zIndex(1)
+                            // The bar is replaced, not faded: with no transition of its own it would take the parent's, and the old bar would stay up under the new layout until that ended.
+                            .transition(.identity)
                     }
                     else if columnBar || model.topBarHidden || model.singleToolbar { EmptyView() }
                     else { WindowDragRegion().frame(height: model.windowFullScreen ? 0 : 28) }
                     ZStack(alignment: onLeft ? .leading : .trailing) {
                         HStack(spacing: 0) {
                             if pinned && onLeft { sidebar(geometry.size.width).transition(.move(edge: .leading).combined(with: .opacity)) }
-                            MainColumn(barInset: columnBar ? ((pinned && onLeft) ? 0 : toolbarInset) : nil,
-                                       cardLeading: cardLeading, cardTrailing: cardTrailing)
+                            // What is left of the window beside a docked sidebar: a docked panel (Bookmarks, History) is never wider than leaves the page its room.
+                            MainColumn(barInset: columnBar ? barLeadingInset : nil,
+                                       cardLeading: cardLeading, cardTrailing: cardTrailing,
+                                       availableWidth: geometry.size.width - dockedSidebarWidth(window: geometry.size.width))
                             if pinned && !onLeft { sidebar(geometry.size.width).transition(.move(edge: .trailing).combined(with: .opacity)) }
                         }
                         if peekEnabled {
                             // Reads where the pointer is straight from the window: it does not rely on view tracking areas.
                             PeekPointerTracker(enabled: true, onLeft: onLeft,
                                                edgeWidth: model.sidebarRail ? CGFloat(sidebarRailWidth) : peekZoneWidth,
-                                               panelWidth: CGFloat(model.sidebarWidth) + WindowInset.gap + 8, peek: peek)
+                                               panelWidth: CGFloat(model.windowWidth > 0 ? min(model.sidebarWidth, Double(model.windowWidth) * 0.42) : model.sidebarWidth) + WindowInset.gap + 8, peek: peek)
                                 .frame(width: 0, height: 0)
                             if peek.revealed { PeekSidebar(peek: peek, topInset: topInset) }
                         }
@@ -119,12 +152,12 @@ struct MacRootView: View {
                 if !model.focusMode && model.autoHidesToolbar && !floatingLayout && !model.floatingAddressVisible && !model.paletteVisible {
                     EdgeHoverZone { toolbarPeek.edge($0) }.frame(height: 6)
                     if toolbarPeek.revealed {
-                        VStack(spacing: 0) {
-                            TopBar(leadingInset: toolbarInset)
-                            if model.effectiveTabLayout != .sidebar { tabRow }
-                        }
+                        VStack(spacing: 0) { if peeksInColumn { TopBar(leadingInset: barLeadingInset) } else { chromeRows } }
                             .background(Color.chrome)
                             .background(EdgeHoverZone { toolbarPeek.panel($0) })
+                            // Beside a docked sidebar, not across it.
+                            .padding(.leading, peeksInColumn && onLeft ? dockedSidebarWidth(window: geometry.size.width) : 0)
+                            .padding(.trailing, peeksInColumn && !onLeft ? dockedSidebarWidth(window: geometry.size.width) : 0)
                             .transition(.move(edge: .top).combined(with: .opacity))
                     }
                 }
@@ -133,11 +166,12 @@ struct MacRootView: View {
                         .frame(width: model.singleRow ? max(model.inlineField.width, 440)
                                : suggestionFieldWidth(window: geometry.size.width))
                         .frame(maxWidth: .infinity, alignment: model.singleRow ? .leading : .center)
+                        .offset(x: model.singleRow ? 0 : model.topBarFieldShift)
                         .padding(.leading, model.singleRow ? min(model.inlineField.x, max(8, geometry.size.width - 448)) : 0)
-                        .padding(.top, model.singleRow ? InlineBar.height : LayoutMetrics.toolbarHeight)
+                        .padding(.top, suggestionsTop)
                         // With vertical tabs and a separate toolbar the field is centred in the column beside the sidebar, not in the whole window.
-                        .padding(.leading, columnBar && pinned && onLeft ? CGFloat(model.sidebarWidth) : 0)
-                        .padding(.trailing, columnBar && pinned && !onLeft ? CGFloat(model.sidebarWidth) : 0)
+                        .padding(.leading, (columnBar || (peeksInColumn && toolbarPeek.revealed)) && onLeft ? dockedSidebarWidth(window: geometry.size.width) : 0)
+                        .padding(.trailing, (columnBar || (peeksInColumn && toolbarPeek.revealed)) && !onLeft ? dockedSidebarWidth(window: geometry.size.width) : 0)
                 }
                 if model.singleToolbar && !model.focusMode && !foldedAway {
                     // No top bar: a strip above the page still drags the window.
@@ -145,7 +179,14 @@ struct MacRootView: View {
                 }
                 if foldedAway || floatingLayout {
                     WindowDragStrip().frame(height: WindowInset.dragStrip).frame(maxHeight: .infinity, alignment: .top)
-                    if floatingLayout && model.pillCollapsed {
+                    if model.layoutPreset == .canvas && !model.floatingAddressVisible {
+                        // Canvas: no pill at rest, only a small handle that stays faint until the pointer comes near; ⌘L, ⇧⌘A and its menu bring everything back.
+                        CanvasHandle()
+                            .padding(.top, 6)
+                            .frame(maxHeight: .infinity, alignment: .top)
+                            .transition(.opacity)
+                            .zIndex(4)
+                    } else if floatingLayout && model.pillCollapsed {
                         PillHandle()
                             .padding(.top, 4)
                             .frame(maxHeight: .infinity, alignment: .top)
@@ -171,7 +212,7 @@ struct MacRootView: View {
                         }
                     }
                 }
-                if floatingLayout && !model.pillCollapsed {
+                if floatingLayout && !model.pillCollapsed && model.layoutPreset != .canvas {
                     // On the side away from the tabs sidebar, so the two never meet: the right when the tabs are on the left.
                     let onRight = model.sidebarPosition == .left
                     // Extensions stand in a vertical strip against the window's edge, away from the tabs sidebar, level with the top of the page.
@@ -209,11 +250,19 @@ struct MacRootView: View {
                 // Whenever something essential would only appear at a window edge, a small handle on screen leads to all of it.
                 // Not while the toolbar it leads to is already slid down (the handle sat on the middle of its address field) or the address bar is open.
                 if !model.focusMode, !toolbarPeek.revealed, !model.floatingAddressVisible, model.layoutState(width: geometry.size.width).needsHandle {
-                    LayoutHandle().padding(.top, 3).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).zIndex(3).transition(.opacity)
+                    LayoutHandle().modifier(FadesUntilPointerNear()).padding(.top, 3).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).zIndex(3).transition(.opacity)
                 }
             }
             .onAppear { model.windowWidth = geometry.size.width }
             .onChange(of: geometry.size.width) { _, width in model.windowWidth = width }
+            // The toolbar's bounds resolved in this stack's own space, the one the suggestions are placed in (it starts at the window's top, above the title bar's safe area).
+            .overlayPreferenceValue(ToolbarBoundsKey.self) { anchor in
+                GeometryReader { g in
+                    let bottom: CGFloat? = anchor.map { g[$0].maxY }
+                    Color.clear.onChange(of: bottom, initial: true) { _, new in toolbarBottom = new }
+                }
+                .allowsHitTesting(false)
+            }
         }
         .ignoresSafeArea(.container, edges: .top)
         .downloadFlight(model.downloads)
@@ -225,6 +274,13 @@ struct MacRootView: View {
             peek.linger = peekLinger
             peek.dwell = peekDwell
             WindowDoubleClick.handler = { model.handleTopBarDoubleClick() }
+            // A window that opens in the Research Desk shows its two pages, as choosing the layout does (the restored tabs are in place by now).
+            if model.layoutPreset == .researchDesk { model.deskSplitPending = true; DispatchQueue.main.async { model.openResearchSplitIfPossible(announce: false) } }
+        }
+        // The Desk pairs the tab in front with the next one as soon as there is one (tabs restored or opened after it was chosen); once only, so a split the
+        // person closed stays closed.
+        .onChange(of: model.tabs.count) { _, _ in
+            if model.deskSplitPending, model.layoutPreset == .researchDesk { model.openResearchSplitIfPossible(announce: false) }
         }
         .onChange(of: model.layoutPreset) { _, _ in peek.linger = peekLinger; peek.dwell = peekDwell }
         .motion(.easeInOut(duration: 0.26), value: foldedAway)
@@ -249,12 +305,8 @@ struct MacRootView: View {
         .onReceive(model.downloads.$active.combineLatest(model.downloads.$failures, model.downloads.$waiting).receive(on: DispatchQueue.main)) { _, _, _ in
             NSApp.dockTile.badgeLabel = DownloadIndicators.make(model.downloads).badge
         }
-        // Layout changes (a preset, the sidebar pinned, collapsed to icons, moved) glide instead of jumping.
-        .motion(.spring(response: 0.4, dampingFraction: 0.88), value: LayoutSignature(preset: model.layoutPreset, visible: model.sidebarVisible,
-                                                                                    rail: model.sidebarRail, position: model.sidebarPosition,
-                                                                                    fullScreen: model.windowFullScreen, tabLayout: model.effectiveTabLayout,
-                                                                                    singleToolbar: model.singleToolbar, autoHides: model.autoHidesToolbar,
-                                                                                    sidebarAutoHide: model.sidebarAutoHide))
+        // A layout change (a preset, the sidebar pinned, collapsed to icons, moved) is applied at once. It used to run as one spring over the whole window; the profile of Minimal -> Sidebar showed that spring
+        // (about half a second of per-frame layout and commit, in a Debug build) as the reason the old toolbar stayed up until it ended. `LayoutSignature` is kept for anything that needs to tell layouts apart.
         .motion(.easeOut(duration: 0.2), value: model.focusMode)
         .environment(\.holdBrowserChrome, { hold in peek.hold(hold); toolbarPeek.hold(hold) })
         .sheet(item: $model.sheet) { SheetContainer(sheet: $0) }
@@ -270,6 +322,11 @@ struct MacRootView: View {
         .onChange(of: peekEnabled) { _, enabled in if !enabled { peek.reset() } }
         .onChange(of: model.windowFullScreen) { old, new in if old && !new && peekEnabled { peek.flash() } }
         .onChange(of: model.autoHidesToolbar) { _, _ in toolbarPeek.reset() }
+        // The edge sidebar stays out while Search Tabs is open (typing there is keyboard focus inside it), and goes after.
+        .onChange(of: model.tabSearchVisible) { _, open in peek.hold(open) }
+        // The edge sidebar stays out while a tab is dragged (to or from it), and goes after the drop.
+        .onReceive(NotificationCenter.default.publisher(for: .toggleEdgeTabs)) { _ in if peekEnabled { peek.toggleFromKeyboard() } }
+        .onReceive(NotificationCenter.default.publisher(for: .tabDragChanged)) { note in peek.hold((note.userInfo?["dragging"] as? Bool) ?? false) }
         .onChange(of: model.floatingAddressVisible) { _, visible in
             if visible { toolbarPeek.reset(); peek.reset() }
         }
@@ -292,10 +349,39 @@ struct MacRootView: View {
             .accessibilityHidden(peek.revealed)
     }
 
+    /// The two top rows, in one place for the window and for the toolbar that slides in over a full-screen page, so they cannot disagree. Classic and Minimal: toolbar, then tabs. The Reversed layouts: tabs, then toolbar.
+    @ViewBuilder private var chromeRows: some View {
+        if model.layoutPreset.tabsOnTop && stripLayout {
+            stripRow
+            TopBar(leadingInset: toolbarInset)
+                .anchorPreference(key: ToolbarBoundsKey.self, value: .bounds) { $0 }
+        } else {
+            TopBar(leadingInset: toolbarInset)
+            tabRow
+        }
+    }
+
+    /// The tab strip as the top row: the room for the traffic lights is a region of its own beside the strip (the strip keeps all of its own spacing), and, like the toolbar's, it drags the window.
+    /// Nothing here sits in front of the lights themselves.
+    @ViewBuilder private var stripRow: some View {
+        if chrome.stripClearance > 0 {
+            HStack(spacing: 0) {
+                Color.clear.frame(width: chrome.stripClearance, height: stripRowHeight)
+                tabRow
+            }
+            .frame(height: stripRowHeight)
+            .background(WindowDragRegion())
+        } else if stripOnTop {
+            tabRow.frame(height: stripRowHeight)
+        } else {
+            tabRow
+        }
+    }
+
     @ViewBuilder private var tabRow: some View {
         switch model.effectiveTabLayout {
-        case .separate: if !model.stripHiddenForSingleTab { HorizontalTabStrip().contextMenu { ToolbarContextMenu() } }
-        case .compact: CompactTabStrip().contextMenu { ToolbarContextMenu() }
+        case .separate: if !model.stripHiddenForSingleTab { HorizontalTabStrip().chromeTrace("HorizontalTabStrip").transition(.identity).contextMenu { ToolbarContextMenu() } }
+        case .compact: CompactTabStrip().transition(.identity).contextMenu { ToolbarContextMenu() }
         case .sidebar: EmptyView()
         }
     }
@@ -309,6 +395,8 @@ struct MainColumn: View {
     let barInset: CGFloat?
     let cardLeading: CGFloat
     let cardTrailing: CGFloat
+    /// The width this column has (the window minus a docked sidebar), so a docked panel can leave the page its room. Nil: no limit (as before).
+    var availableWidth: CGFloat? = nil
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -332,7 +420,7 @@ struct MainColumn: View {
                         }
                     }
                     if let docked = model.dockedPanel {
-                        DockedPanelView(sheet: docked).transition(.move(edge: .trailing).combined(with: .opacity))
+                        DockedPanelView(sheet: docked, availableWidth: availableWidth).transition(.move(edge: .trailing).combined(with: .opacity))
                     }
                 }
                 .motion(.easeOut(duration: 0.22), value: model.dockedPanel)
@@ -427,23 +515,52 @@ struct FocusBand: View {
 /// One page, or two panels when a split view is open. Each panel owns its own live view.
 struct ContentPanels: View {
     @EnvironmentObject var model: BrowserModel
+    @Environment(\.colorSchemeContrast) private var contrast
     @ObservedObject var active: TabController
+    /// The least width a page gets when panels sit side by side.
+    static let minimumPanelWidth: CGFloat = 300
 
     var body: some View {
         let panels = model.orderedSplitPanels()
         if panels.count > 1 {
-            SplitLayout(count: panels.count, horizontal: model.splitOrientation == .sideBySide) { index in
-                panel(panels[index], focused: panels[index].id == active.id, count: panels.count)
+            // Side by side needs room for each page. In a window too narrow for that, the focused page is shown on its own, with a switcher for the
+            // others, instead of squeezing every page into a sliver; the other pages stay open and keep their state (the split itself is not changed).
+            GeometryReader { geo in
+                let desk = model.layoutPreset == .researchDesk
+                let fits = geo.size.width / 2 >= Self.minimumPanelWidth
+                if model.splitOrientation == .sideBySide && !fits {
+                    VStack(spacing: 0) {
+                        PaneSwitcher(panels: panels, activeID: active.id)
+                        panel(active, focused: true, count: panels.count)
+                    }
+                    .padding(desk ? 6 : 0)
+                } else {
+                    SplitLayout(count: panels.count, horizontal: model.splitOrientation == .sideBySide, cards: desk) { index in
+                        panel(panels[index], focused: panels[index].id == active.id, count: panels.count)
+                    }
+                    .padding(desk ? 6 : 0)
+                    .overlay(alignment: .topTrailing) { SplitControls().padding(desk ? 14 : 8).padding(.top, desk ? 30 : 0) }
+                }
             }
-            .overlay(alignment: .topTrailing) { SplitControls().padding(8) }
         } else {
             PageArea(tab: active).id(active.id).transition(.opacity)
         }
     }
 
     private func panel(_ tab: TabController, focused: Bool, count: Int) -> some View {
-        PageArea(tab: tab).id(tab.id)
-            .overlay(RoundedRectangle(cornerRadius: 2).stroke(focused ? Theme.accent : Color.clear, lineWidth: 2).allowsHitTesting(false))
+        let desk = model.layoutPreset == .researchDesk
+        let radius: CGFloat = desk ? 10 : 2
+        return VStack(spacing: 0) {
+            // The Research Desk names each panel and lets one be closed without closing its tab (the other layouts keep the plain split).
+            if desk { ResearchPanelHeader(tab: tab, focused: focused) }
+            PageArea(tab: tab).id(tab.id)
+        }
+            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous)
+                .strokeBorder(focused ? Theme.accent : (desk ? Color.primary.opacity(contrast == .increased ? 0.45 : 0.12) : Color.clear),
+                              lineWidth: focused ? (contrast == .increased ? 3 : (desk ? 1.5 : 2)) : (desk ? 1 : 0)).allowsHitTesting(false))
+            .shadow(color: focused && desk ? Theme.accent.opacity(0.22) : .clear, radius: 8, y: 1)
+            .motion(.easeOut(duration: 0.18), value: focused)
             .contentShape(Rectangle())
             .simultaneousGesture(TapGesture().onEnded { if !focused { model.swapSplit(with: tab.id) } })
             .accessibilityLabel(focused ? "Active panel" : (count > 2 ? "Panel \(model.orderedSplitPanels().firstIndex { $0.id == tab.id }.map { $0 + 1 } ?? 2) of \(count)" : "Side panel"))
@@ -457,13 +574,15 @@ struct SplitLayout<Panel: View>: View {
     let count: Int
     /// Side by side (the groups are columns) or stacked (the groups are rows).
     let horizontal: Bool
+    /// Panels drawn as separate cards (the Research Desk): a wider gap between them with a small grip to drag, instead of a hairline.
+    var cards = false
     @ViewBuilder let panel: (Int) -> Panel
     @State private var outer: [CGFloat] = []
     @State private var inner: [[CGFloat]] = []
     @State private var outerStart: [CGFloat]?
     @State private var innerStart: [CGFloat]?
     private let minimum: CGFloat = 1.0 / 6
-    private let gap: CGFloat = 1
+    private var gap: CGFloat { cards ? 10 : 1 }
 
     /// Which panels share a column (or a row). Two: one each. Three: the first alone, the other two together. Four: two and two.
     static func groups(count: Int) -> [[Int]] {
@@ -530,8 +649,9 @@ struct SplitLayout<Panel: View>: View {
 
     /// A hairline with a wider strip to grab. `vertical` means the line runs top to bottom (it separates side-by-side panels).
     private func divider(vertical: Bool, total: CGFloat, drag: @escaping (CGFloat) -> Void, onEnd: @escaping () -> Void) -> some View {
-        Rectangle().fill(Color.primary.opacity(0.12))
+        Rectangle().fill(cards ? Color.clear : Color.primary.opacity(0.12))
             .frame(width: vertical ? gap : nil, height: vertical ? nil : gap)
+            .overlay { if cards { DividerGrip(vertical: vertical) } }
             .overlay {
                 Color.clear.frame(width: vertical ? 9 : nil, height: vertical ? nil : 9).contentShape(Rectangle())
                     .onHover { inside in if inside { (vertical ? NSCursor.resizeLeftRight : NSCursor.resizeUpDown).push() } else { NSCursor.pop() } }
@@ -540,8 +660,59 @@ struct SplitLayout<Panel: View>: View {
                         .onEnded { _ in onEnd() })
                     .onTapGesture(count: 2) { reset() }
             }
+            // Resizing without a pointer: VoiceOver's adjust action, or Full Keyboard Access, moves the divider by a twentieth.
+            .accessibilityElement(children: .ignore)
+            .accessibilityAdjustableAction { direction in
+                switch direction {
+                case .increment: drag(0.05); onEnd()
+                case .decrement: drag(-0.05); onEnd()
+                @unknown default: break
+                }
+            }
             .accessibilityLabel("Panel divider")
             .accessibilityHint("Drag to resize. Double-click to make the panels equal.")
+    }
+}
+
+/// In a narrow window, one control to choose which page of the split is shown.
+private struct PaneSwitcher: View {
+    @EnvironmentObject var model: BrowserModel
+    let panels: [TabController]
+    let activeID: UInt64
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(Array(panels.enumerated()), id: \.element.id) { index, tab in
+                let focused = tab.id == activeID
+                Button { if !focused { model.swapSplit(with: tab.id) } } label: {
+                    Text("\(index + 1) · \(tab.displayTitle)").font(.system(size: 11, weight: focused ? .semibold : .regular)).lineLimit(1)
+                        .padding(.horizontal, 10).frame(height: 24).frame(maxWidth: .infinity)
+                        .background(Capsule(style: .continuous).fill(focused ? Theme.accent.opacity(0.22) : Color.primary.opacity(0.06)))
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Page \(index + 1) of \(panels.count): \(tab.displayTitle)")
+                .accessibilityAddTraits(focused ? .isSelected : [])
+            }
+        }
+        .padding(.horizontal, 8).padding(.vertical, 4)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("pane-switcher")
+    }
+}
+
+/// The small handle in the gap between two cards: quiet at rest, clearer when the pointer is near, so it reads as something to drag.
+private struct DividerGrip: View {
+    let vertical: Bool
+    @State private var hovering = false
+    @Environment(\.colorSchemeContrast) private var contrast
+    var body: some View {
+        Capsule(style: .continuous)
+            .fill(Color.primary.opacity(hovering ? 0.55 : (contrast == .increased ? 0.45 : 0.2)))
+            .frame(width: vertical ? 4 : 36, height: vertical ? 36 : 4)
+            .onHover { hovering = $0 }
+            .motion(.easeOut(duration: 0.15), value: hovering)
+            .allowsHitTesting(false)
     }
 }
 
@@ -566,9 +737,12 @@ struct SplitControls: View {
             Button { model.closeSplit() } label: { Image(systemName: "xmark").accessibilityLabel("Close split view") }.help("Close Split View")
         }
         .buttonStyle(.borderless)
-        .padding(6)
-        .surface(radius: 8)
-        .opacity(0.9)
+        // Readable icons on a solid-ish capsule (the accent-on-grey of the default borderless style was faint over a page).
+        .foregroundStyle(.primary.opacity(0.85))
+        .padding(.horizontal, 8).padding(.vertical, 5)
+        .background(.regularMaterial, in: Capsule(style: .continuous))
+        .overlay(Capsule(style: .continuous).strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.12), radius: 4, y: 1)
     }
 }
 
@@ -910,5 +1084,78 @@ struct PanelTabView: View {
         }
         .environment(\.panelClose, sheet == .downloads ? { model.closeTab(id: tab.id, force: true) } : nil)
         .themedSurface()
+    }
+}
+
+/// The toolbar's bounds when it is not the first row.
+private struct ToolbarBoundsKey: PreferenceKey {
+    static var defaultValue: Anchor<CGRect>? { nil }
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) { value = nextValue() ?? value }
+}
+
+
+/// A Research Desk panel's own bar: its site icon and title (the focused one marked), and a button that takes the page out of the split while keeping its tab.
+/// Clicking the bar focuses the panel, so the toolbar acts on it.
+struct ResearchPanelHeader: View {
+    @EnvironmentObject var model: BrowserModel
+    @Environment(\.colorSchemeContrast) private var contrast
+    @ObservedObject var tab: TabController
+    let focused: Bool
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            TabFavicon(tab: tab, size: 14)
+            // The page's own identity, for this panel (the toolbar shows the focused one's): private, or not secure.
+            if tab.isPrivate { Image(systemName: "eye.slash.fill").font(.system(size: 10)).foregroundStyle(Theme.privateAccent).accessibilityLabel("Private") }
+            else if !tab.isBlank && !tab.isSecure { Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 10)).foregroundStyle(.orange).accessibilityLabel("Not secure") }
+            VStack(alignment: .leading, spacing: 0) {
+                Text(tab.displayTitle).font(.system(size: 12, weight: focused ? .semibold : .medium)).lineLimit(1).truncationMode(.tail)
+                    .foregroundStyle(focused ? Color.primary : Color.secondary)
+                if !tab.isBlank {
+                    Text(displayHost(tab.url)).font(.system(size: 10)).lineLimit(1).foregroundStyle(.tertiary)
+                }
+            }
+            if tab.isLoading { ProgressView().controlSize(.small).scaleEffect(0.55).frame(width: 14, height: 14) }
+            Spacer(minLength: 0)
+            Button { model.removeFromSplit(tab.id) } label: {
+                Image(systemName: "xmark").font(.system(size: 9, weight: .bold)).frame(width: 22, height: 22)
+                    .background(Circle().fill(Color.primary.opacity(hovering ? 0.12 : 0)))
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain).foregroundStyle(.secondary).opacity(focused || hovering ? 1 : 0.55)
+            .help("Close This Panel (the tab stays open)")
+            .accessibilityLabel("Close panel \(tab.displayTitle)")
+            .accessibilityIdentifier("panel-close")
+        }
+        .padding(.leading, 10).padding(.trailing, 6).frame(height: 34)
+        .background(focused ? Theme.accent.opacity(contrast == .increased ? 0.3 : 0.1) : Color.primary.opacity(contrast == .increased ? 0.1 : 0.035))
+        .overlay(alignment: .bottom) {
+            // The focused panel's underline is the accent; the others get a hairline.
+            Rectangle().fill(focused ? Theme.accent : Color.primary.opacity(contrast == .increased ? 0.4 : 0.1)).frame(height: focused ? 2 : 1)
+        }
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .motion(.easeOut(duration: 0.15), value: hovering)
+        .motion(.easeOut(duration: 0.18), value: focused)
+        .onTapGesture { if !focused { model.swapSplit(with: tab.id) } }
+        .contextMenu {
+            if !focused { Button("Focus This Panel") { model.swapSplit(with: tab.id) } }
+            Button("Swap Panels") { model.swapSplit() }.disabled(model.splitTabID == nil)
+            Button("Change Split Direction") { model.splitOrientation = model.splitOrientation == .sideBySide ? .stacked : .sideBySide }
+            let spare = model.tabsAvailableForPanel()
+            if !spare.isEmpty {
+                Menu("Show Another Tab Here") {
+                    ForEach(spare) { other in Button(other.displayTitle) { model.replaceSplitPanel(tab.id, with: other) } }
+                }
+            }
+            Divider()
+            Button("Close This Panel (the tab stays open)") { model.removeFromSplit(tab.id) }
+            Button("Close Split View") { model.closeSplit() }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityAddTraits(focused ? .isSelected : [])
+        .accessibilityLabel("\(focused ? "Focused panel" : "Panel"): \(tab.displayTitle)")
+        .accessibilityIdentifier("research-panel-header")
     }
 }

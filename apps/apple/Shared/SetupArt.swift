@@ -162,7 +162,7 @@ struct SetupWindowGlyph: View {
         let p = MiniPalette(scheme: scheme, selected: selected)
         MiniWindowFrame(p: p) { w, h in
             switch preset {
-            case .sidebar:
+            case .sidebar, .hybrid, .researchDesk, .workspaceDeck:
                 HStack(spacing: 0) {
                     VStack(alignment: .leading, spacing: h * 0.05) {
                         MiniDots(h: h, p: p).padding(.bottom, h * 0.015)
@@ -179,7 +179,7 @@ struct SetupWindowGlyph: View {
                     Rectangle().fill(p.line).frame(width: 0.6)
                     MiniPage(w: w * 0.70, h: h, p: p)
                 }
-            case .classic:
+            case .classic, .classicReversed:
                 VStack(spacing: 0) {
                     HStack(spacing: h * 0.04) {
                         MiniDots(h: h, p: p)
@@ -197,7 +197,7 @@ struct SetupWindowGlyph: View {
                     .padding(.horizontal, h * 0.06).frame(height: h * 0.11)
                     MiniPage(w: w, h: h * 0.76, p: p)
                 }
-            case .minimal:
+            case .minimal, .minimalReversed:
                 VStack(spacing: 0) {
                     HStack(spacing: h * 0.03) {
                         MiniDots(h: h, p: p)
@@ -208,7 +208,7 @@ struct SetupWindowGlyph: View {
                     .padding(.horizontal, h * 0.05).frame(height: h * 0.115)
                     MiniPage(w: w, h: h * 0.885, p: p)
                 }
-            case .floating:
+            case .floating, .canvas:
                 ZStack(alignment: .top) {
                     MiniPage(w: w, h: h, p: p)
                     HStack { MiniDots(h: h, p: p); Spacer() }.padding(h * 0.05).frame(maxHeight: .infinity, alignment: .top)

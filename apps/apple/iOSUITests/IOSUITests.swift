@@ -1,8 +1,8 @@
 import XCTest
 
 /// Runs inside the iOS Simulator, so it never touches the Mac's keyboard. Needs scripts/testserver.py on :18765.
-/// The iPhone has no address bar or toolbar: a dock of three pills at the bottom, a search button at the top right, and a search
-/// panel that comes down from the top.
+/// The iPhone opens with the Bottom Bar: an address field along the bottom with Back, Forward, Reload, Share, Tabs and Menu under it; while a page is read
+/// the bar folds into one small capsule. (The older floating dock with a search button at the top right is gone.)
 final class IOSUITests: XCTestCase {
     var app: XCUIApplication!
 
@@ -11,12 +11,25 @@ final class IOSUITests: XCTestCase {
         _ = try? String(contentsOf: URL(string: "http://127.0.0.1:18765/_reset")!, encoding: .utf8)
         app = XCUIApplication()
         app.launchArguments += ["-UITestRoot", "bs-ios-ui-\(UUID().uuidString)"]
+        // The first-run Setup screen would cover everything: these tests are about the browser, not about Setup.
+        app.launchEnvironment["BS_SKIP_SETUP"] = "1"
         app.launch()
     }
 
-    func searchButton() -> XCUIElement { app.buttons["collapsed-pill"] }
     func omnibox() -> XCUIElement { app.textFields["omnibox"] }
-    func site() -> XCUIElement { app.buttons["collapsed-pill"] }
+    func tabsButton() -> XCUIElement { app.buttons["Tab overview"] }
+    func moreButton() -> XCUIElement { app.buttons["dock-more"] }
+    func foldedBar() -> XCUIElement { app.buttons["bar-capsule"] }
+    /// An entry of the system menu, whichever element type iOS exposes it as.
+    func menuEntry(_ name: String) -> XCUIElement {
+        app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", name)).firstMatch
+    }
+
+    /// The screen's element list, to the test log, without the long lists of plain containers.
+    func dump(_ why: String) {
+        let lines = app.debugDescription.split(separator: "\n").filter { $0.contains("Button") || $0.contains("StaticText") || $0.contains("MenuItem") || $0.contains("TextField") || $0.contains("Menu,") || $0.contains("Alert") || $0.contains("Sheet") }
+        print("SCREEN (\(why)):\n" + lines.prefix(60).joined(separator: "\n"))
+    }
 
     func serverSaw(_ path: String) -> Bool {
         ((try? String(contentsOf: URL(string: "http://127.0.0.1:18765/_requests")!, encoding: .utf8)) ?? "").contains(path)
@@ -29,61 +42,69 @@ final class IOSUITests: XCTestCase {
     }
 
     func navigate(_ address: String) {
-        XCTAssertTrue(searchButton().waitForExistence(timeout: 15), "search button missing")
-        searchButton().tap()
-        XCTAssertTrue(omnibox().waitForExistence(timeout: 8), "the search panel did not open")
+        XCTAssertTrue(omnibox().waitForExistence(timeout: 15), "address field missing")
         omnibox().tap()
+        // Tapping the bar's field can bring up the search field in its place: wait for the keyboard, and tap the field that is there now.
+        if !waitFor(4, { self.app.keyboards.count > 0 }) { Thread.sleep(forTimeInterval: 0.6); omnibox().tap() }
+        _ = waitFor(6) { self.app.keyboards.count > 0 }
+        if app.keyboards.count == 0 { print("SCREEN (no keyboard after tapping the address field):\n\(app.debugDescription)") }
         omnibox().typeText(address + "\n")
     }
 
-    func testThereAreNoBarsOnlyTheDockAndTheSearchButton() {
-        XCTAssertTrue(searchButton().waitForExistence(timeout: 15))
-        XCTAssertTrue(site().exists, "the dock's site pill")
-        XCTAssertTrue(app.buttons["Back"].exists && app.buttons["Forward"].exists)
-        XCTAssertTrue(app.buttons["dock-tabs"].exists && app.buttons["dock-more"].exists)
-        XCTAssertFalse(omnibox().exists, "no address bar until search is opened")
-        XCTAssertTrue(app.staticTexts["Favorites"].waitForExistence(timeout: 5))
-    }
-
-    func testSearchOpensFromTheTopRightAndComesDownFromTheTop() {
-        XCTAssertTrue(searchButton().waitForExistence(timeout: 15))
-        let button = searchButton().frame
-        XCTAssertGreaterThan(button.midX, app.frame.width * 0.6, "the search button is on the right")
-        XCTAssertLessThan(button.minY, app.frame.height * 0.15, "and at the top")
-        searchButton().tap()
-        XCTAssertTrue(omnibox().waitForExistence(timeout: 8))
-        XCTAssertLessThan(omnibox().frame.minY, app.frame.height * 0.2, "the field is at the top, above the keyboard")
-        XCTAssertTrue(app.buttons["search-engine-menu"].exists, "and there is a way to switch search engines")
+    func testTheBottomBarHasTheAddressFieldAndItsButtons() {
+        XCTAssertTrue(omnibox().waitForExistence(timeout: 15))
+        XCTAssertGreaterThan(omnibox().frame.minY, app.frame.height * 0.6, "the address field is at the bottom, where the thumb is")
+        if !(app.buttons["Back"].exists && app.buttons["Forward"].exists && app.buttons["Share"].exists) { print("SCREEN (bar buttons):\n\(app.debugDescription)") }
+        XCTAssertTrue(app.buttons["Back"].exists && app.buttons["Forward"].exists && app.buttons["Share"].exists)
+        XCTAssertTrue(tabsButton().exists && moreButton().exists, "the tabs and menu buttons")
+        XCTAssertTrue(app.buttons["add-favorite"].waitForExistence(timeout: 5), "the start page is showing")
     }
 
     func testTypingAnAddressLoadsARealPage() {
         navigate("127.0.0.1:18765/page")
         XCTAssertTrue(waitFor(20) { self.serverSaw("/page") }, "navigation never reached the server")
-        XCTAssertTrue(waitFor(10) { self.site().label.contains("127.0.0.1") }, "the dock names the site: \(site().label)")
-        XCTAssertFalse(omnibox().exists, "the search panel closed")
+        XCTAssertTrue(waitFor(10) { (self.omnibox().value as? String ?? "").contains("127.0.0.1") }, "the field names the site: \(omnibox().value as? String ?? "")")
     }
 
     func testTabOverviewOpensWithNewAndPrivateModes() {
-        XCTAssertTrue(searchButton().waitForExistence(timeout: 15))
-        app.buttons["dock-tabs"].tap()
-        XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 6), "overview did not open")
+        XCTAssertTrue(tabsButton().waitForExistence(timeout: 15))
+        tabsButton().tap()
+        let done = app.buttons["overview-done"]
+        if !done.waitForExistence(timeout: 6) { print("SCREEN (overview did not open):\n\(app.debugDescription)") }
+        XCTAssertTrue(done.exists, "overview did not open")
         XCTAssertTrue(app.segmentedControls.buttons["Private"].exists)
         app.segmentedControls.buttons["Private"].tap()
-        XCTAssertTrue(app.staticTexts["Private Browsing"].waitForExistence(timeout: 2) || app.buttons["Done"].exists)
-        app.buttons["Done"].tap()
-        XCTAssertTrue(waitFor(6) { self.app.staticTexts["Private Browsing"].exists }, "private tab start page should show")
+        XCTAssertTrue(app.staticTexts["Nothing here is saved"].waitForExistence(timeout: 2) || done.exists)
+        done.tap()
+        if !waitFor(6, { self.app.staticTexts["Nothing here is saved"].exists }) { dump("private tab start page") }
+        XCTAssertTrue(app.staticTexts["Nothing here is saved"].exists, "private tab start page should show")
     }
 
     func testBookmarkingAPageFromTheMenu() {
         navigate("127.0.0.1:18765/page")
         XCTAssertTrue(waitFor(20) { self.serverSaw("/page") })
-        XCTAssertTrue(waitFor(10) { self.site().label.contains("127.0.0.1") })
-        app.buttons["dock-more"].tap()
-        let add = app.buttons["Add Bookmark"]
-        XCTAssertTrue(add.waitForExistence(timeout: 5), "the menu offers Add Bookmark")
+        XCTAssertTrue(waitFor(10) { (self.omnibox().value as? String ?? "").contains("127.0.0.1") })
+        moreButton().tap()
+        let add = menuEntry("Favorite")
+        if !add.waitForExistence(timeout: 5) { dump("after tapping the menu button") }
+        XCTAssertTrue(add.exists, "the menu offers Favorite")
         add.tap()
-        app.buttons["dock-more"].tap()
-        XCTAssertTrue(app.buttons["Remove Bookmark"].waitForExistence(timeout: 5), "and now offers Remove Bookmark")
+        moreButton().tap()
+        XCTAssertTrue(menuEntry("Remove Favorite").waitForExistence(timeout: 5), "and now offers Remove Favorite")
+    }
+
+    /// The compact bars have no tabs button: the menu has Show All Tabs, which opens the overview.
+    func testTheCompactBarReachesTabsFromTheMenu() {
+        relaunch(arguments: [], environment: ["BS_PHONE_PRESET": "compactBottom"])
+        XCTAssertTrue(omnibox().waitForExistence(timeout: 15), "the compact bar did not come up")
+        XCTAssertFalse(tabsButton().exists, "the compact bar has no tabs button of its own")
+        XCTAssertTrue(moreButton().waitForExistence(timeout: 5))
+        moreButton().tap()
+        let all = menuEntry("Show All Tabs")
+        if !all.waitForExistence(timeout: 5) { dump("compact menu without Show All Tabs") }
+        XCTAssertTrue(all.exists, "the compact bar's menu has Show All Tabs")
+        all.tap()
+        XCTAssertTrue(app.buttons["overview-done"].waitForExistence(timeout: 6), "Show All Tabs did not open the overview")
     }
 
     func testNoBarEverAppearsWhileScrollingAndThePageReachesTheBottomEdge() {
@@ -93,12 +114,13 @@ final class IOSUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 2)
         for _ in 0..<4 { page.swipeUp(velocity: .slow) }
         Thread.sleep(forTimeInterval: 1.0)
-        XCTAssertTrue(app.buttons["compact-pill"].exists, "reading folds the dock into one small pill")
-        XCTAssertFalse(searchButton().exists, "and the top pills step aside")
+        XCTAssertTrue(foldedBar().exists, "reading folds the bar into one small capsule")
+        if tabsButton().exists && tabsButton().isHittable { dump("after scrolling, bar not folded away") }
+        XCTAssertFalse(tabsButton().exists && tabsButton().isHittable, "and the bar's buttons step aside")
         for _ in 0..<2 { page.swipeDown(velocity: .slow) }
         Thread.sleep(forTimeInterval: 1.0)
         XCTAssertFalse(omnibox().exists, "scrolling never brings a bar back")
-        XCTAssertTrue(site().exists && searchButton().exists, "scrolling back opens the dock and the search button again")
+        XCTAssertTrue(omnibox().exists && tabsButton().exists, "scrolling back opens the bar again")
         let shot = app.screenshot()
         if let dir = ProcessInfo.processInfo.environment["PILL_SHOT_DIR"] {
             try? shot.pngRepresentation.write(to: URL(fileURLWithPath: dir + "/dock.png"))
@@ -120,10 +142,12 @@ final class IOSUITests: XCTestCase {
 
     // MARK: Layout and accessibility pictures
 
-    private func relaunch(arguments: [String]) {
+    private func relaunch(arguments: [String], environment: [String: String] = [:]) {
         app.terminate()
         app = XCUIApplication()
         app.launchArguments += ["-UITestRoot", "bs-ios-ui-\(UUID().uuidString)"] + arguments
+        app.launchEnvironment["BS_SKIP_SETUP"] = "1"
+        app.launchEnvironment.merge(environment) { _, new in new }
         app.launch()
     }
 
@@ -131,20 +155,20 @@ final class IOSUITests: XCTestCase {
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = name; shot.lifetime = .keepAlways; add(shot)
     }
 
-    /// The dock and search button stay reachable at the largest text size, and in landscape.
+    /// The address field and the bar's buttons stay reachable at the largest text size, and in landscape.
     func testLargestTextSizeKeepsTheControlsReachable() {
         relaunch(arguments: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
-        XCTAssertTrue(searchButton().waitForExistence(timeout: 15), "search button missing at the largest text size")
-        XCTAssertTrue(searchButton().isHittable, "search button is covered at the largest text size")
+        XCTAssertTrue(omnibox().waitForExistence(timeout: 15), "address field missing at the largest text size")
+        XCTAssertTrue(omnibox().isHittable, "address field is covered at the largest text size")
         attach("phone-largest-text")
     }
 
     func testLandscapeKeepsTheControlsReachable() {
         XCUIDevice.shared.orientation = .landscapeLeft
         defer { XCUIDevice.shared.orientation = .portrait }
-        XCTAssertTrue(searchButton().waitForExistence(timeout: 15), "search button missing in landscape")
+        XCTAssertTrue(omnibox().waitForExistence(timeout: 15), "address field missing in landscape")
         Thread.sleep(forTimeInterval: 0.8)
-        XCTAssertTrue(searchButton().isHittable, "search button is covered in landscape")
+        XCTAssertTrue(omnibox().isHittable, "address field is covered in landscape")
         attach("phone-landscape")
     }
 }

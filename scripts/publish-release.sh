@@ -33,6 +33,7 @@ m = json.load(open(sys.argv[1])); d = sys.argv[2]
 assert m["artifacts"][os.path.basename(d)]["sha256"] == hashlib.sha256(open(d, "rb").read()).hexdigest()
 PY
 git merge-base --is-ancestor "$SRC_COMMIT" origin/main || { echo "✘ the build commit $SRC_COMMIT is not on origin/main"; exit 1; }
+printf '%s' "$NOTES" | python3 -I scripts/check-attribution.py --text || { echo "✘ the release notes contain AI-tool attribution"; exit 1; }
 ASSETS=("$DMG"); [ -f dist/sbom.cdx.json ] && ASSETS+=(dist/sbom.cdx.json dist/build-metadata.json)
 if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
   # The same version again with a newer build: its files and notes are replaced; installed copies see the higher build number in the update feed.

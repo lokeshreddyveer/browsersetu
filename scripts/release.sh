@@ -97,6 +97,9 @@ fi
 RELEASE_COMMIT="$(git rev-parse HEAD)"
 rm -rf "$DIST" "$DERIVED"; mkdir -p "$DIST"
 
+# No AI-tool attribution in files or in new commits (history is never rewritten; see scripts/check-attribution.py).
+python3 -I scripts/check-attribution.py || fail "AI-tool attribution found in the repository or in a new commit (see above)."
+
 # The permanent architecture decision (docs/decisions/0001): documents, manifests, build files and scripts must not contradict it.
 python3 -I scripts/check-architecture.py || fail "the repository contradicts docs/decisions/0001-media-tools-optional-downloads.md (see above)."
 
@@ -204,5 +207,6 @@ assert m.get("source_commit") == commit and m.get("source_dirty") is False, "bui
 m["artifacts"] = {os.path.basename(dmg): {"sha256": hashlib.sha256(open(dmg, "rb").read()).hexdigest(), "bytes": os.path.getsize(dmg)}}
 json.dump(m, open(p, "w"), indent=2); open(p, "a").write("\n")
 PY
+python3 -I scripts/check-attribution.py --files "$DIST/build-metadata.json" "$DIST/sbom.cdx.json" || fail "AI-tool attribution found in the generated release metadata."
 echo "✔ $DMG is signed, notarized and stapled"
 shasum -a 256 "$DMG"

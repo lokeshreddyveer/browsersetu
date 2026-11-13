@@ -30,7 +30,10 @@ struct SiteTile: View {
     }
 
     private var letterTile: some View {
-        Text(tileLetter(title: title, url: url))
+        let letter = tileLetter(title: title, url: url)
+        return Group {
+            if letter.isEmpty { Image(systemName: "globe").font(.system(size: size * 0.42, weight: .medium)) } else { Text(letter) }
+        }
             .font(.system(size: size * 0.42, weight: .semibold, design: .rounded))
             .foregroundStyle(.white)
             .frame(width: size, height: size)
@@ -104,6 +107,8 @@ struct TabMenuItems: View {
                 Button("Replace the Second Panel") { model.openSplit(with: tab) }
             } else { Button("Open in Split View") { model.openSplit(with: tab) } }
         }
+        Button(model.effectiveTabLayout == .sidebar ? "Move Up" : "Move Left") { model.moveTabAlong(tab, by: -1) }.disabled(!model.canMoveTab(tab, by: -1))
+        Button(model.effectiveTabLayout == .sidebar ? "Move Down" : "Move Right") { model.moveTabAlong(tab, by: 1) }.disabled(!model.canMoveTab(tab, by: 1))
         Menu("Move to Window") {
             Button("New Window") { model.moveTabToNewWindow(tab.id) }.disabled(model.tabs.count < 2 && model.isSecondary)
             if !model.otherWindows.isEmpty {
@@ -139,12 +144,15 @@ struct TabMenuItems: View {
         Divider()
         TabDetailsMenu(tab: tab)
         Divider()
-        Button("Close Tab") { model.closeTab(id: tab.id) }
-        Button("Close Other Tabs") { model.closeOtherTabs(except: tab.id) }
-        Button(model.effectiveTabLayout == .sidebar ? "Close Tabs Above" : "Close Tabs to the Left") { model.closeTabs(above: tab.id, wantAbove: true) }
-            .disabled(model.tabsToClose(above: tab.id, wantAbove: true).isEmpty)
-        Button(model.effectiveTabLayout == .sidebar ? "Close Tabs Below" : "Close Tabs to the Right") { model.closeTabs(above: tab.id, wantAbove: false) }
-            .disabled(model.tabsToClose(above: tab.id, wantAbove: false).isEmpty)
+        Button(tab.isLocked ? "Close Tab (locked)" : "Close Tab") { model.closeTab(id: tab.id) }.disabled(tab.isLocked)
+        // Each bulk close says how many tabs it takes (pinned and locked tabs are kept, as the commands do).
+        let others = model.visibleTabs.filter { $0.id != tab.id && !$0.pinned && !$0.isLocked }.count
+        let before = model.tabsToClose(above: tab.id, wantAbove: true).count, after = model.tabsToClose(above: tab.id, wantAbove: false).count
+        Button(others > 0 ? "Close \(others) Other Tab\(others == 1 ? "" : "s")" : "Close Other Tabs") { model.closeOtherTabs(except: tab.id) }.disabled(others == 0)
+        Button((model.effectiveTabLayout == .sidebar ? "Close Tabs Above" : "Close Tabs to the Left") + (before > 0 ? " (\(before))" : "")) { model.closeTabs(above: tab.id, wantAbove: true) }
+            .disabled(before == 0)
+        Button((model.effectiveTabLayout == .sidebar ? "Close Tabs Below" : "Close Tabs to the Right") + (after > 0 ? " (\(after))" : "")) { model.closeTabs(above: tab.id, wantAbove: false) }
+            .disabled(after == 0)
         Button("Clear Unpinned Tabs") { model.clearTabs() }.disabled(model.clearableTabs().count < 2)
     }
 
@@ -506,6 +514,11 @@ struct TabOverview: View {
                 }
                 .pickerStyle(.segmented).frame(maxWidth: 220)
                 #endif
+                // In the Workspace Deck the overview says whose tabs it is showing.
+                if model.layoutPreset == .workspaceDeck {
+                    Text("Overview of \(model.activeWorkspace.isEmpty ? "Personal" : model.activeWorkspace) · \(model.visibleTabs.count) tab\(model.visibleTabs.count == 1 ? "" : "s")")
+                        .font(.headline).lineLimit(1).accessibilityAddTraits(.isHeader).accessibilityIdentifier("overview-title")
+                }
                 HStack(spacing: 6) {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                     TextField("Search Tabs", text: $query).textFieldStyle(.plain).focused($searchFocused)
@@ -731,6 +744,7 @@ struct WorkspaceMenu: View {
     /// A plain header row with no fill and no chevron.
     var flat = false
     @State private var hovering = false
+    @State private var confirmingDelete = false
 
     private var currentIcon: String { model.workspaces.first { $0.name == model.activeWorkspace }?.icon ?? "person" }
     private var currentName: String { model.activeWorkspace.isEmpty ? "Personal" : model.activeWorkspace }
@@ -749,7 +763,7 @@ struct WorkspaceMenu: View {
             Button("New Workspace…") { promptNewWorkspace(model: model) }
             if !model.activeWorkspace.isEmpty {
                 Button("Rename “\(model.activeWorkspace)”…") { promptRenameWorkspace(model: model, name: model.activeWorkspace) }
-                Button("Delete “\(model.activeWorkspace)”", role: .destructive) { model.deleteWorkspace(model.activeWorkspace) }
+                Button("Delete “\(model.activeWorkspace)”…", role: .destructive) { confirmingDelete = true }
             }
             Button("Manage Workspaces…") {
                 #if os(macOS)
@@ -775,6 +789,13 @@ struct WorkspaceMenu: View {
         #endif
         .onHover { hovering = $0 }
         .accessibilityLabel("Workspace: \(currentName)")
+        // Nothing is closed: the tabs move to Personal. Said before it happens.
+        .confirmationDialog("Delete the workspace “\(model.activeWorkspace)”?", isPresented: $confirmingDelete, titleVisibility: .visible) {
+            Button("Delete Workspace", role: .destructive) { model.deleteWorkspace(model.activeWorkspace) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Its tabs stay open and move to Personal. The workspace’s name, icon and theme are removed.")
+        }
     }
 }
 

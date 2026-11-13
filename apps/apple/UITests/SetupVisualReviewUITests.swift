@@ -23,7 +23,7 @@ final class SetupVisualReviewUITests: XCTestCase {
     private var window: XCUIElement { app.windows["browser-AppWindow-1"] }
 
     private func shot(_ name: String) {
-        let image = window.safeScreenshot()
+        guard let image = window.safeScreenshot() else { return }
         try? image.pngRepresentation.write(to: URL(fileURLWithPath: "\(dir)/\(tag)-\(name).png"))
         let a = XCTAttachment(screenshot: image); a.name = name; a.lifetime = .keepAlways; add(a)
     }

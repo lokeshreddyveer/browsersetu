@@ -514,7 +514,8 @@ final class LegacyHistoryTests: XCTestCase {
         let row = vm.rows[0]
         XCTAssertTrue(row.isLegacy); XCTAssertEqual(row.status, .completed); XCTAssertEqual(row.protocolID, "legacy")
         XCTAssertFalse(row.sourceDisplay.contains("SECRET") || row.detail.contains("SECRET"), "an old address's signature is not shown")
-        XCTAssertTrue(row.actions.isDisjoint(with: [.removeRecord, .cancel, .retry, .resume, .rename, .move, .trashFile]), "there is no task to change")
+        XCTAssertTrue(row.actions.isDisjoint(with: [.cancel, .retry, .resume, .rename, .move, .trashFile]), "there is no task to change")
+        XCTAssertTrue(row.actions.contains(.removeRecord), "but an old entry can always be taken off the list (its file is never touched)")
         XCTAssertTrue(row.detail.contains("file not found"), "a file that is gone is said to be gone")
         XCTAssertNil(c.ledger.record(row.id), "no record was created for it")
         var q = DownloadQuery(); q.search = "old3"

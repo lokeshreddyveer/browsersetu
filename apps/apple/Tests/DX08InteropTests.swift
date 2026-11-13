@@ -72,8 +72,11 @@ final class DX08InteropTests: MediaCase {
         for _ in 0..<100 where item.status == .unknown { try await Task.sleep(for: .milliseconds(50)) }
         XCTAssertEqual(item.status, .readyToPlay, "\(String(describing: item.error))", line: line)
         player.play()
-        try await Task.sleep(for: .milliseconds(1200))
-        XCTAssertGreaterThan(player.currentTime().seconds, 0.6, "it plays", line: line)
+        // The threshold is unchanged (it must have played more than 0.6 s). It is waited for, up to 10 s, instead of read after a fixed 1.2 s: how long the player takes to start depends on how busy
+        // the machine is (it read 0.40 s once at the end of a full run), while a file that cannot play still never gets there and fails after the wait.
+        var played = player.currentTime().seconds
+        for _ in 0..<200 where !(played > 0.6) { try await Task.sleep(for: .milliseconds(50)); played = player.currentTime().seconds }
+        XCTAssertGreaterThan(played, 0.6, "it plays", line: line)
         player.pause()
     }
 

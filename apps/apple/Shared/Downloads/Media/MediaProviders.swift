@@ -69,6 +69,53 @@ enum ProviderRecognizer {
     private static func isDigits(_ s: String, _ range: ClosedRange<Int>) -> Bool { range.contains(s.count) && s.allSatisfy { $0.isASCII && $0.isNumber } }
     private static func isCode(_ s: String, _ range: ClosedRange<Int>) -> Bool { range.contains(s.count) && s.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_" || $0 == "-") } }
 
+    // MARK: URL structure of video pages (shared by Vimeo and Facebook)
+
+    /// Vimeo's own site (not its API or developer hosts).
+    private static func vimeoContentHost(_ host: String) -> Bool { host == "vimeo.com" || host == "www.vimeo.com" }
+
+    /// The video id in a Vimeo page address, or nil when the path is not one of its video-page shapes:
+    /// /<id>, /<id>/<private-hash>, /channels/<name>/<id>, /groups/<name>/videos/<id>, /album|showcase/<id>/video/<id>, /ondemand/<name>/<id>.
+    static func vimeoVideoID(_ parts: [String]) -> String? {
+        guard let first = parts.first else { return nil }
+        if isDigits(first, 1...12) { return parts.count == 1 || (parts.count == 2 && isPrivateLinkHash(parts[1])) ? first : nil }          // /<id> or /<id>/<private-link hash>, not /<id>/settings
+        switch first {
+        case "manage": return parts.count == 3 && parts[1] == "videos" && isDigits(parts[2], 1...12) ? parts[2] : nil       // the owner's own management page for a video
+        case "channels": return parts.count >= 3 && isDigits(parts[2], 1...12) ? parts[2] : nil
+        case "groups": return parts.count >= 4 && parts[2] == "videos" && isDigits(parts[3], 1...12) ? parts[3] : nil
+        case "album", "showcase": return parts.count >= 4 && parts[2] == "video" && isDigits(parts[3], 1...12) ? parts[3] : nil
+        case "ondemand": return parts.count >= 3 && isDigits(parts[2], 1...12) ? parts[2] : nil
+        default:
+            if parts.count >= 4, parts[1] == "review", isDigits(parts[2], 1...12), isPrivateLinkHash(parts[3]) { return parts[2] }          // /<owner>/review/<id>/<hash>
+            return nil
+        }
+    }
+
+    /// Vimeo's private-link hash: lower-case hexadecimal, 8 to 12 characters (so a word such as "settings" or "comments" is never taken for one).
+    private static func isPrivateLinkHash(_ s: String) -> Bool { (8...12).contains(s.count) && s.allSatisfy { $0.isASCII && ($0.isNumber || ("a"..."f").contains($0)) } }
+
+    /// Facebook's own content hosts (bare, www, m, web, mbasic, touch), not its developer, business, link-shim or other service hosts.
+    private static func facebookContentHost(_ host: String) -> Bool {
+        if host == "facebook.com" || ["www.", "m.", "web.", "mbasic.", "touch.", "free."].contains(where: { host == $0 + "facebook.com" }) { return true }
+        // language hosts such as en-gb.facebook.com or de.facebook.com
+        guard host.hasSuffix(".facebook.com") else { return false }
+        let label = String(host.dropLast(".facebook.com".count))
+        return label.count == 2 && label.allSatisfy { $0.isASCII && $0.isLowercase && $0.isLetter } || (label.count == 5 && label.dropFirst(2).first == "-" && label.enumerated().allSatisfy { $0.offset == 2 || ($0.element.isASCII && $0.element.isLowercase && $0.element.isLetter) })
+    }
+
+    /// The video id of a Facebook /videos/ address: /<page>/videos/<id>, /<page>/videos/<slug>/<id>, /groups/<group>/videos/<id>. A first segment that is a Facebook section
+    /// (help, policies, marketplace, ...) is not a page name.
+    static func facebookVideosID(_ parts: [String]) -> String? {
+        let sections: Set<String> = ["help", "policies", "privacy", "business", "ads", "about", "legal", "terms", "marketplace", "developers", "settings", "pages", "events", "gaming", "login", "videos", "watch", "reel", "share", "stories", "photo", "photos", "hashtag"]
+        guard let at = parts.firstIndex(of: "videos"), at >= 1 else { return nil }
+        if parts[0] == "pages" { return at == 3 && parts.count == 5 && isDigits(parts[2], 5...25) && isDigits(parts[4], 5...25) ? parts[4] : nil }          // legacy /pages/<name>/<page-id>/videos/<id>
+        if parts[0] == "groups" { return at == 2 && parts.count == 4 && isDigits(parts[3], 5...25) ? parts[3] : nil }
+        guard at == 1, !sections.contains(parts[0].lowercased()) else { return nil }
+        if parts.count == 3, isDigits(parts[2], 5...25) { return parts[2] }
+        if parts.count == 4, isDigits(parts[3], 5...25) { return parts[3] }          // /<page>/videos/<title-slug>/<id>
+        return nil
+    }
+
     /// nil: not a known provider (the generic path applies). A known provider with an address this does not understand still matches, with no media id.
     static func recognize(_ url: URL) -> ProviderMatch? {
         guard let host = canonicalHost(url), let provider = provider(forHost: host) else { return nil }
@@ -92,7 +139,9 @@ enum ProviderRecognizer {
             } else if parts.first == "playlist", let list = q("list"), isCode(list, 10...64) { m.mediaID = list; m.kind = .playlist }
         case .vimeo:
             m.isEmbed = host == "player.vimeo.com"
-            if let id = (m.isEmbed ? (parts.first == "video" && parts.count > 1 ? parts[1] : nil) : parts.first(where: { isDigits($0, 1...12) })), isDigits(id, 1...12) { m.mediaID = id; m.kind = .video }
+            // Only real video-page shapes carry an id: a number elsewhere in a path (a blog year, a help article, a settings page) is not a video.
+            if m.isEmbed { if parts.first == "video", parts.count > 1, isDigits(parts[1], 1...12) { m.mediaID = parts[1]; m.kind = .video } }
+            else if vimeoContentHost(host), let id = vimeoVideoID(parts) { m.mediaID = id; m.kind = .video }
         case .tiktok:
             if host.hasPrefix("vm.") || host.hasPrefix("vt.") || parts.first == "t" { m.isShortLink = true; m.kind = .video }
             else if parts.count >= 3, parts[0].hasPrefix("@"), parts[1] == "video" || parts[1] == "photo", isDigits(parts[2], 5...25) { m.mediaID = parts[2]; m.kind = parts[1] == "video" ? .video : .image }
@@ -103,11 +152,13 @@ enum ProviderRecognizer {
             else if parts.first == "stories", parts.count > 2, isDigits(parts[2], 5...25) { m.mediaID = parts[2]; m.kind = .story }
         case .facebook:
             if hostMatches(host, "fb.watch") { m.isShortLink = true; m.kind = .video; if let c = parts.first, isCode(c, 4...30) { m.mediaID = c } }
-            else if parts.first == "watch", let v = q("v"), isDigits(v, 5...25) { m.mediaID = v; m.kind = .video }
-            else if parts.first == "video.php", let v = q("v"), isDigits(v, 5...25) { m.mediaID = v; m.kind = .video }
-            else if parts.first == "reel", parts.count > 1, isDigits(parts[1], 5...25) { m.mediaID = parts[1]; m.kind = .reel }
-            else if let at = parts.firstIndex(of: "videos"), parts.count > at + 1, isDigits(parts[at + 1], 5...25) { m.mediaID = parts[at + 1]; m.kind = .video }
-            else if parts.count >= 3, parts[0] == "share", parts[1] == "v" { m.isShortLink = true; m.kind = .video; m.mediaID = parts[2] }
+            else if facebookContentHost(host) {
+                if parts.first == "watch", let v = q("v"), isDigits(v, 5...25) { m.mediaID = v; m.kind = .video }
+                else if parts.first == "video.php", let v = q("v"), isDigits(v, 5...25) { m.mediaID = v; m.kind = .video }
+                else if parts.first == "reel", parts.count > 1, isDigits(parts[1], 5...25) { m.mediaID = parts[1]; m.kind = .reel }
+                else if let id = facebookVideosID(parts) { m.mediaID = id; m.kind = .video }
+                else if parts.count >= 3, parts[0] == "share", parts[1] == "v" { m.isShortLink = true; m.kind = .video; m.mediaID = parts[2] }
+            }
         case .x:
             if hostMatches(host, "t.co") { m.isShortLink = true }
             else if let at = parts.firstIndex(of: "status"), parts.count > at + 1, isDigits(parts[at + 1], 5...25) { m.mediaID = parts[at + 1]; m.kind = .post }

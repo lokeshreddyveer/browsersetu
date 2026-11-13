@@ -567,6 +567,11 @@ struct AddDownloadForm: View {
     @State private var ed2k: ED2KAddModel?
     @State private var media: MediaAddModel?
     @State private var torrentProblem: String?
+    /// Asking the server what an unfamiliar address is (cancellable), and the person's choice when it turns out to be a web page.
+    @State private var probing: Task<Void, Never>?
+    @State private var pageChoice: PageChoice?
+    /// An address that turned out to be a web page, with what the person had typed when they asked (so editing the fields meanwhile cannot change what is saved).
+    struct PageChoice: Equatable { var url: URL; var name: String; var checksum: String; var origin: DownloadRequestOrigin }
 
     /// What the installed download extensions suggest for the address typed in. Information only: nothing here starts a download.
     @ViewBuilder private var suggestionsView: some View {
@@ -604,6 +609,10 @@ struct AddDownloadForm: View {
 
     /// An address that ends in .m3u8 or .mpd is a stream playlist: it gets the track choices before anything is downloaded.
     private var origin: DownloadRequestOrigin { text.trimmingCharacters(in: .whitespacesAndNewlines) == (initialText ?? "").trimmingCharacters(in: .whitespacesAndNewlines) && !text.isEmpty ? initialOrigin : .user }
+    /// A video provider's watch page, reel or short: not a file. Saving it as a file would store the page's HTML, so it goes to the video options instead.
+    private var isVideoPage: Bool {
+        url.map(ProviderRecognizer.isVideoPage) ?? false
+    }
     private var isStream: Bool { url.map { ["m3u8", "mpd"].contains($0.pathExtension.lowercased()) } ?? false }
 
     private var checksumOK: Bool { checksum.trimmingCharacters(in: .whitespaces).isEmpty || DownloadIntegrityCheck.normalizedDigest(checksum) != nil }
@@ -626,8 +635,10 @@ struct AddDownloadForm: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Add a download").font(.system(size: 13, weight: .semibold))
             TextField("https://example.com/file.zip or a magnet link", text: $text).textFieldStyle(.roundedBorder).frame(width: 300).onSubmit(start)
-            Text(isED2K ? (ed2kProblem ?? "An eD2k link: you will see what it holds before anything is contacted.") : isMagnet ? (magnetProblem ?? "A magnet link: you will see what it holds before anything is fetched.") : (text.isEmpty || url != nil ? "Paste a direct link to a file." : "That does not look like a web link.")).font(.system(size: 11.5)).foregroundStyle((isED2K ? ed2kProblem : magnetProblem) == nil ? Color.secondary : Color.orange)
+            Text(isED2K ? (ed2kProblem ?? "An eD2k link: you will see what it holds before anything is contacted.") : isMagnet ? (magnetProblem ?? "A magnet link: you will see what it holds before anything is fetched.") : (text.isEmpty || url != nil ? (isVideoPage ? "A video page: Next shows what can be saved." : "Paste a direct link to a file.") : "That does not look like a web link.")).font(.system(size: 11.5)).foregroundStyle((isED2K ? ed2kProblem : magnetProblem) == nil ? Color.secondary : Color.orange)
             suggestionsView
+            if probing != nil { HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Looking at the address…").font(.system(size: 11.5)).foregroundStyle(.secondary); Button("Stop") { probing?.cancel(); probing = nil }.controlSize(.small) } }
+            if let choice = pageChoice { pageChoiceView(choice) }
             if let torrentProblem { Text(torrentProblem).font(.system(size: 11.5)).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true) }
             TextField("Save as (optional)", text: $name).textFieldStyle(.roundedBorder).frame(width: 300).accessibilityLabel("Save as")
             TextField("SHA-256 from the publisher (optional)", text: $checksum).textFieldStyle(.roundedBorder).frame(width: 300).accessibilityLabel("Expected SHA-256")
@@ -635,10 +646,12 @@ struct AddDownloadForm: View {
             HStack {
                 Button("Open .torrent File…", action: openTorrentFile)
                 Button("Open Metalink…", action: openMetalink)
-                Spacer(); Button("Cancel", action: done)
-                Button(isMagnet || isED2K || isStream ? "Next…" : "Download", action: start).buttonStyle(.borderedProminent).disabled(isED2K ? (ed2kProblem != nil || !checksumOK) : isMagnet ? magnet == nil : (url == nil || !checksumOK)).keyboardShortcut(.defaultAction)
+                Spacer()
+                if isVideoPage, let url { Button("Save Page as File") { saveAsFile(url) }.disabled(!checksumOK).help("Save the web page itself, not the video") }
+                Button("Cancel") { probing?.cancel(); done() }
+                Button(isMagnet || isED2K || isStream || isVideoPage ? "Next…" : "Download", action: start).buttonStyle(.borderedProminent).disabled(isED2K ? (ed2kProblem != nil || !checksumOK) : isMagnet ? magnet == nil : (url == nil || !checksumOK || probing != nil)).keyboardShortcut(.defaultAction)
             }
-        }.padding(14)
+        }.padding(14).onDisappear { probing?.cancel() }
     }
 
     /// A Metalink file lists one file and several places it can be had. It is a stranger's document: its addresses are treated as coming from a page, and nothing starts until its time comes.
@@ -672,13 +685,51 @@ struct AddDownloadForm: View {
     }
 
     private func start() {
+        guard probing == nil else { return }          // a second Return while the address is being looked at must not start a second download
         if isED2K { do { ed2k = try ED2KAddModel(coordinator: coordinator, link: text, sha256: checksum.trimmingCharacters(in: .whitespaces).isEmpty ? nil : checksum) } catch { torrentProblem = (error as? LocalizedError)?.errorDescription }; return }
         if let magnet { torrent = TorrentAddModel(coordinator: coordinator, magnet: magnet, origin: origin); return }
         guard let url else { return }
         let typed = name.trimmingCharacters(in: .whitespaces)
+        if isVideoPage { model.openVideoSheet(forPage: url, isPrivate: false); done(); return }
         if isStream { media = MediaAddModel(coordinator: coordinator, url: url, name: typed.isEmpty ? nil : typed, preferences: preferences, origin: origin); return }
-        coordinator.scheduleDownload(url: url, at: Date(), filename: typed.isEmpty ? nil : typed, expectedSHA256: checksum.trimmingCharacters(in: .whitespaces).isEmpty ? nil : checksum, origin: origin)
+        // An address that may be a web page is asked about first: what the server says it is decides, not the way the address ends. If it cannot be asked, it is saved as it always was.
+        if AddressClassifier.worthProbing(url) {
+            pageChoice = nil
+            // Everything the answer will need is captured NOW: editing the fields while the server is asked cannot change the origin, name or checksum that are used.
+            let choice = PageChoice(url: url, name: typed, checksum: checksum.trimmingCharacters(in: .whitespaces), origin: origin)
+            probing = Task {
+                let answer = await model.probeAddress(url, origin: choice.origin)
+                guard !Task.isCancelled else { return }
+                probing = nil
+                switch AddressClassifier.classify(url, contentType: answer?.contentType, finalURL: answer?.finalURL) {
+                case .videoPage: model.openVideoSheet(forPage: answer?.finalURL ?? url, isPrivate: false); done()
+                case .webPage: pageChoice = choice
+                case .file: saveAsFile(choice)
+                }
+            }
+            return
+        }
+        saveAsFile(PageChoice(url: url, name: typed, checksum: checksum.trimmingCharacters(in: .whitespaces), origin: origin))
+    }
+
+    private func saveAsFile(_ url: URL) { saveAsFile(PageChoice(url: url, name: name.trimmingCharacters(in: .whitespaces), checksum: checksum.trimmingCharacters(in: .whitespaces), origin: origin)) }
+
+    /// The plain download of the address, as typed: also what "Save the Page" does when the person means the page itself.
+    private func saveAsFile(_ c: PageChoice) {
+        coordinator.scheduleDownload(url: c.url, at: Date(), filename: c.name.isEmpty ? nil : c.name, expectedSHA256: c.checksum.isEmpty ? nil : c.checksum, origin: c.origin)
         done()
+    }
+
+    @ViewBuilder private func pageChoiceView(_ choice: PageChoice) -> some View {
+        let checksumFine = choice.checksum.isEmpty || DownloadIntegrityCheck.normalizedDigest(choice.checksum) != nil
+        VStack(alignment: .leading, spacing: 6) {
+            Text("This address is a web page. Look for a video on it, or save the page itself?").font(.system(size: 11.5)).fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Button("Look for a Video") { pageChoice = nil; model.openVideoSheet(forPage: choice.url, isPrivate: false); done() }.controlSize(.small)
+                Button("Save the Page") { pageChoice = nil; saveAsFile(choice) }.controlSize(.small).disabled(!checksumFine)
+                Button("Not Now") { pageChoice = nil }.controlSize(.small)
+            }
+        }
     }
 }
 

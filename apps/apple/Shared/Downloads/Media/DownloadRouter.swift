@@ -231,3 +231,15 @@ final class ExtractorBroker {
 
     func forget() { for e in entries.values { e.task?.cancel() }; entries.removeAll() }
 }
+
+
+extension ProviderRecognizer {
+    /// True for a video provider's watch page, reel or short that names one video. Such an address is not a file: saving it as one would store the page's HTML, so every way of adding it goes to the video options.
+    static func isVideoPage(_ url: URL) -> Bool {
+        // A direct media or other file (v.redd.it/<id>/DASH_720.mp4) is a file, whatever site it is on.
+        let ext = url.pathExtension.lowercased()
+        if !ext.isEmpty, ResourceClassifier.category(forExtension: ext) != nil { return false }
+        guard let m = recognize(url) else { return false }
+        return m.mediaID != nil && [.video, .short, .reel].contains(m.kind) && !m.isEmbed
+    }
+}

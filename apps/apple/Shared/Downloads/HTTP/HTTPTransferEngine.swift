@@ -293,7 +293,8 @@ final class HTTPTransferEngine: NSObject, DownloadTransferEngine, URLSessionDown
             if let etag = headers["etag"] { meta["etag"] = etag }
             if let modified = headers["last-modified"] { meta["lastModified"] = modified }
             let name = DownloadFilename.derive(contentDisposition: headers["content-disposition"], url: finalURL, mimeType: headers["content-type"])
-            return DownloadResolvedSource(suggestedFilename: name.name, totalBytes: contentLength, acceptsRanges: acceptsRanges, metadata: DownloadEngineMetadata.validated(meta))
+            return DownloadResolvedSource(suggestedFilename: name.name, totalBytes: contentLength, acceptsRanges: acceptsRanges, metadata: DownloadEngineMetadata.validated(meta),
+                                          contentType: AddressClassifier.mediaType(headers["content-type"]), finalURL: finalURL)
         }
     }
 

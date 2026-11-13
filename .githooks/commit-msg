@@ -1,0 +1,17 @@
+#!/bin/sh
+# Removes AI-tool attribution from a commit message before it is recorded (Co-authored-by / Signed-off-by / Generated-by / Assisted-by trailers naming an AI tool, and "Generated with ..." lines)
+# and refuses a commit whose author or committer identity names an AI tool. Policy: docs/contribution-policy.md.
+# Enable once per clone:  git config core.hooksPath .githooks      (scripts/check-attribution.py is the matching check for files, release text and commit ranges)
+f="$1"
+[ -f "$f" ] || exit 0
+# The author and committer identity must not be an AI tool (it is never rewritten silently: the commit is refused).
+for v in GIT_AUTHOR_IDENT GIT_COMMITTER_IDENT; do
+  ident="$(git var "$v" 2>/dev/null | tr 'A-Z' 'a-z')"
+  case "$ident" in *claude*|*anthropic*|*openai*|*chatgpt*|*copilot*|*gemini*|*codex*) echo "commit refused: $v names an AI tool ($(git var "$v" | sed 's/<.*//')). Fix user.name/user.email (docs/contribution-policy.md)." >&2; exit 1;; esac
+done
+tmp="$(mktemp)" || exit 0
+grep -v -i -E '^[[:space:]]*(co-authored-by|signed-off-by|generated-by|assisted-by):.*(claude|anthropic|openai|chatgpt|gpt|copilot|codex|gemini|cursor|noreply@anthropic\.com)|^[[:space:]]*(🤖[[:space:]]*)?generated (with|by)[[:space:]].*(claude|anthropic|chatgpt|openai|copilot|codex|gemini|cursor|\bai\b)' "$f" > "$tmp"
+# Trailing blank lines left by a removed trailer block are dropped.
+awk '{ lines[NR] = $0 } END { n = NR; while (n > 0 && lines[n] ~ /^[[:space:]]*$/) n--; for (i = 1; i <= n; i++) print lines[i] }' "$tmp" > "$f"
+rm -f "$tmp"
+exit 0

@@ -80,7 +80,8 @@ enum SettingsRouter {
     static var inlineOpener: (() -> Bool)?
 
     static func open(_ panel: SettingsPanel? = nil) {
-        if let panel { UserDefaults.standard.set(panel.rawValue, forKey: storageKey) }
+        // A test run keeps its pane in memory only: the standard preferences belong to the person's own Browser Setu.
+        if let panel, !TestIsolation.isUITestRun, !TestIsolation.isTestProcess { UserDefaults.standard.set(panel.rawValue, forKey: storageKey) }
         NSApp.activate(ignoringOtherApps: true)
         if let inlineOpener, inlineOpener() { return }
         if let opener { opener() } else { NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) }
@@ -91,7 +92,14 @@ enum SettingsRouter {
 /// `BrowserModel`, so a change here reaches every open browser window at once and is saved as it is made.
 struct MacSettingsView: View {
     @EnvironmentObject var model: BrowserModel
-    @AppStorage(SettingsRouter.storageKey) private var selected = SettingsPanel.general.rawValue
+    @AppStorage(SettingsRouter.storageKey) private var storedPanel = SettingsPanel.general.rawValue
+    /// Where a test run keeps the chosen panel: nowhere outside this window (it used to write the person's own preferences when a panel was clicked).
+    @State private var inMemoryPanel = SettingsPanel.general.rawValue
+    private var keepsPanelInMemory: Bool { TestIsolation.isUITestRun || TestIsolation.isTestProcess }
+    private var selected: String {
+        get { keepsPanelInMemory ? inMemoryPanel : storedPanel }
+        nonmutating set { if keepsPanelInMemory { inMemoryPanel = newValue } else { storedPanel = newValue } }
+    }
 
     private var panel: SettingsPanel { SettingsPanel(rawValue: selected) ?? .general }
     @State private var query = ""

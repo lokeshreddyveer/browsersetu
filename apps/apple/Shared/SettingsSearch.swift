@@ -33,7 +33,7 @@ enum SettingsIndex {
         SettingEntry(title: "Websites Look", words: "website appearance light dark sites", phone: "interface", mac: "appearance"),
         SettingEntry(title: "Dark Pages", words: "darken force dark invert", phone: "interface", mac: "appearance"),
         SettingEntry(title: "Density", words: "compact comfortable spacing size", phone: "interface", mac: "appearance"),
-        SettingEntry(title: "Layout", words: "sidebar floating one row classic toolbar position", phone: "interface", mac: "appearance"),
+        SettingEntry(title: "Layout", words: "sidebar floating one row classic minimal reversed hybrid canvas research desk workspace deck custom toolbar position rail icons collapse omnibox address bar edge reveal full screen gallery preset", phone: "interface", mac: "appearance"),
         SettingEntry(title: "Toolbar and Menu", words: "customize buttons dock more menu", phone: "interface", mac: "appearance"),
         SettingEntry(title: "Address Bar Position", words: "top bottom", phone: "interface", mac: "appearance"),
         SettingEntry(title: "Tab Position", words: "vertical horizontal tabs strip side", phone: "interface", mac: "tabs"),

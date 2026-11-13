@@ -24,7 +24,7 @@ final class SidebarButtonsUITests: XCTestCase {
 
     /// What is on screen, attached to the test result, for when a button does not do what it should.
     private func snapshot(_ name: String) {
-        let shot = XCTAttachment(screenshot: app.safeScreenshot()); shot.name = name; shot.lifetime = .keepAlways; add(shot)
+        let shot = app.safeAttachment(); shot.name = name; shot.lifetime = .keepAlways; add(shot)
         let tree = XCTAttachment(string: app.debugDescription); tree.name = name + "-tree"; tree.lifetime = .keepAlways; add(tree)
         print("SNAPSHOT \(name): windows=\(app.windows.count) buttons=\(app.buttons.allElementsBoundByIndex.prefix(60).map { $0.identifier + "|" + $0.label })")
     }

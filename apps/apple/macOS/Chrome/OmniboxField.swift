@@ -310,6 +310,7 @@ struct OmniboxField: NSViewRepresentable {
                 if parent.address.isEditing { focusChanged(false) }   // never rely on the resign callback alone
                 return true
             case #selector(NSResponder.cancelOperation(_:)):
+                // Escape closes the suggestions and restores the address (doc 06); the keyboard stays in the window's own key-view loop, so Tab still reaches the tabs.
                 control.window?.makeFirstResponder(nil)
                 if parent.address.isEditing { focusChanged(false) }   // restores the display text
                 return true
@@ -325,3 +326,4 @@ struct OmniboxField: NSViewRepresentable {
         }
     }
 }
+

@@ -6,27 +6,39 @@ struct IPadRootView: View {
     @EnvironmentObject var model: BrowserModel
     @State private var showLibrary = false
     @Environment(\.scenePhase) private var scenePhase
+    /// The window's width as it is now (Split View, Slide Over and Stage Manager change it), measured, not assumed.
+    @State private var windowWidth: CGFloat = 1024
+    /// Below this the sidebar steps aside (the tab strip stays), so the page keeps room; the same for the toolbar's extra keys, which are in More.
+    private static let sidebarMinimumWindow: CGFloat = 640
+    private static let compactToolbarWindow: CGFloat = 560
+    private var sidebarShown: Bool { model.sidebarVisible && windowWidth >= Self.sidebarMinimumWindow }
+    private var sidebarWidth: CGFloat { min(300, max(220, windowWidth * 0.34)) }
 
     var body: some View {
         ZStack {
             HStack(spacing: 0) {
-                if model.sidebarVisible {
-                    IPadSidebar().transition(.move(edge: .leading).combined(with: .opacity))
+                if sidebarShown {
+                    IPadSidebar(width: sidebarWidth).transition(.move(edge: .leading).combined(with: .opacity))
                     Divider()
                 }
                 VStack(spacing: 0) {
                     RecoveryBanner()
                     if !barsAway {
-                        if let tab = model.active { IPadToolbar(tab: tab, showLibrary: $showLibrary) }
+                        if let tab = model.active { IPadToolbar(tab: tab, showLibrary: $showLibrary, compact: windowWidth < Self.compactToolbarWindow) }
                         IPadTabStrip()
                     }
                     page
                 }
                 if let docked = model.dockedPanel {
-                    DockedPanelView(sheet: docked).transition(.move(edge: .trailing).combined(with: .opacity))
+                    DockedPanelView(sheet: docked, availableWidth: windowWidth - (sidebarShown ? sidebarWidth : 0)).transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
-            .motion(.spring(response: 0.38, dampingFraction: 0.88), value: model.sidebarVisible)
+            .background(GeometryReader { geo in
+                Color.clear
+                    .onAppear { windowWidth = geo.size.width }
+                    .onChange(of: geo.size.width) { _, new in windowWidth = new }
+            })
+            .motion(.spring(response: 0.38, dampingFraction: 0.88), value: sidebarShown)
             .motion(.easeInOut(duration: 0.26), value: barsAway)
             .motion(.easeOut(duration: 0.22), value: model.dockedPanel)
             if model.overviewVisible { IPadTabOverview().transition(.opacity) }
@@ -87,6 +99,13 @@ struct IPadRootView: View {
         case .zoomIn: model.active?.zoom(by: 0.1)
         case .zoomOut: model.active?.zoom(by: -0.1)
         case .actualSize: model.active?.resetZoom()
+        // The ones this route used to ignore (the menu bar had them, the keyboard layer did not).
+        case .searchTabs: model.showOverview()
+        case .findNext: model.findNext()
+        case .findPrevious: model.findNext(backwards: true)
+        case .sharePage: model.shareActivePage()
+        case .readerMode: if let tab = model.active { Task { await tab.toggleReader() } }
+        case .restoreLayout: model.restoreStandardLayout()
         default: break
         }
     }
@@ -136,6 +155,8 @@ private struct IPadToolbar: View {
     @EnvironmentObject var model: BrowserModel
     @ObservedObject var tab: TabController
     @Binding var showLibrary: Bool
+    /// A narrow window: Share and New Tab leave the row (both are in More) so the address field keeps its room.
+    var compact = false
 
     var body: some View {
         HStack(spacing: 4) {
@@ -150,10 +171,10 @@ private struct IPadToolbar: View {
                     .frame(maxWidth: 620)
                 Spacer(minLength: 0)
             }
-            if let url = tab.url, !tab.isBlank {
+            if !compact, let url = tab.url, !tab.isBlank {
                 ShareLink(item: url) { icon("square.and.arrow.up") }.accessibilityLabel("Share")
             }
-            key("plus", "New tab") { model.newTab() }
+            if !compact { key("plus", "New tab") { model.newTab() } }
             key(nil, "Tabs", count: model.visibleTabs.count) { model.showOverview() }
             Menu {
                 // Everything the iPhone's menu has (find, share, reader, text size, the page's tools, extensions, close tabs)...
@@ -195,6 +216,7 @@ private struct IPadToolbar: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .hoverEffect(.highlight)
         .disabled(!enabled).opacity(enabled ? 1 : 0.35)
         .accessibilityLabel(label)
     }
@@ -216,7 +238,7 @@ private struct IPadTabStrip: View {
                         Image(systemName: "plus").font(.system(size: 15, weight: .semibold)).foregroundStyle(.secondary)
                             .frame(width: 40, height: 40).background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.primary.opacity(0.06)))
                     }
-                    .buttonStyle(.plain).accessibilityLabel("New tab")
+                    .buttonStyle(.plain).hoverEffect(.highlight).accessibilityLabel("New tab")
                 }
                 .padding(.horizontal, 12)
             }
@@ -230,6 +252,7 @@ private struct IPadTabChip: View {
     @EnvironmentObject var model: BrowserModel
     @ObservedObject var tab: TabController
     let selected: Bool
+    @State private var hovering = false
 
     var body: some View {
         HStack(spacing: 8) {
@@ -238,8 +261,9 @@ private struct IPadTabChip: View {
             Text(tab.displayTitle).font(.system(size: 14, weight: selected ? .semibold : .regular)).lineLimit(1)
                 .frame(maxWidth: 180, alignment: .leading)
             if tab.isLoading { ProgressView().controlSize(.mini) }
-            if selected {
-                Button { model.closeTab(id: tab.id) } label: { Image(systemName: "xmark").font(.system(size: 11, weight: .bold)).foregroundStyle(.secondary).frame(width: 24, height: 24) }
+            // With a pointer, the close button shows on hover as well as on the open tab.
+            if selected || hovering {
+                Button { model.closeTab(id: tab.id) } label: { Image(systemName: "xmark").font(.system(size: 11, weight: .bold)).foregroundStyle(.secondary).frame(width: 28, height: 28).contentShape(Rectangle()) }
                     .buttonStyle(.plain).accessibilityLabel("Close tab")
             }
         }
@@ -248,6 +272,14 @@ private struct IPadTabChip: View {
         .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(selected ? Theme.accent.opacity(0.16) : Color.primary.opacity(0.06)))
         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .onTapGesture { model.select(tab.id) }
+        .hoverEffect(.highlight)
+        .onHover { hovering = $0 }
+        // Drag a tab to reorder the strip (the same drop rules as the Mac: a pinned tab stays pinned, a private tab keeps to private windows).
+        .draggable(String(tab.id))
+        .dropDestination(for: String.self) { items, _ in
+            guard let raw = items.first, let dragged = UInt64(raw) else { return false }
+            return model.acceptDroppedTab(dragged, before: tab.id)
+        }
         .contextMenu { TabMenuItems(tab: tab) }
         .motion(.easeOut(duration: 0.18), value: selected)
     }

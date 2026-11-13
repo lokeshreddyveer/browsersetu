@@ -182,7 +182,7 @@ final class BrowserIntegrationTests: XCTestCase {
     func testDeletingProfileRemovesDatabaseAndWebsiteData() async throws {
         let model = makeModel()
         XCTAssertTrue(model.createProfile("doomed"))
-        let id = ProfileIdentity.dataStoreID(for: "doomed")
+        let id = try XCTUnwrap(ProfileIdentity.storeID(for: "doomed"), "a test process must have a test store identity")
         _ = await model.engine.cookies(profile: "doomed", isPrivate: false)  // makes the store exist
         await model.removeProfile("doomed")
         XCTAssertFalse(model.profiles.contains("doomed"))

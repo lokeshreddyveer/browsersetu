@@ -109,6 +109,7 @@ extension BrowserModel {
 
     /// Re-reads the shared settings from the database, then puts back what belongs to this window alone: its layout, its workspace and group, its closed tabs.
     func reloadSharedSettings() {
+        SidebarWidthTrace.log("reloadSharedSettings (another window changed a shared setting); width now \(sidebarWidth)")
         let workspace = activeWorkspace, group = activeGroup, closed = closedTabs
         #if os(macOS)
         let layout = layoutSnapshot()
@@ -149,8 +150,42 @@ extension BrowserModel {
     /// A tab was dropped on this window's tab list. From this window it is put in front of `target` (or at the end); from another window it is brought here with its page,
     /// history and place intact, and the window it left closes if that was its last tab.
     @discardableResult
+    /// Moves a tab one place earlier or later among the tabs shown, the menu and keyboard way to do what dragging does. Pinned tabs move among the pinned, the others among the rest.
+    func moveTabAlong(_ tab: TabController, by delta: Int) {
+        let list = moveNeighbours(of: tab)
+        guard let i = list.firstIndex(where: { $0.id == tab.id }), list.indices.contains(i + delta) else { return }
+        if delta < 0 { reorder(tab.id, before: list[i + delta].id) }
+        else { reorder(tab.id, before: i + delta + 1 < list.count ? list[i + delta + 1].id : nil) }
+    }
+
+    func canMoveTab(_ tab: TabController, by delta: Int) -> Bool {
+        let list = moveNeighbours(of: tab)
+        guard let i = list.firstIndex(where: { $0.id == tab.id }) else { return false }
+        return list.indices.contains(i + delta)
+    }
+
+    /// The tabs a move steps among, in the order they are drawn: the pinned ones, or the unpinned ones of the same group where the layout draws groups as sections
+    /// (the Sidebar and its relatives), otherwise the unpinned tabs of the strip.
+    private func moveNeighbours(of tab: TabController) -> [TabController] {
+        let shown = visibleTabs.filter { $0.pinned == tab.pinned }
+        if !tab.pinned, effectiveTabLayout == .sidebar { return listedTabs(inWorkspace: activeWorkspace).filter { !$0.pinned && $0.group == tab.group } }
+        if !tab.pinned, stripGroupsInline { return shown.filter { $0.group == tab.group } }
+        return shown
+    }
+
     func acceptDroppedTab(_ dragged: UInt64, before target: UInt64?) -> Bool {
-        if tabs.contains(where: { $0.id == dragged }) { reorder(dragged, before: target); return true }
+        if tabs.contains(where: { $0.id == dragged }) {
+            reorder(dragged, before: target)
+            // Dropped on blank space or after the last row of the open tabs: out of its group (the open tabs are the ungrouped ones).
+            if target == nil, stripGroupsInline || effectiveTabLayout == .sidebar, let tab = tabs.first(where: { $0.id == dragged }), !tab.pinned, !tab.group.isEmpty {
+                moveTab(tab, to: "")
+            }
+            // With groups inline, a tab dropped among a group's tabs joins that group, and one dropped among ungrouped tabs leaves its group (Chrome and Edge do the same).
+            if stripGroupsInline || effectiveTabLayout == .sidebar, let t = target.flatMap({ id in tabs.first { $0.id == id } }), let tab = tabs.first(where: { $0.id == dragged }), !tab.pinned, !t.pinned, tab.group != t.group {
+                moveTab(tab, to: t.group)
+            }
+            return true
+        }
         guard let source = windows.model(forTab: dragged), source !== self else { return false }
         // A tab never changes who can see its cookies by being moved: say why, and leave it where it is.
         if let tab = source.tabs.first(where: { $0.id == dragged }),
@@ -160,6 +195,20 @@ extension BrowserModel {
         }
         guard source.moveTab(dragged, to: self) else { return false }
         reorder(dragged, before: target)
+        return true
+    }
+
+    /// A tab dropped on a group's header joins that group ("" = out of every group). A pinned tab stays out of groups, as everywhere else.
+    func acceptDroppedTab(_ dragged: UInt64, intoGroup group: String) -> Bool {
+        guard tabs.contains(where: { $0.id == dragged }) || acceptDroppedTab(dragged, before: nil), let tab = tabs.first(where: { $0.id == dragged }), !tab.pinned else { return false }
+        if tab.group != group { moveTab(tab, to: group) }
+        return true
+    }
+
+    /// A tab dropped on the pinned tiles is pinned (one already pinned is left alone).
+    func acceptDroppedTabToPin(_ dragged: UInt64) -> Bool {
+        guard tabs.contains(where: { $0.id == dragged }) || acceptDroppedTab(dragged, before: nil), let tab = tabs.first(where: { $0.id == dragged }) else { return false }
+        if !tab.pinned { togglePin(tab) }
         return true
     }
 

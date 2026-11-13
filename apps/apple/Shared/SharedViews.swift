@@ -143,7 +143,13 @@ struct SheetContainer: View {
 
 struct BookmarksView: View {
     var embedded = false
+    /// What the Library puts under its search field (the Bookmarks / History picker).
+    var accessory: AnyView? = nil
     @EnvironmentObject var model: BrowserModel
+    @State private var collapsed: Set<String> = []
+    @State private var marked: String?
+    @State private var enterList = 0
+    @State private var dropTarget: String?
     @State private var query = ""
     @State private var items: [BookmarkItem] = []
 
@@ -166,6 +172,247 @@ struct BookmarksView: View {
     }
 
     var body: some View {
+        if embedded { libraryBody } else { standardBody }
+    }
+
+    /// The Library sidebar: folders that fold, a site icon and the title on each row (the address is the tooltip), the same menus as the sheet.
+    private var libraryBody: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 2) {
+                ForEach(folders, id: \.name) { folder in
+                    let isFavorites = folder.name == BrowserModel.favoritesFolder
+                    let title = folder.name.isEmpty ? "Bookmarks" : folder.name
+                    // While a search is on, matches are shown even inside a folded folder (folding is remembered and comes back with the empty query).
+                    let folded = collapsed.contains(folder.name) && query.isEmpty
+                    Button { if folded { collapsed.remove(folder.name) } else { collapsed.insert(folder.name) } } label: {
+                        HStack(spacing: 7) {
+                            Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary).rotationEffect(.degrees(folded ? 0 : 90)).frame(width: 12)
+                            Image(systemName: isFavorites ? "star.fill" : (folder.name.isEmpty ? "bookmark" : "folder")).font(.system(size: 12)).foregroundStyle(isFavorites ? Color.yellow : Color.secondary).frame(width: 16)
+                            Text(title).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                            Spacer(minLength: 0)
+                            Text("\(folder.rows.count)").font(.system(size: 11)).foregroundStyle(.tertiary)
+                        }
+                        .padding(.horizontal, 6).frame(height: 30).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(title), \(folder.rows.count) bookmarks, \(folded ? "closed" : "open")")
+                    .accessibilityAddTraits(marked == "f:" + folder.name ? .isSelected : [])
+                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.accent.opacity(marked == "f:" + folder.name ? 0.9 : 0), lineWidth: 1.5))
+                    .id("f:" + folder.name)
+                    // A bookmark dragged onto a folder moves into it (only its folder changes); the folder lights up while it is a valid target.
+                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.accent.opacity(dropTarget == folder.name ? 0.22 : 0)))
+                    .dropDestination(for: String.self) { items, _ in dropBookmarks(items, into: folder.name) } isTargeted: { on in
+                        if on { dropTarget = folder.name } else if dropTarget == folder.name { dropTarget = nil }
+                    }
+                    .contextMenu { folderMenu(folder.name, count: folder.rows.count) }
+                    if !folded {
+                        ForEach(sorted(folder.rows), id: \.url) { b in LibraryRow(title: LibraryRow<EmptyView>.fallbackTitle(b.title, b.url), url: b.url, drag: "bookmark:" + b.url, marked: marked == "b:" + b.url, open: { model.open(urlString: b.url) }, menu: { bookmarkMenu(b, folderNames: folders.map(\.name)) }).id("b:" + b.url) }
+                    }
+                }
+            }
+            .padding(.horizontal, 8).padding(.bottom, 12)
+        }
+        .libraryKeyboard(marked: $marked, ids: keyboardIDs, parent: keyboardParent, activate: keyboardActivate, remove: keyboardRemove,
+                         fold: { id, fold in let name = String(id.dropFirst(2)); if fold { collapsed.insert(name) } else { collapsed.remove(name) } },
+                         isFolded: { id in collapsed.contains(String(id.dropFirst(2))) && query.isEmpty }, entry: enterList)
+        .overlay { if items.isEmpty { ContentUnavailableView(query.isEmpty ? "No Bookmarks" : "No Results", systemImage: "book") } }
+        .embeddedSearch(embedded: true, text: $query, prompt: "Search Bookmarks", accessory: accessory, enterList: $enterList)
+        .safeAreaInset(edge: .bottom, spacing: 0) { libraryBar }
+        .onChange(of: query) { _, _ in reload() }
+        .onAppear(perform: reload)
+    }
+
+    /// The rows the arrow keys visit: each folder, then (unless it is folded) its bookmarks in the order shown.
+    private var keyboardIDs: [String] {
+        folders.flatMap { folder -> [String] in
+            let folded = collapsed.contains(folder.name) && query.isEmpty
+            return ["f:" + folder.name] + (folded ? [] : sorted(folder.rows).map { "b:" + $0.url })
+        }
+    }
+    private func keyboardParent(_ id: String) -> String? {
+        guard id.hasPrefix("b:") else { return nil }
+        let url = String(id.dropFirst(2))
+        return folders.first { $0.rows.contains { $0.url == url } }.map { "f:" + $0.name }
+    }
+    private func keyboardActivate(_ id: String) {
+        if id.hasPrefix("f:") {
+            let name = String(id.dropFirst(2))
+            if collapsed.contains(name) { collapsed.remove(name) } else { collapsed.insert(name) }
+        } else {
+            model.open(urlString: String(id.dropFirst(2)))
+        }
+    }
+    /// Delete on a bookmark is the menu's Delete; on a folder it is Delete Folder…, which asks what to do with the bookmarks.
+    private func keyboardRemove(_ id: String) {
+        let key = String(id.dropFirst(2))
+        if id.hasPrefix("b:") { if let b = items.first(where: { $0.url == key }) { remove(b) } }
+        else if !key.isEmpty && key != BrowserModel.favoritesFolder, let folder = folders.first(where: { $0.name == key }) { deleteFolder(key, count: folder.rows.count) }
+    }
+
+    private func sorted(_ rows: [BookmarkItem]) -> [BookmarkItem] {
+        switch model.librarySort {
+        case .saved: return rows
+        case .title: return rows.sorted { LibraryRow<EmptyView>.fallbackTitle($0.title, $0.url).localizedCaseInsensitiveCompare(LibraryRow<EmptyView>.fallbackTitle($1.title, $1.url)) == .orderedAscending }
+        case .address: return rows.sorted { $0.url.localizedCaseInsensitiveCompare($1.url) == .orderedAscending }
+        }
+    }
+
+    @State private var importing = false
+    @State private var exporting = false
+    @State private var transferDocument = BookmarkHTMLDocument(text: "")
+
+    private var canBookmark: Bool { if let tab = model.active, !tab.isBlank, tab.url != nil { return true } else { return false } }
+
+    /// The Library's own actions along its foot: add the page you are on, add it to a new folder, sort, and more (Reading List, Sessions, import and export, which Settings also offers).
+    private var libraryBar: some View {
+        VStack(spacing: 0) {
+            Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 1).padding(.horizontal, 12)
+            HStack(spacing: 4) {
+                barIcon("plus", "Bookmark This Page", id: "library-add") { addCurrentPage(to: "") }.disabled(!canBookmark)
+                Menu {
+                    Button("Add This Page to Favorites") { addCurrentPage(to: BrowserModel.favoritesFolder) }
+                    Button("Add This Page to a New Folder…") { newFolderForCurrentPage() }
+                } label: { barGlyph("folder.badge.plus") }
+                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                .disabled(!canBookmark).help("Add this page to a folder").accessibilityLabel("Add this page to a folder").accessibilityIdentifier("library-folder")
+                Spacer(minLength: 0)
+                Menu {
+                    Picker("Sort", selection: $model.librarySort) { ForEach(BrowserModel.LibrarySort.allCases, id: \.self) { Text($0.rawValue).tag($0) } }.pickerStyle(.inline)
+                } label: { barGlyph("arrow.up.arrow.down") }
+                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                .help("Sort bookmarks").accessibilityLabel("Sort bookmarks").accessibilityIdentifier("library-sort")
+                Menu {
+                    Button("Reading List…") { model.sheet = .readingList }
+                    Button("Saved Sessions…") { model.sheet = .sessions }
+                    Divider()
+                    Button("Import Bookmarks…") { importing = true }
+                    Button("Export Bookmarks…") { transferDocument = BookmarkHTMLDocument(text: model.bookmarksHTML()); exporting = true }
+                } label: { barGlyph("ellipsis") }
+                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                .help("More").accessibilityLabel("More Library actions").accessibilityIdentifier("library-more")
+            }
+            .padding(.horizontal, 12).frame(height: 38)
+        }
+        .fileImporter(isPresented: $importing, allowedContentTypes: ImportKind.bookmarks.contentTypes) { result in
+            guard case .success(let url) = result else { return }
+            Task { model.notice = await ImportActions.bookmarks(from: url, model: model); reload() }
+        }
+        .fileExporter(isPresented: $exporting, document: transferDocument, contentType: .html, defaultFilename: "Browser Setu Bookmarks") { result in
+            if case .success = result { model.notice = "Bookmarks exported." }
+        }
+    }
+
+    private func barGlyph(_ symbol: String) -> some View {
+        Image(systemName: symbol).font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary).frame(width: 28, height: 26).contentShape(Rectangle())
+    }
+    private func barIcon(_ symbol: String, _ help: String, id: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) { barGlyph(symbol) }.buttonStyle(.plain).help(help).accessibilityLabel(help).accessibilityIdentifier(id)
+    }
+
+    private func addCurrentPage(to folder: String) {
+        guard let tab = model.active, !tab.isBlank, let url = tab.url?.absoluteString else { return }
+        // The page may already be saved (in a folder, under a title of the person's own): adding must not move it or rename it. Choosing a folder for it from the folder menu is a move, and says so.
+        if let existing = ((try? model.core.listBookmarks(query: "")) ?? []).first(where: { $0.url == url }) {
+            if existing.folder == folder || folder.isEmpty { model.notice = "This page is already in your bookmarks."; return }
+            try? model.core.addBookmark(url: url, title: existing.title, folder: folder)
+            model.refreshBookmarkState()
+            reload()
+            return
+        }
+        try? model.core.addBookmark(url: url, title: tab.displayTitle, folder: folder)
+        model.refreshBookmarkState()
+        reload()
+    }
+
+    /// A folder exists once it holds a bookmark, so a new one starts with the page you are on.
+    private func newFolderForCurrentPage() {
+        Task { @MainActor in
+            if let name = await Dialogs.promptText(title: "New Folder", message: "Name the folder. This page is added to it.", placeholder: ""), !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                addCurrentPage(to: name.trimmingCharacters(in: .whitespacesAndNewlines))
+            }
+        }
+    }
+
+    /// The menu a bookmark has in the sheet and in the Library.
+    @ViewBuilder private func bookmarkMenu(_ b: BookmarkItem, folderNames: [String]) -> some View {
+        Button("Open in New Tab") { model.open(urlString: b.url, newTab: true) }
+        Button("Open in Background Tab") { if let url = URL(string: b.url) { model.openTab(url: url, isPrivate: false, select: false) } }
+        Divider()
+        Button("Rename…") { edit(b) }
+        Button("Edit Address…") { editAddress(b) }
+        Button("Edit Tags…") { editTags(b) }
+        Button("Copy Address") { copyToPasteboard(b.url) }
+        Menu("Move to Folder") {
+            Button("Favorites") { move(b, to: BrowserModel.favoritesFolder) }.disabled(b.folder == BrowserModel.favoritesFolder)
+            Button("No Folder") { move(b, to: "") }.disabled(b.folder.isEmpty)
+            ForEach(folderNames.filter { !$0.isEmpty && $0 != BrowserModel.favoritesFolder && $0 != b.folder }, id: \.self) { f in Button(f) { move(b, to: f) } }
+            Divider()
+            Button("New Folder…") { newFolder(for: b) }
+        }
+        Divider()
+        Button("Delete", role: .destructive) { remove(b) }
+    }
+
+    /// What a folder's menu offers. A folder is a name its bookmarks share: it exists while it holds a bookmark. Favorites and the unfiled list keep their names.
+    @ViewBuilder private func folderMenu(_ name: String, count: Int) -> some View {
+        if !name.isEmpty && name != BrowserModel.favoritesFolder {
+            Button("Rename Folder…") { renameFolder(name) }
+            Button("Delete Folder…", role: .destructive) { deleteFolder(name, count: count) }
+        }
+    }
+
+    /// Renaming moves each of the folder's bookmarks to the new name (their addresses and titles stay); a name another folder already has is refused, not merged.
+    private func renameFolder(_ old: String) {
+        Task { @MainActor in
+            guard let raw = await Dialogs.promptText(title: "Rename Folder", message: "New name for “\(old)”.", placeholder: old) else { return }
+            let new = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !new.isEmpty, new != old else { return }
+            let all = (try? model.core.listBookmarks(query: "")) ?? []
+            if new == BrowserModel.favoritesFolder || all.contains(where: { $0.folder == new }) { model.notice = "There is already a folder called “\(new)”."; return }
+            for b in all where b.folder == old { try? model.core.addBookmark(url: b.url, title: b.title, folder: new) }
+            collapsed.remove(old)
+            reload()
+        }
+    }
+
+    /// Deleting a folder asks what to do with what is in it: keep the bookmarks (they go to the unfiled list) or delete them with it.
+    private func deleteFolder(_ name: String, count: Int) {
+        Task { @MainActor in
+            let choice = await Dialogs.choose(title: "Delete the folder “\(name)”?", message: "It holds \(count) bookmark\(count == 1 ? "" : "s"). You can keep them (they move to Bookmarks, outside any folder) or delete them with the folder.",
+                                              buttons: ["Keep the Bookmarks", "Delete the Bookmarks", "Cancel"])
+            guard choice == 0 || choice == 1 else { return }
+            for b in ((try? model.core.listBookmarks(query: "")) ?? []) where b.folder == name {
+                if choice == 0 { try? model.core.addBookmark(url: b.url, title: b.title, folder: "") } else { try? model.core.removeBookmark(url: b.url) }
+            }
+            model.refreshBookmarkState()
+            collapsed.remove(name)
+            reload()
+        }
+    }
+
+    /// Changing the address replaces the saved record (its title and folder stay); an address already saved is refused, and only web addresses are taken.
+    private func editAddress(_ b: BookmarkItem) {
+        Task { @MainActor in
+            guard let raw = await Dialogs.promptText(title: "Edit Address", message: "The address of “\(b.title.isEmpty ? b.url : b.title)”.", placeholder: b.url) else { return }
+            let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty, text != b.url else { return }
+            guard let url = URL(string: text), let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https", url.host?.isEmpty == false else { model.notice = "That is not a web address."; return }
+            if ((try? model.core.listBookmarks(query: "")) ?? []).contains(where: { $0.url == text }) { model.notice = "That address is already saved."; return }
+            try? model.core.removeBookmark(url: b.url)
+            try? model.core.addBookmark(url: text, title: b.title, folder: b.folder)
+            model.refreshBookmarkState()
+            reload()
+        }
+    }
+
+    /// A bookmark dropped on a folder: only its folder changes. Anything else that is dragged (a tab, a link) is not taken.
+    private func dropBookmarks(_ items: [String], into folder: String) -> Bool {
+        let moved = model.dropBookmark(items, into: folder)
+        if moved { reload() }
+        return moved
+    }
+
+    private var standardBody: some View {
         List {
             ForEach(folders, id: \.name) { folder in
                 Section(folder.name.isEmpty ? "Bookmarks" : folder.name) {
@@ -201,7 +448,7 @@ struct BookmarksView: View {
             }
         }
         .overlay { if items.isEmpty { ContentUnavailableView(query.isEmpty ? "No Bookmarks" : "No Results", systemImage: "book") } }
-        .embeddedSearch(embedded: embedded, text: $query)
+        .embeddedSearch(embedded: embedded, text: $query, prompt: "Search Library", accessory: accessory)
         .onChange(of: query) { _, _ in reload() }
         .onAppear(perform: reload)
     }
@@ -258,8 +505,63 @@ struct BookmarksView: View {
     }
 }
 
+/// One saved page in the Library sidebar (a bookmark or a history entry): the site's icon and a title; the address shows as a tooltip.
+struct LibraryRow<Menu: View>: View {
+    let title: String
+    let url: String
+    /// What dragging the row carries (nil: the row cannot be dragged).
+    var drag: String? = nil
+    var marked = false
+    let open: () -> Void
+    @ViewBuilder let menu: () -> Menu
+    @State private var hovering = false
+
+    var body: some View {
+        if let drag { row.draggable(drag) } else { row }
+    }
+
+    private var row: some View {
+        // The second click of a double-click is not a second open (a bookmark set to open in a new tab would otherwise open twice); the system's own click count tells them apart.
+        Button {
+            #if os(macOS)
+            if let event = NSApp.currentEvent, event.type == .leftMouseUp || event.type == .leftMouseDown, event.clickCount >= 2 { return }
+            #endif
+            open()
+        } label: {
+            HStack(spacing: 8) {
+                #if os(macOS)
+                if let icon = FaviconStore.shared.image(forURL: url, points: 14) { Image(nsImage: icon).frame(width: 16, height: 16) }
+                else { Image(systemName: "globe").font(.system(size: 12)).foregroundStyle(.secondary).frame(width: 16, height: 16) }
+                #else
+                Image(systemName: "globe").font(.system(size: 12)).foregroundStyle(.secondary).frame(width: 16, height: 16)
+                #endif
+                Text(title).font(.system(size: 13)).lineLimit(1).truncationMode(.tail)
+                Spacer(minLength: 0)
+            }
+            .padding(.leading, 26).padding(.trailing, 8).frame(height: 30)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(hovering ? 0.07 : 0)))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.accent.opacity(marked ? 0.9 : 0), lineWidth: 1.5))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(url)
+        .contextMenu(menuItems: menu)
+        .accessibilityLabel(title)
+        .accessibilityHint(url)
+        .accessibilityAddTraits(marked ? .isSelected : [])
+    }
+
+    /// A readable title when a page has none: its address without the scheme.
+    static func fallbackTitle(_ title: String, _ url: String) -> String {
+        if !title.isEmpty { return title }
+        return url.replacingOccurrences(of: "https://", with: "").replacingOccurrences(of: "http://", with: "")
+    }
+}
+
 struct HistoryView: View {
     var embedded = false
+    var accessory: AnyView? = nil
     @EnvironmentObject var model: BrowserModel
     @State private var query = ""
     @State private var items: [HistoryItem] = []
@@ -284,6 +586,62 @@ struct HistoryView: View {
     }
 
     var body: some View {
+        if embedded { libraryBody } else { standardBody }
+    }
+
+    @State private var confirmingClear = false
+    @State private var marked: String?
+    @State private var enterList = 0
+
+    /// The Library sidebar's History: day headings, a site icon and a title on each row, and Clear History at the foot of the Library (the sheet keeps it in its own toolbar).
+    private var libraryBody: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 2) {
+                ForEach(sections, id: \.title) { section in
+                    Text(section.title.uppercased()).font(.system(size: 10.5, weight: .semibold)).tracking(0.7).foregroundStyle(.secondary.opacity(0.85))
+                        .padding(.horizontal, 6).padding(.top, 10).padding(.bottom, 2)
+                        .accessibilityAddTraits(.isHeader)
+                    ForEach(section.rows, id: \.url) { h in
+                        LibraryRow(title: LibraryRow<EmptyView>.fallbackTitle(h.title, h.url), url: h.url, marked: marked == "h:" + h.url, open: { model.open(urlString: h.url) }) {
+                            Button("Open in New Tab") { model.open(urlString: h.url, newTab: true) }
+                            Button("Open in Background Tab") { if let url = URL(string: h.url) { model.openTab(url: url, isPrivate: false, select: false) } }
+                            Button("Copy Address") { copyToPasteboard(h.url) }
+                            Divider()
+                            Button("Remove from History", role: .destructive) { remove(h) }
+                        }
+                        .id("h:" + h.url)
+                    }
+                }
+            }
+            .padding(.horizontal, 8).padding(.bottom, 12)
+        }
+        .libraryKeyboard(marked: $marked, ids: sections.flatMap { $0.rows.map { "h:" + $0.url } },
+                         activate: { id in model.open(urlString: String(id.dropFirst(2))) },
+                         remove: { id in if let h = items.first(where: { $0.url == String(id.dropFirst(2)) }) { remove(h) } }, entry: enterList)
+        .overlay { if items.isEmpty { ContentUnavailableView(query.isEmpty ? "No History" : "No Results", systemImage: "clock") } }
+        .embeddedSearch(embedded: true, text: $query, prompt: "Search History", accessory: accessory, enterList: $enterList)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 0) {
+                Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 1).padding(.horizontal, 12)
+                HStack {
+                    Button("Clear History…", role: .destructive) { confirmingClear = true }
+                        .buttonStyle(.plain).font(.system(size: 12.5)).foregroundStyle(items.isEmpty ? Color.secondary.opacity(0.5) : Color.red.opacity(0.85))
+                        .disabled(items.isEmpty)
+                        .accessibilityIdentifier("clear-history")
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 14).frame(height: 38)
+            }
+        }
+        .confirmationDialog("Clear all browsing history?", isPresented: $confirmingClear, titleVisibility: .visible) {
+            Button("Clear History", role: .destructive) { try? model.core.clearHistory(); reload() }
+            Button("Cancel", role: .cancel) {}
+        } message: { Text("This removes every entry from History. Your bookmarks, Reading List, saved sessions and open tabs are not affected.") }
+        .onChange(of: query) { _, _ in reload() }
+        .onAppear(perform: reload)
+    }
+
+    private var standardBody: some View {
         List {
             ForEach(sections, id: \.title) { section in
                 Section(section.title) {
@@ -305,7 +663,7 @@ struct HistoryView: View {
             }
         }
         .overlay { if items.isEmpty { ContentUnavailableView(query.isEmpty ? "No History" : "No Results", systemImage: "clock") } }
-        .embeddedSearch(embedded: embedded, text: $query)
+        .searchable(text: $query)
         .toolbar {
             ToolbarItem(placement: .destructiveAction) {
                 Button("Clear All", role: .destructive) {
@@ -450,15 +808,26 @@ struct AppearanceSettingsSection: View {
             #if os(macOS)
             Section("Layout") {
                 Picker("Preset", selection: $model.layoutPreset) {
-                    ForEach(LayoutPreset.allCases) { Text($0.title).tag($0) }
+                    ForEach(LayoutPreset.Family.allCases) { family in
+                        let members = LayoutPreset.allCases.filter { $0.family == family && ($0.isOffered || $0 == model.layoutPreset) }
+                        if !members.isEmpty {
+                            Section(family.rawValue) { ForEach(members) { Text($0.title).tag($0) } }
+                        }
+                    }
                 }
                     .settingsNoted(model.layoutPreset.summary)
-                Toggle("Tint the toolbar with the page’s colour", isOn: $model.tintToolbar)
-                Text(model.themeIsActive
-                     ? "The bar takes a lighter touch of each page's colour on top of your theme. A colour that would clash with it (a white page in a dark window) only adds a faint wash."
-                     : "The bar takes on the colour of each page, the way Safari's does. A colour that would clash with the window (a white page in a dark window) only adds a faint wash.")
+                // The toolbar is the window's own colour now, the same as the margin around the page, so there is no page tint to switch on (the stored choice is left as it was).
+                Toggle("Tint the toolbar with the page’s colour", isOn: .constant(false)).disabled(true)
+                Text("The toolbar now uses the window’s own colour in every layout, so it matches the margin around the page. There is no page tint to switch on.")
                     .settingsNote()
                 Toggle("Fold the toolbar and tabs into a pill while reading", isOn: $model.collapseOnScroll)
+                    .disabled(model.effectiveTabLayout == .sidebar && !model.topBarHidden)
+                if model.effectiveTabLayout == .sidebar && !model.topBarHidden {
+                    Text("Folding applies to layouts with tabs across the top. With the tabs down the side the toolbar and sidebar stay where they are.").settingsNote()
+                }
+                if model.layoutPreset.docksTabNavigator {
+                    Text("\(model.layoutPreset.title) has its address bar in the toolbar above the page; the sidebar has none.").settingsNote()
+                }
                 Picker("Double-click the top bar", selection: $model.doubleClickAction) {
                     ForEach(DoubleClickAction.allCases) { Text($0.title).tag($0) }
                 }
@@ -471,20 +840,38 @@ struct AppearanceSettingsSection: View {
                     }
                     .disabled(model.singleToolbarCustom)
                     Toggle("Show sidebar", isOn: $model.sidebarVisible)
+                    // What the combination does, said instead of silently overriding a choice.
+                    Text(model.singleToolbarCustom
+                         ? "With a single toolbar the address bar lives in the sidebar, so the tabs are always down the side and there is no top bar to reveal."
+                         : model.tabLayout == .sidebar && !model.sidebarVisible
+                            ? "The tabs are down the side with the sidebar hidden: they slide in when the pointer reaches the window edge."
+                            : model.tabLayout == .sidebar
+                                ? "Vertical tabs with a separate toolbar (the Hybrid layout has this ready-made)."
+                                : "Tabs across the top with a separate toolbar.")
+                        .settingsNote()
                 }
                 Picker("Sidebar position", selection: $model.sidebarPosition) {
                     ForEach(SidebarPosition.allCases) { Text($0.title).tag($0) }
                 }
                 .pickerStyle(.segmented)
-                Toggle("Collapse sidebar to icons", isOn: $model.sidebarRail)
-                Toggle("Hide sidebar until the pointer touches the window edge", isOn: Binding(
-                    get: { model.sidebarAutoHide }, set: { on in model.sidebarAutoHide = on; model.setSidebarShown(!on) }))
+                if model.layoutPreset.hasTabSidebar {
+                    Toggle("Collapse sidebar to icons", isOn: $model.sidebarRail)
+                    Toggle("Hide sidebar until the pointer touches the window edge", isOn: Binding(
+                        get: { model.sidebarAutoHide }, set: { on in model.sidebarAutoHide = on; model.setSidebarShown(!on) }))
+                } else {
+                    // Shown, not silently missing: say why the tab-sidebar settings are not here.
+                    Text(model.layoutPreset == .canvas
+                         ? "Canvas has no sidebar; the Library opens from its handle or the menus. Its position and width below are kept for the Library."
+                         : "\(model.layoutPreset.title) has its tabs across the top, so there is no tab sidebar to collapse or hide at the edge. Position and width apply to the Library sidebar.")
+                        .settingsNote()
+                }
                 HStack {
                     Text("Sidebar width")
                     Slider(value: $model.sidebarWidth, in: sidebarWidthRange, step: 10)
                     Text("\(Int(model.sidebarWidth))").monospacedDigit().foregroundStyle(.secondary)
                 }
                 .disabled(model.sidebarRail)
+                if model.sidebarRail { Text("The width applies when the sidebar is open; the icon rail has one fixed width.").settingsNote() }
                 Picker("Split view direction", selection: $model.splitOrientation) {
                     Text("Side by side").tag(SplitOrientation.sideBySide)
                     Text("Stacked").tag(SplitOrientation.stacked)
@@ -512,7 +899,7 @@ struct AppearanceSettingsSection: View {
             Section {
                 Button("Reset Appearance and Layout") {
                     model.appearance = .system; model.accent = .teal; model.accentChosen = false; model.density = .comfortable
-                    model.sidebarWidth = 250
+                    model.sidebarWidth = sidebarStandardWidth
                     model.addressBarPosition = BrowserModel.defaultAddressBarPosition
                     // The same standard layout every other reset gives: also the pin choice, auto-hide, single toolbar, focus mode and toolbar buttons.
                     model.restoreStandardLayout()
@@ -565,7 +952,7 @@ struct TabsSettingsSection: View {
             }
             Section("Tab Tree") {
                 Toggle("Show tabs under the tab they were opened from", isOn: $model.tabTree)
-                    .settingsNoted("In the vertical tab list, a tab opened from a link sits one step in under its parent. The arrow beside a parent folds its branch. Closing a parent moves its tabs up a level.")
+                    .settingsNoted("In the vertical tab list (the Sidebar layout), a tab opened from a link sits one step in under its parent, and the arrow beside a parent folds its branch. Closing a parent moves its tabs up a level. The horizontal strip of Classic, Minimal and One Row shows no indentation: turning this on only places each tab beside the tab it was opened from.")
             }
             Section("Tab Groups") {
                 if model.groupNames.isEmpty { Text("No tab groups").foregroundStyle(.secondary) }
@@ -662,7 +1049,13 @@ private struct WorkspaceSettingsRow: View {
                     Button("Move Up") { model.moveWorkspace(workspace.name, by: -1) }
                     Button("Move Down") { model.moveWorkspace(workspace.name, by: 1) }
                     Divider()
-                    Button("Delete Workspace", role: .destructive) { model.deleteWorkspace(workspace.name) }
+                    Button("Delete Workspace", role: .destructive) {
+                        #if os(macOS)
+                        confirmDeleteWorkspace(model: model, name: workspace.name)
+                        #else
+                        model.deleteWorkspace(workspace.name)
+                        #endif
+                    }
                 } label: {
                     Image(systemName: "ellipsis.circle").font(.system(size: 15)).foregroundStyle(.secondary).accessibilityLabel("More for \(workspace.name)")
                 }
@@ -692,7 +1085,7 @@ private struct WorkspaceSettingsRow: View {
                         Spacer()
                         Picker("", selection: Binding(get: { layout }, set: { model.setWorkspacePreset(workspace.name, preset: $0) })) {
                             Text("Keep current").tag(LayoutPreset?.none)
-                            ForEach(LayoutPreset.allCases) { Text($0.title).tag(LayoutPreset?.some($0)) }
+                            ForEach(LayoutPreset.allCases.filter { $0.isOffered || $0 == layout }) { Text($0.title).tag(LayoutPreset?.some($0)) }
                         }
                         .labelsHidden().pickerStyle(.menu).fixedSize()
                     }
@@ -1400,16 +1793,19 @@ struct RecoveryBanner: View {
 extension View {
     /// Sheets use the system search field. Inside the sidebar a system search field would add a native toolbar row to the
     /// window, so there it is a plain field above the list.
-    @ViewBuilder func embeddedSearch(embedded: Bool, text: Binding<String>) -> some View {
+    @ViewBuilder func embeddedSearch(embedded: Bool, text: Binding<String>, prompt: String = "Search", accessory: AnyView? = nil, enterList: Binding<Int>? = nil) -> some View {
         if embedded {
-            VStack(spacing: 6) {
-                HStack(spacing: 6) {
-                    Image(systemName: "magnifyingglass").font(.system(size: 11)).foregroundStyle(.secondary)
-                    TextField("Search", text: text).textFieldStyle(.plain).font(.system(size: 12.5))
+            VStack(spacing: 8) {
+                HStack(spacing: 7) {
+                    Image(systemName: "magnifyingglass").font(.system(size: 12)).foregroundStyle(.secondary)
+                    TextField(prompt, text: text).textFieldStyle(.plain).font(.system(size: 13))
+                        // ↓ in the field moves the keyboard into the list below it (the Library's rows are reached with the arrow keys).
+                        .onKeyPress(.downArrow) { if let enterList { enterList.wrappedValue += 1; return .handled } else { return .ignored } }
                 }
-                .padding(.horizontal, 9).frame(height: 26)
-                .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.primary.opacity(0.07)))
-                .padding(.horizontal, 10)
+                .padding(.horizontal, 10).frame(height: 32)
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.primary.opacity(0.07)))
+                .padding(.horizontal, 12)
+                if let accessory { accessory.padding(.horizontal, 12) }
                 self
             }
         } else {

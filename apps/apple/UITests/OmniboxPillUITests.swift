@@ -24,7 +24,7 @@ final class OmniboxPillUITests: XCTestCase {
     private func pillExpanded() -> XCUIElement { any("floating-address-bar") }
 
     private func shot(_ name: String) {
-        let a = XCTAttachment(screenshot: app.windows.firstMatch.safeScreenshot()); a.name = name; a.lifetime = .keepAlways; add(a)
+        let a = app.windows.firstMatch.safeAttachment(); a.name = name; a.lifetime = .keepAlways; add(a)
     }
 
     private func gone(_ element: XCUIElement, _ seconds: Double = 4) -> Bool {

@@ -44,8 +44,8 @@ enum HealthCheck {
 
         if let engine = model.engine as? WebKitEngine {
             let stores = await WebKitEngine.existingDataStoreIDs()
-            let expected = ProfileIdentity.dataStoreID(for: model.profileName)
-            items.append(stores.contains(expected)
+            let expected = ProfileIdentity.storeID(for: model.profileName)
+            items.append(expected.map { stores.contains($0) } ?? false
                          ? HealthItem(name: "Website data store", status: .ok, detail: "The profile’s own cookie and storage area exists.")
                          : HealthItem(name: "Website data store", status: .warning, detail: "Created the first time a page is loaded."))
             _ = engine

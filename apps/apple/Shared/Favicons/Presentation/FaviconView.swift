@@ -30,8 +30,9 @@ struct FaviconView<Placeholder: View>: View {
                 // Decorative: the name beside it already says which site this is.
                 .accessibilityHidden(true)
         } else {
-            // While the icon is being looked up the placeholder carries a skeleton; with no icon to wait for it is just the placeholder (a letter).
-            placeholder().skeleton(icons.phase(forURL: url) == .loading)
+            // While the icon is looked up, and when there is none, the placeholder stands still: a repeating shimmer in every tab of a long strip was constant work
+            // for no information (the tab's own spinner already says it is loading).
+            placeholder()
         }
     }
 }

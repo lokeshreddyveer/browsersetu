@@ -12,8 +12,10 @@ final class WebKitCompileTests: XCTestCase {
         return WKContentRuleListStore(url: folder) ?? .default()
     }
 
+    private static func isolatedDefaults() -> UserDefaults? { nil }                 // nothing is written to the person's preferences
+
     func testWebKitAcceptsEveryProtectionLevel() async throws {
-        let installer = ContentRuleInstaller(store: Self.isolatedStore())
+        let installer = ContentRuleInstaller(store: Self.isolatedStore(), defaults: Self.isolatedDefaults())
         var config = PrivacyConfiguration()
         try config.addSiteException("shop.example")
         try config.addUserRule(domain: "blocked.example", action: .block)
@@ -28,7 +30,7 @@ final class WebKitCompileTests: XCTestCase {
     }
 
     func testIdenticalSnapshotReusesCompiledListAndInvalidRulesKeepThePreviousOne() async throws {
-        let installer = ContentRuleInstaller(store: Self.isolatedStore())
+        let installer = ContentRuleInstaller(store: Self.isolatedStore(), defaults: Self.isolatedDefaults())
         let snapshot = try XCTUnwrap(PolicyBuilder.build(configuration: PrivacyConfiguration()))
         let first = await installer.apply(snapshot)
         XCTAssertTrue(first.installed)
@@ -47,8 +49,30 @@ final class WebKitCompileTests: XCTestCase {
         XCTAssertEqual(failed.identifier, goodID)
     }
 
+    /// The app applies a light list at start and the full one right after. A relaunch (a new installer on the same store) must find BOTH already compiled: pruning at the first apply must not delete the
+    /// list the second apply needs (it used to, so the full list was compiled again on every launch).
+    func testRelaunchDoesNotPruneTheListTheNextApplyNeeds() async throws {
+        let store = Self.isolatedStore()
+        let suiteName = "bs.rules.relaunch.\(UUID().uuidString)"
+        let suite = UserDefaults(suiteName: suiteName)!
+        defer { UserDefaults().removePersistentDomain(forName: suiteName) }
+        var light = PrivacyConfiguration(); light.mode = .light
+        var full = PrivacyConfiguration(); full.mode = .strict
+        let lightSnapshot = try XCTUnwrap(PolicyBuilder.build(configuration: light)), fullSnapshot = try XCTUnwrap(PolicyBuilder.build(configuration: full))
+        XCTAssertNotEqual(lightSnapshot.identifier, fullSnapshot.identifier)
+
+        let first = ContentRuleInstaller(store: store, defaults: suite)
+        _ = await first.apply(lightSnapshot); _ = await first.apply(fullSnapshot)
+
+        let relaunched = ContentRuleInstaller(store: store, defaults: suite)          // a new process: nothing in memory
+        let again1 = await relaunched.apply(lightSnapshot)
+        let again2 = await relaunched.apply(fullSnapshot)
+        XCTAssertTrue(again1.reusedCompiledList, "the light list is found compiled after a relaunch")
+        XCTAssertTrue(again2.reusedCompiledList, "the full list must still be compiled after the light list's apply pruned the cache")
+    }
+
     func testNewTabsInheritProtectionAndRemovalDetaches() async throws {
-        let installer = ContentRuleInstaller(store: Self.isolatedStore())
+        let installer = ContentRuleInstaller(store: Self.isolatedStore(), defaults: Self.isolatedDefaults())
         let snapshot = try XCTUnwrap(PolicyBuilder.build(configuration: PrivacyConfiguration()))
         _ = await installer.apply(snapshot)
         let early = WKUserContentController()

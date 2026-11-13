@@ -82,6 +82,8 @@ enum AppCommands {
         AppCommand(id: "cmd-edit-find-next", section: "Edit", title: "Find Next", symbol: "pencil", shortcut: .findNext, isEnabled: { m in !(!m.findVisible) }) { m in m.findNext() },
         AppCommand(id: "cmd-edit-find-previous", section: "Edit", title: "Find Previous", symbol: "pencil", shortcut: .findPrevious, isEnabled: { m in !(!m.findVisible) }) { m in m.findNext(backwards: true) },
         AppCommand(id: "cmd-workspace-personal", section: "Workspace", title: "Personal", symbol: "square.grid.2x2", shortcut: nil, isEnabled: { _ in true }) { m in m.switchWorkspace("") },
+        AppCommand(id: "cmd-workspace-next", section: "Workspace", title: "Next Workspace", symbol: "square.grid.2x2", shortcut: nil, isEnabled: { m in !m.workspaces.isEmpty }) { m in m.switchWorkspace(by: 1) },
+        AppCommand(id: "cmd-workspace-previous", section: "Workspace", title: "Previous Workspace", symbol: "square.grid.2x2", shortcut: nil, isEnabled: { m in !m.workspaces.isEmpty }) { m in m.switchWorkspace(by: -1) },
         AppCommand(id: "cmd-workspace-new-workspace", section: "Workspace", title: "New Workspace…", symbol: "square.grid.2x2", shortcut: nil, isEnabled: { _ in true }) { m in promptNewWorkspace(model: m) },
         AppCommand(id: "cmd-split-view-new-tab-in-split-view", section: "Split View", title: "New Tab in Split View", symbol: "rectangle.split.2x1", shortcut: nil, isEnabled: { _ in true }) { m in m.openSplitNewTab() },
         AppCommand(id: "cmd-split-view-add-a-panel", section: "Split View", title: "Add a Panel", symbol: "rectangle.split.2x1", shortcut: nil, isEnabled: { m in !(m.splitTabID == nil || m.fourthSplitTabID != nil) }) { m in m.addThirdPanelNewTab() },
@@ -151,6 +153,10 @@ enum AppCommands {
         AppCommand(id: "cmd-library-picture-in-picture", section: "Library", title: "Picture in Picture", symbol: "pip", shortcut: nil, isEnabled: { m in !(m.active?.isBlank ?? true) }) { m in m.togglePictureInPicture() },
         AppCommand(id: "cmd-library-share-page", section: "Library", title: "Share Page…", symbol: "square.and.arrow.up", shortcut: .sharePage, isEnabled: { m in !(m.active?.isBlank ?? true) }) { m in m.shareActivePage() },
         AppCommand(id: "cmd-library-search-tabs", section: "Library", title: "Search Tabs", symbol: "books.vertical", shortcut: .searchTabs, isEnabled: { _ in true }) { m in if m.tabSearchVisible { m.tabSearchVisible = false; m.tabSearchQuery = "" }
+                else if m.layoutPreset == .canvas {
+                    // Canvas has no sidebar to show the list in: its tab switcher is the overview.
+                    m.showOverview()
+                }
                 else {
                     // The list lives in the sidebar, so it has to be on screen.
                     if !m.sidebarVisible { m.pinSidebar() }

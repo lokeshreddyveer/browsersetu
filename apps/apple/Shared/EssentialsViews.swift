@@ -63,6 +63,10 @@ struct EssentialTile: View {
     var width: CGFloat?
     var didOpen: (() -> Void)?
     @State private var hovering = false
+    @FocusState private var focused: Bool
+    @State private var ringShown = false
+
+    private func open() { model.openEssential(essential.id); didOpen?() }
 
     private var live: TabController? { model.liveTab(for: essential) }
     private var selected: Bool { live.map { $0.id == model.activeID } ?? false }
@@ -80,7 +84,23 @@ struct EssentialTile: View {
             .motion(.easeOut(duration: 0.14), value: hovering)
             .motion(.easeOut(duration: 0.16), value: selected)
             .onHover { hovering = $0 }
-            .onTapGesture { model.openEssential(essential.id); didOpen?() }
+            .onTapGesture { open() }
+            // Reachable from the keyboard (Full Keyboard Access, Tab) and by VoiceOver: Return and Space open it, and a ring shows where the keyboard is.
+            .focusable().focusEffectDisabled().focused($focused)
+            .onKeyPress(.return) { open(); return .handled }
+            .onKeyPress(.space) { open(); return .handled }
+            .onChange(of: focused) { _, now in
+                #if os(macOS)
+                guard now, let type = NSApp.currentEvent?.type else { return }
+                if [.leftMouseDown, .leftMouseUp, .rightMouseDown, .otherMouseDown].contains(type) { ringShown = false }
+                else if [.keyDown, .keyUp, .flagsChanged].contains(type) { ringShown = true }
+                #else
+                if now { ringShown = true }
+                #endif
+            }
+            // The ring is for the keyboard; a tile that took focus from a click shows none.
+            .overlay { if focused && ringShown { RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.accent.opacity(0.8), lineWidth: 1.5).allowsHitTesting(false) } }
+            .accessibilityAction { open() }
             .help(essential.title)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("\(essential.title), Essential")

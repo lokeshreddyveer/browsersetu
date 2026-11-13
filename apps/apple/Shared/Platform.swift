@@ -111,6 +111,10 @@ enum Dialogs {
 
     /// `prefill: false` shows `placeholder` as a hint that disappears when typing starts (it is never the answer); the default fills the field with it as a starting value, as renames do.
     static func promptText(title: String, message: String, placeholder: String, prefill: Bool = true) async -> String? {
+        #if DEBUG
+        // Test seam (Debug builds only), like the one in `choose`: a native UI test cannot type into a modal alert, so it can give the answer in `-UITestPromptAnswer`.
+        if let answer = UserDefaults.standard.string(forKey: "UITestPromptAnswer") { return answer }
+        #endif
         #if os(macOS)
         let alert = NSAlert()
         alert.messageText = title

@@ -21,7 +21,7 @@ final class BrowserUITests: XCTestCase {
     override func tearDown() {
         // A test that failed leaves the app's own window and its accessibility tree behind, so the cause can be read afterwards instead of guessed.
         if let run = testRun, !run.hasSucceeded, let app, app.state == .runningForeground || app.state == .runningBackground {
-            let shot = XCTAttachment(screenshot: app.windows["browser-AppWindow-1"].safeScreenshot()); shot.name = "failure-window"; shot.lifetime = .keepAlways; add(shot)
+            let shot = app.windows["browser-AppWindow-1"].safeAttachment(); shot.name = "failure-window"; shot.lifetime = .keepAlways; add(shot)
             let tree = XCTAttachment(string: app.debugDescription); tree.name = "failure-hierarchy"; tree.lifetime = .keepAlways; add(tree)
         }
         app?.terminate()
@@ -187,7 +187,7 @@ final class BrowserUITests: XCTestCase {
     }
 
     func capture(_ name: String) {
-        let shot = XCTAttachment(screenshot: app.windows.firstMatch.safeScreenshot())
+        let shot = app.windows.firstMatch.safeAttachment()
         shot.name = name
         shot.lifetime = .keepAlways
         add(shot)

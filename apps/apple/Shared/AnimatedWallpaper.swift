@@ -89,10 +89,18 @@ final class AppActivity: ObservableObject {
 @MainActor
 enum WallpaperDebug {
     static let path = NSTemporaryDirectory() + "wallpaper-debug.log"
+    /// Writes happen on a background queue and use the throwing file calls: the older `seekToEndOfFile()` / `write(_:)` RAISE an Objective-C exception on any write error, which crashed a Debug build while 100
+    /// start pages appeared and each logged from `StartPageView`'s `onAppear` on the main thread (crash report of 2026-11-11, `asiBacktraces`: `NSConcreteFileHandle writeData:` ← `WallpaperDebug.log`). A failed write is now ignored.
+    private static let queue = DispatchQueue(label: "bs.wallpaper-debug-log", qos: .utility)
     static func log(_ text: String) {
         let line = "\(String(format: "%.2f", Date().timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 10_000))) \(text)\n"
-        if let handle = FileHandle(forWritingAtPath: path) { handle.seekToEndOfFile(); handle.write(Data(line.utf8)); try? handle.close() }
-        else { try? line.write(toFile: path, atomically: false, encoding: .utf8) }
+        let path = Self.path
+        queue.async {
+            if !FileManager.default.fileExists(atPath: path) { FileManager.default.createFile(atPath: path, contents: nil) }
+            guard let handle = FileHandle(forWritingAtPath: path) else { return }
+            defer { try? handle.close() }
+            do { try handle.seekToEnd(); try handle.write(contentsOf: Data(line.utf8)) } catch { /* diagnostics only: never fail the app for a log line */ }
+        }
     }
     /// Start pages on screen right now (counted by the pages themselves).
     static var visibleStartPages = 0
