@@ -41,10 +41,10 @@ struct SetupLayoutDemo: View {
 
     @ViewBuilder private func scene(w: CGFloat, h: CGFloat, t: Double, pal: MiniPalette) -> some View {
         switch preset {
-        case .classic: classic(w, h, t, pal)
-        case .sidebar: sidebar(w, h, t, pal)
-        case .minimal: minimal(w, h, t, pal)
-        case .floating: floating(w, h, t, pal)
+        case .classic, .classicReversed: classic(w, h, t, pal)
+        case .sidebar, .hybrid, .researchDesk, .workspaceDeck: sidebar(w, h, t, pal)
+        case .minimal, .minimalReversed: minimal(w, h, t, pal)
+        case .floating, .canvas: floating(w, h, t, pal)
         case .inline, .custom: oneRow(w, h, t, pal)
         }
     }

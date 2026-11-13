@@ -6,12 +6,12 @@ struct ToolbarExtras: View {
     @EnvironmentObject var model: BrowserModel
 
     var body: some View {
-        if model.shows(.workspaces) { WorkspaceToolbarMenu() }
+        if model.showsOnToolbar(.workspaces) { WorkspaceToolbarMenu() }
         if model.shows(.profile) { ProfileToolbarMenu() }
         if model.shows(.splitView) { SplitToolbarMenu() }
         if model.shows(.history) { ChromeButton(symbol: "clock", help: "History", identifier: "history-button") { model.sheet = .history } }
         if model.shows(.library) { ChromeButton(symbol: "book", help: "Bookmarks", identifier: "library-button") { model.sheet = .bookmarks } }
-        if model.shows(.find), model.active?.isBlank == false { ChromeButton(symbol: "magnifyingglass", help: "Find in Page", identifier: "find-button") { model.showFind() } }
+        if model.shows(.find) { ChromeButton(symbol: "magnifyingglass", help: "Find in Page", identifier: "find-button") { model.showFind() }.disabled(model.active?.isBlank ?? true) }
         if model.shows(.palette) { ChromeButton(symbol: "command", help: "Command Palette", identifier: "palette-button") { model.paletteVisible.toggle() } }
     }
 }
@@ -271,31 +271,60 @@ struct DownloadsToolbarButton: View {
     @State private var justFinished = false
     @State private var finishedTask: Task<Void, Never>?
     @State private var showsPopover = false
+    /// The ring's share: bytes done over bytes expected, counting only downloads whose size is known; nil (a turning arc, no percentage) when none is known yet.
+    static func ringProgress(_ items: [ActiveDownload]) -> Double? {
+        let sized = items.filter { $0.totalBytes > 0 }
+        guard !sized.isEmpty else { return nil }
+        return min(1, Double(sized.map(\.completedBytes).reduce(0, +)) / Double(max(1, sized.map(\.totalBytes).reduce(0, +))))
+    }
+    @State private var spin = false
 
     var body: some View {
         let items = Array(coordinator.active.values)
-        let average = items.isEmpty ? 0 : items.map(\.fraction).reduce(0, +) / Double(items.count)
+        // Progress counts bytes, over the downloads whose size is known; when no size is known yet the ring turns instead of showing a made-up share.
+        let known = Self.ringProgress(items)
+        let average = known ?? 0
         let showsCheck = items.isEmpty && justFinished
+        let failedNew = coordinator.hasUnseenFailure
+        let paused = items.isEmpty && !coordinator.interrupted.isEmpty
         // A click opens the small list; "Open Downloads" in it opens the whole window.
-        Button { showsPopover.toggle() } label: {
+        Button { showsPopover.toggle(); coordinator.markFailuresSeen() } label: {
             ZStack {
                 if !items.isEmpty {
                     Circle().stroke(Color.primary.opacity(0.15), lineWidth: 2)
-                    Circle().trim(from: 0, to: max(0.04, average)).stroke(Theme.accent, style: StrokeStyle(lineWidth: 2, lineCap: .round)).rotationEffect(.degrees(-90))
+                    if let known {
+                        Circle().trim(from: 0, to: known).stroke(Theme.accent, style: StrokeStyle(lineWidth: 2, lineCap: .round)).rotationEffect(.degrees(-90))
+                    } else {
+                        // Size not known: a short arc that turns (still, with Motion off or Reduce Motion), never a fake percentage.
+                        Circle().trim(from: 0, to: 0.22).stroke(Theme.accent, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                            .rotationEffect(.degrees(spin ? 270 : -90))
+                            .onAppear { if MotionStyle.current != .off && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { withAnimation(.linear(duration: 1.1).repeatForever(autoreverses: false)) { spin = true } } }
+                            .onDisappear { spin = false }
+                    }
                 }
                 Image(systemName: showsCheck ? "checkmark.circle.fill" : (items.isEmpty ? "arrow.down.circle" : "arrow.down"))
                     .foregroundStyle(items.isEmpty && !showsCheck ? Color.primary : Theme.accent)
                     .contentTransition(.symbolEffect(.replace))
             }
             .frame(width: items.isEmpty ? nil : 20, height: items.isEmpty ? nil : 20)
+            // A download that failed since the list was last opened, or ones waiting paused, are marked on the button (a shape, not colour alone).
+            .overlay(alignment: .bottomTrailing) {
+                if failedNew {
+                    Image(systemName: "exclamationmark.circle.fill").font(.system(size: 8, weight: .bold)).foregroundStyle(.white, .red).offset(x: 3, y: 3)
+                } else if paused {
+                    Image(systemName: "pause.circle.fill").font(.system(size: 8, weight: .bold)).foregroundStyle(.white, .secondary).offset(x: 3, y: 3)
+                }
+            }
         }
         .buttonStyle(ChromeButtonStyle())
         .marksDownloadsButton()
         .popover(isPresented: $showsPopover, arrowEdge: .bottom) {
             DownloadsPopover(vm: model.downloadList) { showsPopover = false; model.sheet = .downloads }
         }
-        .help(items.isEmpty ? (showsCheck ? "Download finished" : "Downloads") : "Downloading… \(Int((average * 100).rounded()))%")
-        .accessibilityLabel(items.isEmpty ? (showsCheck ? "Downloads, finished" : "Downloads") : "Downloads, \(Int((average * 100).rounded())) percent")
+        .help(failedNew ? "A download failed. Click to see it." : items.isEmpty ? (showsCheck ? "Download finished" : paused ? "Downloads (paused)" : "Downloads")
+              : known == nil ? "Downloading… (size not known yet)" : "Downloading… \(Int((average * 100).rounded()))%")
+        .accessibilityLabel(failedNew ? "Downloads, a download failed" : items.isEmpty ? (showsCheck ? "Downloads, finished" : paused ? "Downloads, paused" : "Downloads")
+              : known == nil ? "Downloads, in progress, size not known" : "Downloads, \(Int((average * 100).rounded())) percent")
         .accessibilityIdentifier("downloads-button")
         .motion(.easeOut(duration: 0.2), value: items.isEmpty)
         .motion(.easeOut(duration: 0.2), value: showsCheck)

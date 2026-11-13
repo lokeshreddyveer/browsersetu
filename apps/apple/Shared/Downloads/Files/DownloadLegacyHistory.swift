@@ -62,12 +62,21 @@ enum DownloadLegacyHistory {
         }
     }
 
+    /// What two descriptions of one download share: the file name and the address without query, user name or fragment.
+    static func twinKey(filename: String, address: String) -> String { filename + "|" + comparableAddress(address) }
+
+    /// The rule that finds the older-history lines of a finished task (the same matching as `unseen`: same name and address, finished within a minute of the line): its key and when it finished.
+    static func twin(of record: DownloadTaskRecord) -> (key: String, at: Double)? {
+        guard record.state == .completed else { return nil }
+        return (twinKey(filename: record.file.filename, address: record.source.url ?? ""), (record.completedAt ?? record.updatedAt).timeIntervalSince1970)
+    }
+
     /// A row for the list. It carries no task state of its own beyond "completed": that is all the old history ever recorded.
     static func row(for entry: Entry, fileExists: (String) -> Bool) -> DownloadRow {
         let url = URL(string: entry.url)
         let source = DownloadSourceRef(url: url)
         let found = fileExists(entry.filename)
-        var actions: DownloadRowActions = []
+        var actions: DownloadRowActions = [.removeRecord]          // an entry can always be taken off the list; its file is never touched
         if found { actions.formUnion([.open, .reveal]) }
         return DownloadRow(
             id: identifier(for: entry), filename: entry.filename, host: source.host ?? "", protocolLabel: "—", status: .completed, statusText: "Completed",

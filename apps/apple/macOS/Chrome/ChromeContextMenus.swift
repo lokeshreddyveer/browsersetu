@@ -8,11 +8,16 @@ private struct LayoutMenu: View {
     @EnvironmentObject var model: BrowserModel
     var body: some View {
         Menu("Layout") {
-            ForEach(LayoutPreset.allCases.filter { $0 != .custom }) { preset in
-                Button {
-                    animated(.easeOut(duration: 0.2)) { model.layoutPreset = preset }
-                } label: {
-                    if model.layoutPreset == preset { Label(preset.title, systemImage: "checkmark") } else { Text(preset.title) }
+            // Grouped by family, as in Settings; Custom is set up in Settings.
+            ForEach(LayoutPreset.Family.allCases.filter { $0 != .own }) { family in
+                Section(family.rawValue) {
+                    ForEach(LayoutPreset.allCases.filter { $0.family == family && $0.isOffered }) { preset in
+                        Button {
+                            animated(.easeOut(duration: 0.2)) { model.layoutPreset = preset }
+                        } label: {
+                            if model.layoutPreset == preset { Label(preset.title, systemImage: "checkmark") } else { Text(preset.title) }
+                        }
+                    }
                 }
             }
         }
@@ -54,7 +59,8 @@ struct SidebarContextMenu: View {
             }
         }
         Divider()
-        if model.showsMenuItem(.sidebarSections) { Menu("Show in Sidebar") {
+        // The sidebar sections (Bookmarks, History…) are the Library sidebar's; a layout whose sidebar is the tab navigator has no such switch.
+        if model.showsMenuItem(.sidebarSections), !model.layoutPreset.hasTabSidebar { Menu("Show in Sidebar") {
             ForEach(SidebarSection.allCases) { section in
                 Button { animated(.easeOut(duration: 0.18)) { model.sidebarSection = section } } label: {
                     if model.sidebarSection == section { Label(section.title, systemImage: "checkmark") } else { Label(section.title, systemImage: section.symbol) }
@@ -69,7 +75,7 @@ struct SidebarContextMenu: View {
             }
         } }
         if model.showsMenuItem(.collapse) { Button(model.sidebarRail ? "Expand Sidebar" : "Collapse to Icons") { animated(.easeOut(duration: 0.22)) { model.sidebarRail.toggle() } } }
-        if model.showsMenuItem(.autoHide) {
+        if model.showsMenuItem(.autoHide), model.layoutPreset.hasTabSidebar {
             Button(model.sidebarAutoHide ? "Keep Sidebar Open" : "Hide Until Pointer Reaches the Edge") {
                 animated(.easeOut(duration: 0.22)) { if model.sidebarAutoHide { model.pinSidebar() } else { model.hideSidebarToEdge() } }
             }
@@ -92,6 +98,20 @@ struct ToolbarContextMenu: View {
         if model.showsMenuItem(.newPrivateTab) { Button("New Private Window") { model.openPrivateWindow() } }
         if model.showsMenuItem(.newPrivateTab) { Button("New Private Tab") { model.openTab(url: nil, isPrivate: true) } }
         if model.showsMenuItem(.reopenClosed) { Button("Reopen Closed Tab") { model.reopenClosedTab() }.disabled(model.closedTabs.isEmpty) }
+        // The horizontal strip shows one group's tabs at a time (the ungrouped tabs, or a chosen group); this is where to choose, besides Tab Overview. It is the same command the group chips use.
+        if !model.groupNames.isEmpty && model.effectiveTabLayout != .sidebar {
+            Menu("Show Tab Group") {
+                Button { model.selectGroup("") } label: {
+                    if model.activeGroup.isEmpty { Label("Ungrouped Tabs (\(model.tabCount(inGroup: "")))", systemImage: "checkmark") } else { Text("Ungrouped Tabs (\(model.tabCount(inGroup: "")))") }
+                }
+                Divider()
+                ForEach(model.groupNames, id: \.self) { name in
+                    Button { model.selectGroup(name) } label: {
+                        if model.activeGroup == name { Label("\(name) (\(model.tabCount(inGroup: name)))", systemImage: "checkmark") } else { Text("\(name) (\(model.tabCount(inGroup: name)))") }
+                    }
+                }
+            }
+        }
         Divider()
         Button(model.sidebarVisible ? "Hide Sidebar" : "Show Sidebar") { animated(.easeOut(duration: 0.22)) { model.toggleSidebar() } }
         if model.showsMenuItem(.breakMode) { Button(model.breakActive ? "End Break" : "Break: Pause All Media") { model.toggleBreakMode() } }

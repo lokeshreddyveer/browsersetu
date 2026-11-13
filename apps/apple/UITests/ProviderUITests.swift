@@ -106,7 +106,7 @@ final class ProviderUITests: XCTestCase {
         let twoChosen = message(contains: "2 files").waitForExistence(timeout: 5)
         if !twoChosen {
             // The failure, as the app itself shows it: its own window (not the whole screen), the accessibility hierarchy, and what each row and text says.
-            let shot = XCTAttachment(screenshot: app.windows.firstMatch.safeScreenshot()); shot.name = "two-chosen-missing-window"; shot.lifetime = .keepAlways; add(shot)
+            let shot = app.windows.firstMatch.safeAttachment(); shot.name = "two-chosen-missing-window"; shot.lifetime = .keepAlways; add(shot)
             let tree = XCTAttachment(string: app.debugDescription); tree.name = "two-chosen-missing-hierarchy"; tree.lifetime = .keepAlways; add(tree)
             print("PROVIDER-FLAKE app foreground: \(app.state == .runningForeground)")
         }

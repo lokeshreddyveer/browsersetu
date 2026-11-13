@@ -8,6 +8,22 @@ struct BrowserSetuMacApp: App {
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
+        #if DEBUG
+        // Before anything else: a test process never keeps the person's own home (WebKit's web data lives under it).
+        TestIsolation.relocateHomeIfNeeded()
+        TestWindowFrameGuard.installIfTestProcess()
+        WindowProbe.startIfRequested()
+        ClickTrace.installIfRequested()
+        #endif
+        // A test run saves no window position (the Settings window and any other window included): AppKit writes it into the person's own preferences.
+        if TestIsolation.isUITestRun {
+            // SwiftUI can give a window its autosave name again after it was cleared, so every change of a window's place or size clears it once more (a name is what makes AppKit save the frame).
+            for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResizeNotification, NSWindow.didMoveNotification, NSWindow.didEndLiveResizeNotification] {
+                NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { note in
+                    if let window = note.object as? NSWindow, !window.frameAutosaveName.isEmpty { window.setFrameAutosaveName("") }
+                }
+            }
+        }
         // The app no longer runs in the App Sandbox: bring the earlier container's data across (copy only) before anything opens it. Never under tests or with a test root.
         if Self.debugRoot == nil, NSClassFromString("XCTestCase") == nil, UserDefaults.standard.string(forKey: "UITestRoot") == nil {
             if case .failed(let why) = SandboxMigration.runIfNeeded() {
@@ -87,6 +103,8 @@ struct BrowserSetuMacApp: App {
     /// Browser Setu brings back its own windows, each with its own tabs, from what it saved. macOS would bring back the same windows a second time, empty, and
     /// the two together grew the number of windows at every start. So the system's copy is switched off, and any it left from earlier runs is deleted.
     private static func turnOffSystemWindowRestoration() {
+        // A test process neither writes these two preferences nor deletes a saved-state folder: both belong to the person's own app (production behavior below is unchanged).
+        guard !TestIsolation.isTestProcess else { return }
         let defaults = UserDefaults.standard
         defaults.set(true, forKey: "ApplePersistenceIgnoreState")
         defaults.set(false, forKey: "NSQuitAlwaysKeepsWindows")
@@ -297,11 +315,16 @@ struct BrowserCommands: Commands {
             Button("Find Previous") { AppCommands.perform("cmd-edit-find-previous", model) } .shortcut(.findPrevious, model.shortcuts).disabled(!AppCommands.isEnabled("cmd-edit-find-previous", model))
         }
         CommandMenu("Workspace") {
-            Button("Personal") { AppCommands.perform("cmd-workspace-personal", model) } .keyboardShortcut("1", modifiers: [.control])
+            // A check mark on the workspace that is open.
+            Toggle("Personal", isOn: Binding(get: { model.activeWorkspace.isEmpty }, set: { _ in AppCommands.perform("cmd-workspace-personal", model) })) .keyboardShortcut("1", modifiers: [.control])
             ForEach(Array(model.workspaces.enumerated()), id: \.element.id) { index, ws in
-                if index < 8 { Button(ws.name) { model.switchWorkspace(ws.name) }.keyboardShortcut(KeyEquivalent(Character("\(index + 2)")), modifiers: [.control]) }
-                else { Button(ws.name) { model.switchWorkspace(ws.name) } }
+                let open = Binding(get: { model.activeWorkspace == ws.name }, set: { _ in model.switchWorkspace(ws.name) })
+                if index < 8 { Toggle(ws.name, isOn: open).keyboardShortcut(KeyEquivalent(Character("\(index + 2)")), modifiers: [.control]) }
+                else { Toggle(ws.name, isOn: open) }
             }
+            Divider()
+            Button("Next Workspace") { model.switchWorkspace(by: 1) }.keyboardShortcut("]", modifiers: [.control, .shift, .command]).disabled(model.workspaces.isEmpty)
+            Button("Previous Workspace") { model.switchWorkspace(by: -1) }.keyboardShortcut("[", modifiers: [.control, .shift, .command]).disabled(model.workspaces.isEmpty)
             Divider()
             Button("New Workspace…") { AppCommands.perform("cmd-workspace-new-workspace", model) }
         }
@@ -374,6 +397,7 @@ struct BrowserCommands: Commands {
             Button("Close Duplicate Tabs") { AppCommands.perform("cmd-library-close-duplicate-tabs", model) }.disabled(!AppCommands.isEnabled("cmd-library-close-duplicate-tabs", model))
             Menu("Split View") {
                 Toggle("Link Scrolling", isOn: Binding(get: { model.linkedPanes }, set: { model.setLinkedPanes($0) })).disabled(model.splitTabID == nil)
+                Button("Focus Next Panel") { model.focusNextPanel() }.keyboardShortcut("]", modifiers: [.control, .command]).disabled(model.splitTabID == nil)
                 Button("Compare the Two Pages…") { AppCommands.perform("cmd-library-compare-the-two-pages", model) }.disabled(!AppCommands.isEnabled("cmd-library-compare-the-two-pages", model))
                 Button("Reopen Last Split Layout") { AppCommands.perform("cmd-library-reopen-last-split-layout", model) }.disabled(!AppCommands.isEnabled("cmd-library-reopen-last-split-layout", model))
             }
@@ -421,8 +445,20 @@ struct BrowserCommands: Commands {
         }
         CommandGroup(after: .sidebar) {
             Button("Toggle Sidebar") { AppCommands.perform("cmd-view-toggle-sidebar", model) } .shortcut(.toggleSidebar, model.shortcuts)
+            if model.hasEdgeTabs { Button("Show Tabs at the Edge") { model.toggleEdgeTabs() } }
+            // The icon rail has a keyboard way out: expand it to the full tab list, and back.
+            if model.layoutPreset.usesSidebarPin && model.sidebarVisible {
+                Button(model.sidebarRail ? "Expand Sidebar" : "Collapse Sidebar to Icons") { model.sidebarRail.toggle() }.keyboardShortcut("l", modifiers: [.option, .shift, .command])
+            }
             Button("Show Tab Overview") { AppCommands.perform("cmd-view-show-tab-overview", model) } .shortcut(.tabOverview, model.shortcuts)
             Button("New Tab Group…") { AppCommands.perform("cmd-view-new-tab-group", model) }
+            // The keyboard way to reorder (every drag has one): the tab in front moves one place, within its pinned or unpinned run.
+            Button(model.effectiveTabLayout == .sidebar ? "Move Tab Up" : "Move Tab Left") { if let tab = model.active { model.moveTabAlong(tab, by: -1) } }
+                .keyboardShortcut(.leftArrow, modifiers: [.command, .option, .shift])
+                .disabled(model.active.map { !model.canMoveTab($0, by: -1) } ?? true)
+            Button(model.effectiveTabLayout == .sidebar ? "Move Tab Down" : "Move Tab Right") { if let tab = model.active { model.moveTabAlong(tab, by: 1) } }
+                .keyboardShortcut(.rightArrow, modifiers: [.command, .option, .shift])
+                .disabled(model.active.map { !model.canMoveTab($0, by: 1) } ?? true)
             Divider()
             ForEach(1...9, id: \.self) { n in
                 Button("Select Tab \(n)") { model.selectTab(number: n) }.keyboardShortcut(KeyEquivalent(Character("\(n)")))

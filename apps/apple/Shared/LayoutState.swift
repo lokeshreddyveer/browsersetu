@@ -6,15 +6,17 @@ import SwiftUI
 /// The rules the model and `LayoutState` must agree on, written once. Both call these, so the screens and the diagnostics cannot drift apart (they did: a
 /// stored Custom auto-hide choice and One Row in full screen were each answered differently by the two).
 enum LayoutRules {
-    /// Whether the toolbar hides until the pointer reaches the top edge. A single toolbar has no top bar to hide.
+    /// Whether the toolbar hides until the pointer reaches the top edge: only when the person chose it (Custom's auto-hide option). Full screen does not hide it:
+    /// a layout looks the same in full screen as in a window, with more room (`fullScreen` is kept in the signature so callers state it, and the rule is
+    /// visibly independent of it). A single toolbar has no top bar to hide.
     static func autoHidesToolbar(preset: LayoutPreset, singleToolbar: Bool, toolbarAutoHide: Bool, fullScreen: Bool) -> Bool {
-        !singleToolbar && ((preset == .custom && toolbarAutoHide) || fullScreen)
+        !singleToolbar && preset == .custom && toolbarAutoHide
     }
 
     /// Whether the sidebar slides in from the window edge by choice. A remembered "hide until the edge" only counts in the layouts that have a sidebar: it
     /// must not give Classic, Minimal or One Row ("no sidebar") an edge-hover one.
     static func sidebarAutoHides(preset: LayoutPreset, sidebarAutoHide: Bool) -> Bool {
-        sidebarAutoHide && preset != .classic && preset != .minimal && preset != .inline
+        sidebarAutoHide && preset != .classic && preset != .minimal && preset != .inline && !preset.tabsOnTop
     }
 }
 
@@ -22,6 +24,15 @@ enum LayoutRules {
 enum LayoutMetrics {
     /// Room kept for the traffic lights at the start of a toolbar: none in full screen, where they are not in the window.
     static func toolbarLeadingInset(fullScreen: Bool) -> CGFloat { fullScreen ? 10 : 84 }
+
+    /// Where the window's traffic lights are accounted for in the two top rows. Normally the toolbar (the top row) keeps the room. With the tabs above the toolbar the strip row is the top row: it
+    /// reserves the lights' room in a region of its own (not padding inside the strip, so tab content, Essentials and scroll spacing are untouched), and the toolbar below uses the no-lights inset
+    /// already used in full screen. In full screen the lights are not in the window, so the strip reserves nothing. With the strip hidden the toolbar is the top row again and keeps the room.
+    struct ChromeInsets: Equatable { var stripClearance: CGFloat; var toolbar: CGFloat }
+    static func chromeInsets(tabsOnTop: Bool, fullScreen: Bool, stripShown: Bool) -> ChromeInsets {
+        guard tabsOnTop && stripShown else { return ChromeInsets(stripClearance: 0, toolbar: toolbarLeadingInset(fullScreen: fullScreen)) }
+        return ChromeInsets(stripClearance: fullScreen ? 0 : toolbarLeadingInset(fullScreen: false), toolbar: toolbarLeadingInset(fullScreen: true))
+    }
     /// The same room at the head of a sidebar that is under the lights, left side and windowed only.
     static let sidebarLights: CGFloat = 74
     /// Top inset of the content in a sidebar, with and without a top bar over the page.
@@ -29,7 +40,7 @@ enum LayoutMetrics {
     /// The height of the one row of controls at the top of a window (and of the One Row bar). Every layout measures its top bar from this.
     static let toolbarHeight: CGFloat = 40
     static let sidebarTopColumnBar: CGFloat = toolbarHeight
-    static let sidebarTopBarless: CGFloat = 46
+    static let sidebarTopBarless: CGFloat = toolbarHeight
 }
 
 struct LayoutInputs: Equatable {
@@ -47,6 +58,10 @@ struct LayoutInputs: Equatable {
     var windowFullScreen = false
     var collapseOnScroll = true
     var windowWidth: Double = 1100
+    /// The room a docked sidebar (or its rail) takes from the window: the toolbar of a layout with a separate toolbar beside it lives in what is left.
+    var dockedSidebarWidth: Double = 0
+    /// Which toolbar buttons are switched on (the real bar counts only these).
+    var toolbarVisible = ToolbarVisibility()
     /// How many of the optional toolbar buttons are on; they take room, so they move the width at which the rest fold away.
     var toolbarExtras = 0
 }
@@ -104,14 +119,15 @@ struct LayoutState: Equatable {
         let sidebar: SidebarMode
         if i.focusMode { sidebar = .hidden }
         else if i.sidebarVisible { sidebar = i.sidebarRail ? .rail : .pinned }
-        else if LayoutRules.sidebarAutoHides(preset: i.preset, sidebarAutoHide: i.sidebarAutoHide) || resolved.tabLayout == .sidebar { sidebar = .onEdge }
+        // Canvas has no sidebar at the edge either: its tabs are reached through the switcher.
+        else if i.preset != .canvas, LayoutRules.sidebarAutoHides(preset: i.preset, sidebarAutoHide: i.sidebarAutoHide) || resolved.tabLayout == .sidebar { sidebar = .onEdge }
         else { sidebar = .hidden }
 
         let top: TopChrome
         if i.focusMode { top = .focusBand }
-        else if i.preset == .floating { top = .floatingPill }
+        else if i.preset == .floating || i.preset == .canvas { top = .floatingPill }
         else if single { top = .none }
-        else if autoHidesToolbar { top = .toolbarOnEdge }      // checked before One Row: in full screen it hides like the others, and needs its handle
+        else if autoHidesToolbar { top = .toolbarOnEdge }      // only Custom with its auto-hide option on; full screen keeps the layout's own chrome
         else if i.preset == .inline { top = .singleRow }
         else { top = .toolbar }
 
@@ -123,7 +139,7 @@ struct LayoutState: Equatable {
         else { tabs = .strip }
 
         let address: AddressPlacement
-        if i.focusMode || i.preset == .floating { address = .floatingSearch }
+        if i.focusMode || i.preset == .floating || i.preset == .canvas { address = .floatingSearch }
         else if single { address = sidebar == .pinned ? .sidebar : .floatingSearch }
         else if i.preset == .inline { address = .inRow }
         else { address = .toolbar }
@@ -134,14 +150,16 @@ struct LayoutState: Equatable {
         switch top {
         case .toolbar, .singleRow:
             // The toolbar drops its optional buttons from the right as the window narrows; they stay one click away in More.
-            let priority = ToolbarPriority(fitting: CGFloat(i.windowWidth), leadingInset: LayoutMetrics.toolbarLeadingInset(fullScreen: i.windowFullScreen), extras: i.toolbarExtras)
+            // The same width the bar itself gets (the window minus a docked sidebar) and the same visible buttons, so the diagnostics and the screen agree.
+            let priority = ToolbarPriority(fitting: CGFloat(max(0, i.windowWidth - i.dockedSidebarWidth)), leadingInset: LayoutMetrics.toolbarLeadingInset(fullScreen: i.windowFullScreen), extras: i.toolbarExtras, visible: i.toolbarVisible)
             reach[.search] = .visible
             reach[.settings] = .handle
             reach[.newTab] = priority.showOptional ? .visible : .handle
             reach[.tabOverview] = priority.showOptional ? .visible : .handle
             if !priority.showOptional { folded = [.newTab, .tabOverview] }
         case .floatingPill:
-            reach[.search] = .visible; reach[.newTab] = .handle; reach[.tabOverview] = .handle; reach[.settings] = .handle
+            // Canvas shows a handle, not the pill: the address is one ⌘L (or a click on the handle) away.
+            reach[.search] = i.preset == .canvas ? .handle : .visible; reach[.restoreLayout] = .handle; reach[.newTab] = .handle; reach[.tabOverview] = .handle; reach[.settings] = .handle
         case .focusBand:
             // The focus band carries a menu with everything.
             reach[.search] = .handle; reach[.newTab] = .handle; reach[.tabOverview] = .handle; reach[.settings] = .handle
@@ -188,7 +206,8 @@ struct LayoutSnapshot: Codable, Equatable {
 enum WindowPreset: String, CaseIterable, Identifiable {
     case research, writing, media, minimal
     var id: String { rawValue }
-    var title: String { rawValue.capitalized }
+    /// "Minimal" is also a layout (with compact tabs); this arrangement is One Row, so it is called Compact here (the stored value stays `minimal`).
+    var title: String { self == .minimal ? "Compact" : rawValue.capitalized }
     var summary: String {
         switch self {
         case .research: "Vertical tabs docked on the left, so many pages stay in view"
@@ -226,6 +245,8 @@ extension BrowserModel {
         inputs.windowFullScreen = windowFullScreen
         inputs.collapseOnScroll = collapseOnScroll
         inputs.windowWidth = width
+        inputs.dockedSidebarWidth = (sidebarVisible && !focusMode && effectiveTabLayout == .sidebar && !singleToolbar) ? (sidebarRail ? sidebarRailWidth : min(sidebarWidth, width * 0.42)) : 0
+        inputs.toolbarVisible = toolbarVisibility
         inputs.toolbarExtras = toolbarExtrasCount
         return inputs
     }

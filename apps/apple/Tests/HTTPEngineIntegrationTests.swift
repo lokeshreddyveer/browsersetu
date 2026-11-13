@@ -125,6 +125,17 @@ final class HTTPEngineIntegrationTests: XCTestCase {
         XCTAssertEqual(record?.file.integrity, .unknown, "nothing to compare it against")
     }
 
+    func testTheServersOwnContentTypeAndTheFinalAddressAreReported() async throws {
+        let page = try await c.http.engine.resolve(DownloadSourceRequest(url: url("/htmlpage"), profile: "default", isPrivate: false))
+        XCTAssertEqual(page.contentType, "text/html")
+        XCTAssertEqual(AddressClassifier.classify(url("/htmlpage"), contentType: page.contentType, finalURL: page.finalURL), .webPage, "a real web page is the person's choice")
+        let video = try await c.http.engine.resolve(DownloadSourceRequest(url: url("/file/100?ctype=video/mp4"), profile: "default", isPrivate: false))
+        XCTAssertEqual(video.contentType, "video/mp4")
+        XCTAssertEqual(AddressClassifier.classify(url("/file/100?ctype=video/mp4"), contentType: video.contentType, finalURL: video.finalURL), .file)
+        let hopped = try await c.http.engine.resolve(DownloadSourceRequest(url: url("/redirect/2/100"), profile: "default", isPrivate: false))
+        XCTAssertEqual(hopped.finalURL?.path, "/file/100", "the address after redirects is known")
+    }
+
     func testAServerThatRefusesHeadIsAskedAnotherWay() async throws {
         let resolved = try await c.http.engine.resolve(DownloadSourceRequest(url: url("/nohead/4321"), profile: "default", isPrivate: false))
         XCTAssertEqual(resolved.totalBytes, 4321)

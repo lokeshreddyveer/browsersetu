@@ -12,7 +12,7 @@ final class IntroUITests: XCTestCase {
         return app
     }
     private func shot(_ app: XCUIApplication, _ name: String) {
-        let image = app.windows["browser-AppWindow-1"].safeScreenshot()
+        guard let image = app.windows["browser-AppWindow-1"].safeScreenshot() else { return }
         try? image.pngRepresentation.write(to: URL(fileURLWithPath: "\(dir)/globe-\(name).png"))
         let a = XCTAttachment(screenshot: image); a.name = name; a.lifetime = .keepAlways; add(a)
     }

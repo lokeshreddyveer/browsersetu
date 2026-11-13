@@ -39,6 +39,31 @@ final class PerformanceBaselineTests: XCTestCase {
         XCTAssertLessThan(switches.max() ?? 0, 250, "a tab switch took a quarter of a second")
         XCTAssertLessThan(suggest.max() ?? 0, 100, "suggestions blocked typing for 100 ms")
     }
+
+    /// The same two moments in every layout, with 25 tabs open: choosing a tab (what the click does before any drawing), and changing to the layout. Model-level times on this machine,
+    /// for comparing one build with the next; they are not frame times (those need Instruments) and no page is reloaded by either (the page views are checked to be the same objects).
+    func testEveryLayoutBaseline() async throws {
+        let root = NSTemporaryDirectory() + "bs-perf-layouts-\(UUID().uuidString)"
+        let model = BrowserModel(engine: WebKitEngine(), root: root, profile: "default")
+        await model.start()
+        for index in 0..<24 { _ = model.openTab(url: URL(string: "https://example.com/p\(index)"), isPrivate: false, select: false) }
+        let ids = model.tabs.map(\.id)
+        let views = model.tabs.map { ObjectIdentifier($0.hostView) }
+        var worstSelect = 0.0
+        for preset in LayoutPreset.allCases {
+            let switchMs = ms { model.layoutPreset = preset }
+            var picks: [Double] = []
+            for id in ids { picks.append(ms { model.select(id) }) }
+            let sorted = picks.sorted()
+            let p50 = sorted[sorted.count / 2], p95 = sorted[Int(Double(sorted.count - 1) * 0.95)]
+            worstSelect = max(worstSelect, p95)
+            print("PERF layout=\(preset.rawValue) tabs=\(ids.count) switch-ms=\(String(format: "%.2f", switchMs)) select-p50-ms=\(String(format: "%.2f", p50)) select-p95-ms=\(String(format: "%.2f", p95))")
+        }
+        XCTAssertEqual(model.tabs.map { ObjectIdentifier($0.hostView) }, views, "no layout replaced a page's view")
+        XCTAssertLessThan(worstSelect, 250, "choosing a tab took a quarter of a second in some layout")
+        model.layoutPreset = .classic
+    }
+
 }
 
 /// What the person feels when they press the + for a new tab while a real page is open: how long the window is held up. The snapshot of the page being left and

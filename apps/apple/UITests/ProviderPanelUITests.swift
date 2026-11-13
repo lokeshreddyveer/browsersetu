@@ -31,7 +31,7 @@ final class ProviderPanelUITests: XCTestCase {
     }
     func any(_ id: String) -> XCUIElement { app.descendants(matching: .any).matching(identifier: id).firstMatch }
     func shot(_ name: String) {
-        let image = app.windows["browser-AppWindow-1"].safeScreenshot()
+        guard let image = app.windows["browser-AppWindow-1"].safeScreenshot() else { return }
         try? image.pngRepresentation.write(to: URL(fileURLWithPath: "\(shots)/provider-\(name).png"))
         let a = XCTAttachment(screenshot: image); a.name = name; a.lifetime = .keepAlways; add(a)
     }

@@ -921,6 +921,7 @@ struct TabSwipe: ViewModifier {
             .offset(x: model.swipeAddressPill ? drag * 0.3 : 0)
             .accessibilityAction(named: "Next tab") { model.swipeToTab(1) }
             .accessibilityAction(named: "Previous tab") { model.swipeToTab(-1) }
+            .accessibilityAction(named: "Show all tabs") { model.openTabsView() }
             .motion(.interactiveSpring(), value: drag)
             .simultaneousGesture(
                 DragGesture(minimumDistance: 20)

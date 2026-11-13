@@ -34,12 +34,11 @@ final class LayoutConsistencyTests: XCTestCase {
         }
     }
 
-    func testOneRowInFullScreenHidesLikeTheOthersAndKeepsItsWayBack() {
+    func testOneRowInFullScreenKeepsItsRow() {
         var i = LayoutInputs()
         i.preset = .inline; i.windowFullScreen = true
         let state = LayoutState.resolve(i)
-        XCTAssertEqual(state.topChrome, .toolbarOnEdge)
-        XCTAssertTrue(state.needsHandle, "nothing but the page is on screen, so the handle must be drawn")
+        XCTAssertEqual(state.topChrome, .singleRow, "full screen keeps One Row's row on screen")
         XCTAssertTrue(state.everythingReachable)
     }
 

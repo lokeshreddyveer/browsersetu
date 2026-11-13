@@ -89,6 +89,22 @@ final class DownloadsViewModel: ObservableObject {
     @Published private(set) var historyPages = 1
     @Published private(set) var hasMoreHistory = false
     private var legacyEntries: [DownloadLegacyHistory.Entry] = []
+    /// Older-history rows the person removed from the list. The old table can only be cleared as a whole, so a single removal is remembered here (the files are never touched).
+    private var hiddenLegacy: Set<UUID> = []
+    private var hiddenOrder: [UUID] = []
+    /// Older lines hidden BY RULE, because the download they describe was removed: file name + address without query, and when it finished. A rule needs no loaded entry, so it works however the
+    /// removal and the loading of the older history interleave, in any window, and after a relaunch.
+    private var hiddenTwinOrder: [String] = []
+    private var hiddenTwinTimes: [String: [Double]] = [:]
+    /// While a bulk removal runs the hiding is collected and written ONCE at the end (clearing thousands of entries must not rewrite the stored lists thousands of times).
+    private var hideBatchDepth = 0
+    private var pendingHideIDs: [UUID] = []
+    private var pendingHideTwins: [(key: String, at: Double)] = []
+    /// Tests lower the cap to exercise trimming.
+    static var hiddenLimitOverride: Int?
+    private var hiddenVersionSeen = -1
+    /// At most as many as the older history can ever list; the oldest are forgotten first.
+    private static var hiddenLimit: Int { hiddenLimitOverride ?? DownloadLegacyHistory.maxPages * DownloadLegacyHistory.pageSize }
     private var legacyByID: [UUID: DownloadLegacyHistory.Entry] = [:]
     /// Reads the older history (the Rust core's list, newest first). Nil where there is none.
     typealias LegacySource = @Sendable (UInt32) throws -> [(url: String, filename: String, created: Int64)]
@@ -127,7 +143,7 @@ final class DownloadsViewModel: ObservableObject {
     let changeDelay: TimeInterval, progressDelay: TimeInterval
 
     private enum Keys {
-        static let filter = "downloads.filter", sort = "downloads.sort", ascending = "downloads.ascending", inspector = "downloads.inspector"
+        static let filter = "downloads.filter", sort = "downloads.sort", ascending = "downloads.ascending", inspector = "downloads.inspector", legacyHidden = "downloads.legacyHidden", legacyHiddenTwins = "downloads.legacyHiddenTwins", legacyHiddenVersion = "downloads.legacyHiddenVersion"
     }
 
     init(coordinator: DownloadCoordinator, performer: DownloadActionPerforming? = nil, legacy: LegacySource? = nil, defaults: UserDefaults? = .standard, changeDelay: TimeInterval = 0.12, progressDelay: TimeInterval = 0.5) {
@@ -209,6 +225,7 @@ final class DownloadsViewModel: ObservableObject {
     var viewerPrivateSession: () -> UUID? = { nil }
 
     func refreshNow() {
+        mergeStoredHidden()          // another window may have removed things since this model last looked
         guard let coordinator else { return }
         rebuilds += 1; generation += 1
         // The size of a finished file is asked for only where the record kept none, and looked up once per download (remembered until the files are rechecked), so a long list is not
@@ -222,7 +239,7 @@ final class DownloadsViewModel: ObservableObject {
         // The older history, minus anything the task database already describes, below the live rows' own history.
         legacyByID = [:]
         if !legacyEntries.isEmpty {
-            for entry in DownloadLegacyHistory.unseen(legacyEntries, records: snapshot.records) {
+            for entry in DownloadLegacyHistory.unseen(legacyEntries, records: snapshot.records) where !hiddenLegacy.contains(DownloadLegacyHistory.identifier(for: entry)) && !isHiddenByRule(entry) {
                 let row = DownloadLegacyHistory.row(for: entry) { [unowned self] name in self.legacyFileExists(name, key: DownloadLegacyHistory.identifier(for: entry)) }
                 legacyByID[row.id] = entry
                 built.append(row)
@@ -258,6 +275,72 @@ final class DownloadsViewModel: ObservableObject {
     }
 
     // MARK: Older history
+
+    /// "Remove from List" on a row of the older history: it is forgotten here (and stays forgotten); the file is not touched.
+    func hideLegacy(_ id: UUID) { queueHide(ids: [id], twins: []) }
+
+    private func queueHide(ids: [UUID], twins: [(key: String, at: Double)]) {
+        if hideBatchDepth > 0 { pendingHideIDs += ids; pendingHideTwins += twins } else { hide(ids: ids, twins: twins) }
+    }
+    private func flushHiddenBatch() {
+        guard hideBatchDepth == 0, !(pendingHideIDs.isEmpty && pendingHideTwins.isEmpty) else { return }
+        let ids = pendingHideIDs, twins = pendingHideTwins; pendingHideIDs = []; pendingHideTwins = []
+        hide(ids: ids, twins: twins)
+    }
+
+    private static let twinSeparator: Character = "\u{1F}"
+    private func twinString(_ key: String, _ at: Double) -> String { "\(at)\(Self.twinSeparator)\(key)" }
+    private func parseTwin(_ stored: String) -> (key: String, at: Double)? {
+        guard let sep = stored.firstIndex(of: Self.twinSeparator), let at = Double(stored[..<sep]), at.isFinite else { return nil }
+        return (String(stored[stored.index(after: sep)...]), at)
+    }
+
+    /// Reads what is stored (other windows, earlier launches) and ADDS it to what this model knows. Cheap when nothing changed: one integer is compared first.
+    private func mergeStoredHidden(force: Bool = false) {
+        guard let d = defaults else { return }
+        let version = d.integer(forKey: Keys.legacyHiddenVersion)
+        guard force || version != hiddenVersionSeen else { return }
+        hiddenVersionSeen = version
+        for id in (d.stringArray(forKey: Keys.legacyHidden) ?? []).compactMap(UUID.init(uuidString:)) where hiddenLegacy.insert(id).inserted { hiddenOrder.append(id) }
+        for t in d.stringArray(forKey: Keys.legacyHiddenTwins) ?? [] { if let p = parseTwin(t) { addTwin(p.key, p.at) } }
+    }
+    private func addTwin(_ key: String, _ at: Double) {
+        if hiddenTwinTimes[key, default: []].contains(at) { return }
+        hiddenTwinTimes[key, default: []].append(at); hiddenTwinOrder.append(twinString(key, at))
+    }
+    private func hide(ids: [UUID], twins: [(key: String, at: Double)]) {
+        mergeStoredHidden()            // union with what another window stored since (a changed version counter says so): writing only this model's view would bring back what that window removed
+        for id in ids where hiddenLegacy.insert(id).inserted { hiddenOrder.append(id) }
+        for t in twins { addTwin(t.key, t.at) }
+        let limit = Self.hiddenLimit
+        if hiddenOrder.count > limit { hiddenOrder.removeFirst(hiddenOrder.count - limit); hiddenLegacy = Set(hiddenOrder) }
+        if hiddenTwinOrder.count > limit {
+            hiddenTwinOrder.removeFirst(hiddenTwinOrder.count - limit)
+            hiddenTwinTimes = [:]; for t in hiddenTwinOrder { if let p = parseTwin(t) { hiddenTwinTimes[p.key, default: []].append(p.at) } }
+        }
+        guard let d = defaults else { return }
+        d.set(hiddenOrder.map(\.uuidString), forKey: Keys.legacyHidden)
+        d.set(hiddenTwinOrder, forKey: Keys.legacyHiddenTwins)
+        let version = d.integer(forKey: Keys.legacyHiddenVersion) + 1
+        d.set(version, forKey: Keys.legacyHiddenVersion); hiddenVersionSeen = version
+    }
+    /// True when a rule says this older line describes a download that was removed (same name and address, finished within a minute of the line).
+    private func isHiddenByRule(_ entry: DownloadLegacyHistory.Entry) -> Bool {
+        guard !hiddenTwinTimes.isEmpty, let times = hiddenTwinTimes[DownloadLegacyHistory.twinKey(filename: entry.filename, address: entry.url)] else { return false }
+        let t = entry.created.timeIntervalSince1970
+        return times.contains { abs($0 - t) <= 60 }
+    }
+
+    /// A finished download also has a line in the older history. The list hides that line only while the task record exists, so removing the record used to make the older line appear in its place.
+    /// Removing a task therefore hides its older line too, BY RULE (never any file, never another download's line): the rule needs no loaded entry, so removing before the older history has
+    /// loaded, or when its line is on a page not loaded yet, still holds.
+    private func hideTwins(ofTask id: UUID) {
+        guard let record = coordinator?.ledger.record(id), record.state == .completed, let twin = DownloadLegacyHistory.twin(of: record) else { return }
+        queueHide(ids: [], twins: [twin])
+    }
+
+    /// The one way a task record leaves the list from this model.
+    private func removeTask(_ id: UUID) { hideTwins(ofTask: id); coordinator?.removeRecord(id) }
 
     /// Reads the current pages of the older history off the main thread and shows them. Safe to call again; it never reads more than `maxPages` pages.
     func loadLegacy() {
@@ -322,6 +405,7 @@ final class DownloadsViewModel: ObservableObject {
     /// Runs an action on the given rows (default: the selection) — only on those that support it. Returns how many it was carried out for.
     @discardableResult
     func perform(_ action: DownloadRowActions, on ids: Set<UUID>? = nil, priority: DownloadPriority? = nil) -> Int {
+        hideBatchDepth += 1; defer { hideBatchDepth -= 1; flushHiddenBatch() }
         let chosen = DownloadBatch.eligible(action, in: rows, selection: ids ?? selection)
         for row in chosen {
             switch action {
@@ -331,7 +415,8 @@ final class DownloadsViewModel: ObservableObject {
             case .cancel: performer.performCancel(row.id, status: row.status)
             case .startNow: performer.performStartNow(row.id)
             case .setPriority: if let priority { performer.performSetPriority(row.id, priority) }
-            case .removeRecord: performer.performRemoveRecord(row.id)
+            case .removeRecord:
+                if row.isLegacy { hideLegacy(row.id) } else { hideTwins(ofTask: row.id); performer.performRemoveRecord(row.id) }
             default: break
             }
         }
@@ -351,6 +436,7 @@ final class DownloadsViewModel: ObservableObject {
     /// A file that could not be moved keeps its entry and is named in the message, so nothing disappears from the list while its file is still on disk. "Remove from List" stays a separate action
     /// that never touches a file. Several files are handled one by one: a failure does not stop or undo the others.
     func confirmTrash() {
+        hideBatchDepth += 1; defer { hideBatchDepth -= 1; flushHiddenBatch() }
         let targets = pendingTrash; pendingTrash = []
         var moved = 0, sharedRemoved = 0, kept: [String] = []
         var trashedPaths = Set<String>()
@@ -359,14 +445,14 @@ final class DownloadsViewModel: ObservableObject {
             guard coordinator?.ledger.record(row.id) != nil else { continue }
             let path = coordinator?.managedFile(of: row.id)?.standardizedFileURL.path
             // Another selected row for the same file: the first one already moved it, so this one is done too (not a failure) and only its entry goes.
-            if let path, trashedPaths.contains(path) { coordinator?.removeRecord(row.id); sharedRemoved += 1; continue }
+            if let path, trashedPaths.contains(path) { removeTask(row.id); sharedRemoved += 1; continue }
             // Other finished downloads in the list that point at the very same file (a duplicate entry, a re-download that kept the name). Looked up BEFORE the move, while the file still exists.
             let siblings = path.map { entriesSharing(file: $0, except: row.id) } ?? []
             let ok = trashPerformer?(row.id) ?? (coordinator?.trashFile(of: row.id) ?? false)
             if ok {
-                coordinator?.removeRecord(row.id); moved += 1
+                removeTask(row.id); moved += 1
                 if let path { trashedPaths.insert(path) }
-                for other in siblings { coordinator?.removeRecord(other); sharedRemoved += 1 }          // their file is gone too: an entry with nothing to open is not kept
+                for other in siblings { removeTask(other); sharedRemoved += 1 }          // their file is gone too: an entry with nothing to open is not kept
             } else { kept.append(row.filename) }
         }
         recheckFiles()
@@ -427,7 +513,7 @@ final class DownloadsViewModel: ObservableObject {
                 guard let self, let coordinator = self.coordinator else { return }
                 for id in left {
                     guard let record = coordinator.ledger.record(id) else { left.remove(id); continue }
-                    if record.state.isFinal || record.state == .failed { coordinator.removeRecord(id); left.remove(id) }
+                    if record.state.isFinal || record.state == .failed { removeTask(id); left.remove(id) }
                 }
                 try? await Task.sleep(for: .milliseconds(150))
             }

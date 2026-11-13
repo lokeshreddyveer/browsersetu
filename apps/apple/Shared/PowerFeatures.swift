@@ -20,20 +20,36 @@ enum ClearOnQuit: String, CaseIterable, Identifiable {
 enum GroupColor: String, CaseIterable, Identifiable {
     case red, orange, yellow, green, teal, blue, purple, pink, grey
     var id: String { rawValue }
+    /// The colour a group is drawn in when none was chosen, as Chrome gives every new group one: always the same for the same name (not stored; choosing a colour
+    /// replaces it). Grey is left out, so an uncoloured group never looks disabled.
+    static func automatic(for name: String) -> GroupColor {
+        let palette: [GroupColor] = [.blue, .green, .purple, .orange, .teal, .pink, .red, .yellow]
+        let sum = name.unicodeScalars.reduce(0) { ($0 &* 31 &+ Int($1.value)) & 0x7fffffff }
+        return palette[sum % palette.count]
+    }
     var title: String { rawValue.capitalized }
-    var color: Color {
+    var components: (r: Double, g: Double, b: Double) {
         switch self {
-        case .red: Color(red: 0.88, green: 0.32, blue: 0.30)
-        case .orange: Color(red: 0.92, green: 0.54, blue: 0.22)
-        case .yellow: Color(red: 0.92, green: 0.76, blue: 0.22)
-        case .green: Color(red: 0.30, green: 0.68, blue: 0.40)
-        case .teal: Color(red: 0.12, green: 0.62, blue: 0.66)
-        case .blue: Color(red: 0.28, green: 0.50, blue: 0.90)
-        case .purple: Color(red: 0.58, green: 0.40, blue: 0.86)
-        case .pink: Color(red: 0.90, green: 0.40, blue: 0.62)
-        case .grey: Color(red: 0.55, green: 0.57, blue: 0.62)
+        case .red: (0.88, 0.32, 0.30)
+        case .orange: (0.92, 0.54, 0.22)
+        case .yellow: (0.92, 0.76, 0.22)
+        case .green: (0.30, 0.68, 0.40)
+        case .teal: (0.12, 0.62, 0.66)
+        case .blue: (0.28, 0.50, 0.90)
+        case .purple: (0.58, 0.40, 0.86)
+        case .pink: (0.90, 0.40, 0.62)
+        case .grey: (0.55, 0.57, 0.62)
         }
     }
+    var color: Color { let c = components; return Color(red: c.r, green: c.g, blue: c.b) }
+    /// WCAG relative luminance of the colour.
+    var luminance: Double {
+        func lin(_ v: Double) -> Double { v <= 0.03928 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4) }
+        let c = components
+        return 0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b)
+    }
+    /// Text on this colour is black when white text would fall under 4.5:1 (the WCAG minimum for small text), white otherwise.
+    var prefersDarkText: Bool { 1.05 / (luminance + 0.05) < 4.5 }
 }
 
 extension BrowserModel {

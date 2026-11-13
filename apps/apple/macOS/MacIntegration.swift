@@ -9,8 +9,50 @@ private func frontModel() -> BrowserModel? {
 }
 
 /// Dock menu: what a right-click or long press on the Dock icon offers.
+/// Full screen for the browser window in front: the key window when it can be full screen, otherwise the main window (a small panel can be key without being
+/// the window the person means).
+@MainActor
+enum BrowserFullScreen {
+    static func target() -> NSWindow? {
+        [NSApp.keyWindow, NSApp.mainWindow].compactMap { $0 }.first { $0.styleMask.contains(.resizable) && !($0 is NSPanel) }
+            ?? NSApp.orderedWindows.first { $0.isVisible && $0.styleMask.contains(.resizable) && !($0 is NSPanel) }
+    }
+    static func toggle() { target()?.toggleFullScreen(nil) }
+}
+
 @MainActor
 final class MacAppDelegate: NSObject, NSApplicationDelegate {
+    /// ⌃⌘F goes to the browser window itself. AppKit's View-menu item (kept, so the menu is unchanged) sends it to the key window, and in the layouts with no
+    /// toolbar (Floating, Canvas) that did not reach the browser window: full screen could be entered from the menu but not left with ⌃⌘F (a known SwiftUI
+    /// symptom, developer.apple.com/forums/thread/725111). Typing in a field is not affected: only this exact combination is taken.
+    private var fullScreenKeyMonitor: Any?
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        fullScreenKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.function, .numericPad, .capsLock])
+            // Escape leaves full screen, as it does in Safari, Finder and Keynote, but only when nothing else is waiting for it: no panel, sheet, search, find, address
+            // editing or half-open address field (each of those takes the Escape first, as before).
+            if flags.isEmpty, event.keyCode == 53 {
+                let leaves: Bool = MainActor.assumeIsolated {
+                    guard let window = BrowserFullScreen.target(), window.styleMask.contains(.fullScreen), window.attachedSheet == nil, let m = frontModel() else { return false }
+                    return !(m.overviewVisible || m.paletteVisible || m.findVisible || m.tabSearchVisible || m.floatingAddressVisible || m.sheet != nil || m.addressBar.isEditing)
+                }
+                guard leaves else { return event }
+                MainActor.assumeIsolated { BrowserFullScreen.toggle() }
+                return nil
+            }
+            // The F key by its position (keyCode 3), not by the character it types: with Control held that can arrive as a control code.
+            guard flags == [.control, .command], event.keyCode == 3 else { return event }
+            let target = MainActor.assumeIsolated({ BrowserFullScreen.target() })
+            #if DEBUG
+            NSLog("FSKEY fired: target=%@ key=%@ main=%@", String(describing: target?.title), String(describing: NSApp.keyWindow?.className), String(describing: NSApp.mainWindow?.className))
+            #endif
+            guard target != nil else { return event }
+            // After this key event has finished (not inside it, while Control is still down), which is when AppKit accepts the change from every layout.
+            DispatchQueue.main.async { MainActor.assumeIsolated { BrowserFullScreen.toggle() } }
+            return nil
+        }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.servicesProvider = ServicesProvider.shared
         NSUpdateDynamicServices()

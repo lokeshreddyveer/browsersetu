@@ -4,7 +4,15 @@ import SwiftUI
 struct DockedPanelView: View {
     @EnvironmentObject var model: BrowserModel
     let sheet: Sheet
+    /// The width of the column the panel sits in, where the caller knows it (the Mac): the panel then never takes the room the page needs. Nil keeps the stored width (the iPad).
+    var availableWidth: CGFloat? = nil
     @State private var dragStart: Double?
+
+    /// The stored width (300 to 560), or less when the window is too narrow to leave the page at least 320 points (the panel keeps 220 at the least). The stored value is not changed.
+    private var shownWidth: CGFloat {
+        guard let available = availableWidth else { return model.dockWidth }
+        return max(220, min(model.dockWidth, available - 320))
+    }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -47,7 +55,7 @@ struct DockedPanelView: View {
                 .settlesBeforeShowing()
             }
             .themedSurface()
-            .frame(width: model.dockWidth)
+            .frame(width: shownWidth)
         }
         .chromeFill()
     }

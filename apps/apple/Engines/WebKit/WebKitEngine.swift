@@ -19,7 +19,7 @@ final class WebKitEngine: BrowserEngine {
     private var privateSessionStores: [UUID: WKWebsiteDataStore] = [:]
     private var proxy: (config: ProxyConfig, password: String?)?
     private var webPolicy = WebPolicy()
-    let rules = ContentRuleInstaller()
+    let rules = ContentRuleInstaller(store: TestIsolation.contentRuleStore(), defaults: TestIsolation.contentRuleDefaults)
     private let extraRules = ExtraRuleInstaller()
     private let tabs = NSHashTable<WebKitTab>.weakObjects()
     #if DEBUG
@@ -104,9 +104,9 @@ final class WebKitEngine: BrowserEngine {
         } else if container == TabOrganizing.scratchContainer {
             config.websiteDataStore = .nonPersistent()                     // gone with the tab
         } else if let container {
-            config.websiteDataStore = WKWebsiteDataStore(forIdentifier: ProfileIdentity.dataStoreID(for: profile + "#" + container))
+            config.websiteDataStore = persistentStore(profile + "#" + container) ?? .nonPersistent()
         } else {
-            config.websiteDataStore = WKWebsiteDataStore(forIdentifier: ProfileIdentity.dataStoreID(for: profile))
+            config.websiteDataStore = persistentStore(profile) ?? .nonPersistent()
         }
         applyProxy(to: config.websiteDataStore)
         // A web view announces itself without the "Version/… Safari/…" part that Safari adds, and many sites (Google's home page
@@ -254,19 +254,25 @@ final class WebKitEngine: BrowserEngine {
         store.proxyConfigurations = [configuration]
     }
 
+    /// A profile's persistent website-data store, by the one identity rule (`ProfileIdentity.storeID`): nil in a test process that is not safely set up, so nothing persistent is created, read, cleared or deleted.
+    private func persistentStore(_ profile: String) -> WKWebsiteDataStore? {
+        ProfileIdentity.storeID(for: profile).map { WKWebsiteDataStore(forIdentifier: $0) }
+    }
+
     func cookies(profile: String, isPrivate: Bool) async -> [CookieInfo] {
         let store: WKWebsiteDataStore
         if isPrivate {
             guard let privateStore else { return [] }
             store = privateStore
         } else {
-            store = WKWebsiteDataStore(forIdentifier: ProfileIdentity.dataStoreID(for: profile))
+            guard let persistent = persistentStore(profile) else { return [] }
+            store = persistent
         }
         return await store.httpCookieStore.allCookies().map { CookieInfo(name: $0.name, value: $0.value, domain: $0.domain) }
     }
 
     func clearData(profile: String) async {
-        let store = WKWebsiteDataStore(forIdentifier: ProfileIdentity.dataStoreID(for: profile))
+        guard let store = persistentStore(profile) else { return }
         await store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast)
     }
 
@@ -283,7 +289,7 @@ final class WebKitEngine: BrowserEngine {
     }
 
     func siteData(profile: String) async -> [SiteDataInfo] {
-        let store = WKWebsiteDataStore(forIdentifier: ProfileIdentity.dataStoreID(for: profile))
+        guard let store = persistentStore(profile) else { return [] }
         let records = await store.dataRecords(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes())
         return records
             .map { SiteDataInfo(host: $0.displayName, kinds: Self.kinds($0.dataTypes)) }
@@ -292,7 +298,7 @@ final class WebKitEngine: BrowserEngine {
     }
 
     func removeSiteData(host: String, profile: String) async {
-        let store = WKWebsiteDataStore(forIdentifier: ProfileIdentity.dataStoreID(for: profile))
+        guard let store = persistentStore(profile) else { return }
         let records = await store.dataRecords(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes()).filter { $0.displayName == host }
         guard !records.isEmpty else { return }
         await store.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), for: records)
@@ -315,7 +321,7 @@ final class WebKitEngine: BrowserEngine {
 
     func removeProfileData(profile: String) async {
         // WebKit refuses while a web view or a store object that just read the profile is still being released, so ask again a few times.
-        let id = ProfileIdentity.dataStoreID(for: profile)
+        guard let id = ProfileIdentity.storeID(for: profile) else { return }
         for attempt in 0..<5 {
             if (try? await WKWebsiteDataStore.remove(forIdentifier: id)) != nil { return }
             if !(await WKWebsiteDataStore.allDataStoreIdentifiers.contains(id)) { return }

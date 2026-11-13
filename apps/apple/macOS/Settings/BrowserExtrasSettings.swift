@@ -110,11 +110,11 @@ struct TabHoverAndStacksSection: View {
             Text("Strip and Sidebar")
         }
         Section {
-            Toggle("Stack tabs of a group together in the tab strip", isOn: $model.tabStacks)
+            Toggle("Stack the tabs of one website together", isOn: $model.tabStacks)
         } header: {
             Text("Tab Stacks")
         } footer: {
-            Text("With a tab group, its tabs share one place in the strip: the open one shows, with a count, and a click on the count opens the stack's other tabs.")
+            Text("In the vertical tab list (the Sidebar layout), tabs of one website share one place: the first shows, with a count, and a click on the count folds or opens the stack. The horizontal tab strip of Classic, Minimal and One Row does not stack tabs.")
         }
     }
 }
@@ -298,7 +298,7 @@ struct SidebarFooterSection: View {
         } header: {
             Text("Sidebar Buttons")
         } footer: {
-            Text("The buttons along the foot of the sidebar. Seven fit in the row; more go under a “…” button. You can also right-click the row to tick them.")
+            Text("The buttons along the foot of the sidebar in the vertical-tab layouts (Sidebar). Seven fit in the row; more go under a “…” button. You can also right-click the row to tick them. The Library of Classic, Minimal and One Row has its own bar (add, sort, more), and Downloads, Profile and Settings are in the toolbar.")
         }
         .motion(.easeOut(duration: 0.2), value: model.sidebarFooter)
     }

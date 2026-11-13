@@ -34,14 +34,16 @@ enum AppRelease {
 
 /// The same text goes into docs/releases/<version>-build-<n>.md and the GitHub release notes.
 enum WhatsNewContent {
-    static let title = "What's new in Browser Setu 0.4.2"
+    static let title = "What's new in Browser Setu 0.4.3"
     struct Item: Identifiable, Equatable { let symbol: String; let heading: String; let text: String; var id: String { heading } }
     static let items: [Item] = [
-        Item(symbol: "play.rectangle", heading: "Videos have their names", text: "In the toolbar's video list, each video shows its own title, so you can tell them apart. A video link you add opens the video options instead of saving a web page."),
-        Item(symbol: "sparkles", heading: "Updates show what changed", text: "After an update you see the opening scene and this page. The setup questions are asked only on a first install."),
+        Item(symbol: "rectangle.3.group", heading: "Four new layouts", text: "Hybrid keeps a full toolbar over the page with your tabs in a sidebar. Canvas is just the page, with the address on ⌘L and your tabs on ⇧⌘A. Research Desk puts two pages side by side. Workspace Deck lists every workspace first. They are grouped with the others under Everyday, Organized, Immersive and Productivity."),
+        Item(symbol: "folder", heading: "Tab groups in every tab strip", text: "Groups now show inline in Classic, Minimal and One Row, with colour, collapse and drag in and out, as they do in the sidebar."),
+        Item(symbol: "sidebar.left", heading: "A calmer sidebar", text: "Workspaces, search and Essentials stay in place while your pinned tabs, open tabs and groups scroll together. Essentials take at most two rows. Floating's sidebar also opens from the keyboard."),
+        Item(symbol: "arrow.up.left.and.arrow.down.right", heading: "Full screen keeps your toolbar", text: "Your layout stays as it is in full screen, and Esc leaves it when nothing else is open."),
+        Item(symbol: "eye.slash", heading: "Private tabs are marked everywhere", text: "A private tab is clearly marked in every layout, and moving a tab between windows keeps its privacy."),
+        Item(symbol: "ipad.and.iphone", heading: "iPad and iPhone", text: "The iPad sidebar steps aside in narrow windows and its toolbar folds into More. Every iPhone layout, including the compact ones, reaches all your tabs from the menu."),
         Item(symbol: "arrow.down.circle", heading: "Video tools are your choice", text: "The video download and media processing tools are optional downloads, not part of the app. Install them from Settings > Media whenever you want video and audio downloads. You see the size first and nothing downloads without your yes."),
-        Item(symbol: "bolt.shield", heading: "A smaller app", text: "The download is about 33 MB."),
-        Item(symbol: "checkmark.seal", heading: "Checked before it runs", text: "Every tool is checked (hash, developer signature, Apple notarization, processor type) before it is installed, and can be repaired or removed in Settings."),
     ]
 }
 

@@ -51,6 +51,11 @@ final class DownloadCoordinator: ObservableObject {
     func quietFlights(for seconds: TimeInterval = 4) { flightsQuietUntil = Date().addingTimeInterval(seconds) }
     @Published private(set) var completed: [URL] = []
     @Published private(set) var interrupted: [UUID: InterruptedDownload] = [:]
+    /// The failures the person has already seen (the downloads list was opened). A failure not in here marks the Downloads buttons, whatever else was dismissed or
+    /// cleared meanwhile. Shared by the toolbar's and the footer's.
+    @Published private(set) var seenFailureIDs: Set<UUID> = []
+    var hasUnseenFailure: Bool { failures.contains { !seenFailureIDs.contains($0.id) } }
+    func markFailuresSeen() { seenFailureIDs.formUnion(failures.map(\.id)) }
     /// Set by the engine: starts a download again from its resume data.
     var resumer: ((Data) -> Void)?
     /// Preferred over `resumer` when set: also tells the engine which task is being resumed, so the resumed download keeps its identity.

@@ -315,14 +315,17 @@ extension BrowserModel {
 struct AudioBadge: View {
     @ObservedObject var tab: TabController
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// When the speaker was last clicked: a double-click on it mutes twice and must never count as a double-click on the tab (which can close it).
+    @MainActor static var lastTap = Date.distantPast
+    @MainActor static var tappedJustNow: Bool { Date().timeIntervalSince(lastTap) < 0.6 }
 
     var body: some View {
         if tab.playingAudio || tab.muted {
-            Button { tab.setMuted(!tab.muted) } label: {
+            Button { AudioBadge.lastTap = Date(); tab.setMuted(!tab.muted) } label: {
                 Image(systemName: tab.muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
                     .font(.system(size: 9, weight: .semibold)).foregroundStyle(tab.muted ? Color.secondary : Theme.accent)
                     .symbolEffect(.variableColor.iterative, isActive: !tab.muted && !reduceMotion && MotionStyle.current != .off)
-                    .frame(width: 16, height: 16).contentShape(Rectangle())
+                    .frame(width: 16, height: 16).contentShape(Rectangle().inset(by: -4))
             }
             .buttonStyle(.plain)
             .accessibilityLabel(tab.muted ? "Unmute tab" : "Mute tab")

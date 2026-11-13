@@ -229,6 +229,17 @@ final class PrivacyController: ObservableObject {
         try? change { try $0.setList(url, enabled: enabled) }
     }
 
+    /// What reading one downloaded list found. `Sendable` plain values only: the list's bytes go in, one of these comes out.
+    enum ListCheck: Sendable { case usable, notText, unusable }
+
+    /// Checks one downloaded list: it must be text, and the filter reader or the content-blocker reader must find something in it. This is the check `updateLists` always made, moved out of the main actor
+    /// (`@concurrent`: it runs on the shared background pool, one list at a time, because the caller awaits it inside its loop, so lists are still checked in order and none is installed before its turn).
+    @concurrent nonisolated static func check(downloaded data: Data, name: String) async -> ListCheck {
+        guard String(data: data, encoding: .utf8) != nil else { return .notText }
+        guard (try? FilterParser.parse(data, source: name)) != nil || !ABPContentParser.parse(data).isEmpty else { return .unusable }
+        return .usable
+    }
+
     /// Downloads the enabled lists. New text is compiled first and only saved if WebKit accepts the result, so a bad
     /// download never replaces working protection.
     func updateLists(now: Date = Date()) async {
@@ -251,9 +262,12 @@ final class PrivacyController: ObservableObject {
             do {
                 guard let parsedURL = URL(string: url) else { throw ListUpdateError.notHTTPS }
                 let data = try await fetcher.fetch(parsedURL, limit: PolicyBuilder.byteLimit)
-                guard String(data: data, encoding: .utf8) != nil else { throw ListUpdateError.notText }
-                guard (try? FilterParser.parse(data, source: name)) != nil || !ABPContentParser.parse(data).isEmpty else {
-                    throw FilteringIssue.empty
+                // Reading the whole list is the long part (seconds for a large one), so it is done off the main actor; the checks, their order and their errors are the same as before.
+                try Task.checkCancellation()
+                switch await Self.check(downloaded: data, name: name) {
+                case .notText: throw ListUpdateError.notText
+                case .unusable: throw FilteringIssue.empty
+                case .usable: break
                 }
                 fresh[url] = data
             } catch {
@@ -300,6 +314,8 @@ final class PrivacyController: ObservableObject {
 
     /// At launch only: refreshes lists when automatic updates are on and the interval has passed. No timers.
     func updateIfDue(now: Date = Date()) async {
+        // A UI-test launch (a throwaway `-UITestRoot`) never fetches lists by itself: that was a real download, and a long parse, in every test. Unit tests and a person's own Debug build are unaffected.
+        guard !TestIsolation.isUITestRun else { return }
         guard configuration.automaticUpdates, !configuration.effective.downloadedLists.isEmpty else { return }
         // A metered or Low Data connection waits; the lists are still fetched when the person asks or at the next launch on a normal one.
         if NetworkConditions.shared.shouldDeferBackground { return }
@@ -319,7 +335,7 @@ final class PrivacyController: ObservableObject {
     /// The first time, and again if the files were lost or the level changed: fetches the lists the current level needs. Never under tests.
     /// After that, lists only change when the user asks or has allowed automatic updates.
     func fetchStandardListsIfMissing() async {
-        guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil, !ProxyState.active else { return }
+        guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil, !TestIsolation.isUITestRun, !ProxyState.active else { return }
         let urls = configuration.effective.downloadedLists
         guard !urls.isEmpty, cache.readAll(urls).count < urls.count else { return }
         await updateLists()

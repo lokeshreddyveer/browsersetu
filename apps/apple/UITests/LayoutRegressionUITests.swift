@@ -13,7 +13,7 @@ final class LayoutRegressionUITests: XCTestCase {
     }
 
     private func attach(_ app: XCUIApplication, _ name: String) {
-        let shot = XCTAttachment(screenshot: app.windows.firstMatch.safeScreenshot()); shot.name = name; shot.lifetime = .keepAlways; add(shot)
+        let shot = app.windows.firstMatch.safeAttachment(); shot.name = name; shot.lifetime = .keepAlways; add(shot)
         let tree = XCTAttachment(string: app.debugDescription); tree.name = name + "-accessibility-tree"; tree.lifetime = .keepAlways; add(tree)
     }
 

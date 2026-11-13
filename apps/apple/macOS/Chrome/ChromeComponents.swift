@@ -266,6 +266,30 @@ struct WindowDragRegion: NSViewRepresentable {
     func updateNSView(_ view: NSView, context: Context) {}
 }
 
+/// The window's three buttons sit on the line the first row of controls shares: their centre is `LayoutMetrics.toolbarHeight / 2` below the window's top. This is the usual method (Electron and Chromium do the same): find the
+/// title bar container above the buttons, make it that tall, and put each button where its centre belongs, in the container's own coordinates. AppKit lays the title bar out again on resize, full screen, coming to the front and
+/// changing screen, so it is applied again on each of those (see `WindowObserver`). The buttons are the system's own, only moved; nothing in the window is drawn under them (each layout keeps its own room for them).
+@MainActor enum TrafficLightLine {
+    static var center: CGFloat { LayoutMetrics.toolbarHeight / 2 }
+
+    static func apply(to window: NSWindow) {
+        guard window.isVisible, !window.styleMask.contains(.fullScreen) else { return }
+        let types: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
+        let buttons = types.compactMap { window.standardWindowButton($0) }
+        guard let close = buttons.first, let titlebar = close.superview, let container = titlebar.superview,
+              String(describing: type(of: container)).contains("TitlebarContainer"), let frameView = container.superview else { return }
+        let height = center * 2
+        let wanted = NSRect(x: container.frame.minX, y: frameView.bounds.height - height, width: container.frame.width, height: height)
+        if abs(container.frame.minY - wanted.minY) > 0.5 || abs(container.frame.height - height) > 0.5 { container.frame = wanted }
+        if abs(titlebar.frame.height - height) > 0.5 || abs(titlebar.frame.minY) > 0.5 { titlebar.frame = NSRect(x: 0, y: 0, width: container.bounds.width, height: height) }
+        // In the title bar's own (bottom-up) coordinates, a button whose centre is `center` below the top has its bottom edge at height - center - button height / 2.
+        for button in buttons {
+            let y = (titlebar.bounds.height - center - button.frame.height / 2).rounded()
+            if abs(button.frame.minY - y) > 0.5 { button.setFrameOrigin(NSPoint(x: button.frame.minX, y: y)) }
+        }
+    }
+}
+
 /// Reports full-screen changes so the toolbar can give back the space the traffic lights used.
 struct WindowObserver: NSViewRepresentable {
     let onFullScreen: (Bool) -> Void
@@ -280,14 +304,26 @@ struct WindowObserver: NSViewRepresentable {
             guard let window else { return }
             window.titlebarAppearsTransparent = true
             window.titleVisibility = .hidden
+            TrafficLightLine.apply(to: window)
+            if TestIsolation.isUITestRun { window.setFrameAutosaveName("") }           // a test run never saves a window position into the person's own preferences
             DispatchQueue.main.async { [weak self, weak window] in
                 self?.onFullScreen(window?.styleMask.contains(.fullScreen) ?? false)
             }
             for name in [NSWindow.didEnterFullScreenNotification, NSWindow.didExitFullScreenNotification] {
                 tokens.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self, weak window] _ in
-                    MainActor.assumeIsolated { self?.onFullScreen(window?.styleMask.contains(.fullScreen) ?? false) }
+                    MainActor.assumeIsolated {
+                        self?.onFullScreen(window?.styleMask.contains(.fullScreen) ?? false)
+                        if let window { TrafficLightLine.apply(to: window) }
+                    }
                 })
             }
+            // AppKit lays the title bar out again when the window resizes, comes to the front or changes appearance: the line is put back each time.
+            for name in [NSWindow.didResizeNotification, NSWindow.didBecomeKeyNotification, NSWindow.didEndLiveResizeNotification, NSWindow.didChangeScreenNotification] {
+                tokens.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak window] _ in
+                    MainActor.assumeIsolated { if let window { TrafficLightLine.apply(to: window) } }
+                })
+            }
+            DispatchQueue.main.async { [weak window] in if let window { TrafficLightLine.apply(to: window) } }
         }
         deinit { tokens.forEach { NotificationCenter.default.removeObserver($0) } }
     }
@@ -322,7 +358,7 @@ struct MacOmnibox: View {
     /// domain is the only thing that matters at rest.
     private var inSidebar: Bool { model.singleToolbar && !floating }
     private var height: CGFloat { tabField ? 26 : (bare ? 26 : (floating ? 32 : (inSidebar ? 36 : 30))) }
-    private var radius: CGFloat { tabField ? 8 : (floating ? height / 2 : (inSidebar ? Radius.item : height / 2)) }
+    private var radius: CGFloat { tabField ? height / 2 : (floating ? height / 2 : (inSidebar ? Radius.item : height / 2)) }
 
     private var icon: String {
         if tab.isPrivate { return "eye.slash.fill" }
@@ -351,7 +387,11 @@ struct MacOmnibox: View {
         row
         .background(RoundedRectangle(cornerRadius: radius, style: .continuous).fill(Color.fieldFill.opacity(address.isEditing ? 0.7 : (hovering ? 1.15 : 1))))
         .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous)
-            .strokeBorder(Color.primary.opacity(address.isEditing ? 0 : (contrast == .increased ? 0.4 : (inSidebar ? 0.10 : 0.07))), lineWidth: 0.5).allowsHitTesting(false))
+            .strokeBorder(Color.primary.opacity(address.isEditing ? 0 : (contrast == .increased ? 0.4 : (tabField ? 0 : (inSidebar ? 0.10 : 0.07)))), lineWidth: 0.5).allowsHitTesting(false))
+        .overlay {
+            // One Row: the field being typed in is told from a merely selected tab by a thin ring (it is not there at rest).
+            if tabField && address.isEditing { Capsule().strokeBorder(Theme.accent.opacity(0.55), lineWidth: 1).allowsHitTesting(false) }
+        }
         .overlay(alignment: .bottom) {
             // In the sidebar the field is also the page's progress bar.
             if inSidebar { LoadingBar(tab: tab, height: 2).id(tab.id).padding(.horizontal, 12).allowsHitTesting(false) }
@@ -416,15 +456,27 @@ struct MacOmnibox: View {
             }
             // The buttons at the end of the field are the ones chosen in Settings, in that order (right-click the bar to change them).
             ForEach(model.addressBarItems.filter { $0 != .siteInfo }) { item in trailing(item) }
+            if tabField && !address.isEditing { tabClose }
         }
         .motion(.easeOut(duration: 0.2), value: tab.identity)
         .motion(.easeOut(duration: 0.2), value: model.addressBarItems)
-        .padding(.horizontal, bare ? 2 : 10)
+        .padding(.horizontal, bare ? 2 : (tabField ? 12 : 10))
         .frame(height: height)
         .contextMenu { addressBarMenu }
         .popover(isPresented: $arrangingBar, arrowEdge: .bottom) {
             ButtonArranger(kind: "address", heading: "Address Bar Buttons", items: $model.addressBarItems, all: AddressBarItem.allCases, defaults: AddressBarItem.defaults,
                            title: { $0.title }, symbol: { $0.symbol })
+        }
+    }
+
+    /// One Row: the selected tab is this field, so its Close sits at the trailing end, after the field's own buttons (Reload, the shield). Not while typing, when the field's room is the text's. A locked tab has no
+    /// Close (the model refuses it): a lock stands there instead.
+    @ViewBuilder private var tabClose: some View {
+        if tab.isLocked {
+            Image(systemName: "lock.fill").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
+                .frame(width: 16, height: 16).help("Locked").accessibilityLabel("Locked tab")
+        } else if TabChipRules.showsCloseButton(locked: false, selected: true, hovering: false) {
+            TabCloseButton(action: { model.closeTab(id: tab.id) }, restOpacity: 0.8, restWash: 0.08)
         }
     }
 
@@ -525,10 +577,12 @@ struct TopBar: View {
 
     var body: some View {
         Group {
+            // Changing layout swaps one bar for the other at once (`.identity`): the default fade kept the old bar mounted for about half a second under the new one, so Classic's toolbar and
+            // Minimal's strip showed through while One Row appeared.
             if model.singleRow {
                 // The bar needs the width it is given (not a stored one) to know which buttons still fit, so it is measured here.
-                GeometryReader { geo in InlineBar(leadingInset: leadingInset, width: geo.size.width) }.frame(height: InlineBar.height)
-            } else { standard }
+                GeometryReader { geo in InlineBar(leadingInset: leadingInset, width: geo.size.width) }.frame(height: InlineBar.height).chromeTrace("InlineBar").transition(.identity)
+            } else { standard.chromeTrace("TopBar.standard").transition(.identity) }
         }
             .contextMenu { ToolbarContextMenu() }
     }
@@ -536,12 +590,13 @@ struct TopBar: View {
     private var standard: some View {
         GeometryReader { geo in
             let priority = ToolbarPriority(fitting: geo.size.width, leadingInset: leadingInset, extras: model.toolbarExtrasCount, visible: model.toolbarVisibility)
+            let placement = priority.fieldPlacement(window: geo.size.width, leadingInset: leadingInset)
             // Controls hug both edges and the address field sits in the middle of the window, not between the
             // two clusters, so it stays put as buttons come and go.
             ZStack {
                 HStack(spacing: 2) {
                     Color.clear.frame(width: leadingInset, height: 1)
-                    if model.shows(.sidebar) {
+                    if model.showsOnToolbar(.sidebar) {
                         ChromeButton(symbol: "sidebar.left", help: "Toggle Sidebar", identifier: "sidebar-button") { model.toggleSidebar() }
                     }
                     if let tab = model.active, model.shows(.backForward) {
@@ -554,14 +609,20 @@ struct TopBar: View {
                 }
                 .padding(.trailing, 10)
                 if let tab = model.active {
-                    MacOmnibox(tab: tab, address: model.addressBar, showReload: true, shield: true)
-                        .frame(width: priority.fieldWidth(window: geo.size.width, leadingInset: leadingInset))
+                    // The Reload setting is this button in Classic (Back/Forward never carry it here); Cmd-R and the menus work whatever the setting.
+                    MacOmnibox(tab: tab, address: model.addressBar, showReload: model.shows(.reload), shield: true)
+                        .frame(width: placement.width)
+                        .offset(x: placement.shift)
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height)
+            .inactiveWindowDimming()
             .motion(.easeOut(duration: 0.2), value: priority)
-            .onChange(of: priority.fieldWidth(window: geo.size.width, leadingInset: leadingInset), initial: true) { _, width in
+            .onChange(of: placement.width, initial: true) { _, width in
                 if model.topBarFieldWidth != width { model.topBarFieldWidth = width }
+            }
+            .onChange(of: placement.shift, initial: true) { _, shift in
+                if model.topBarFieldShift != shift { model.topBarFieldShift = shift }
             }
         }
         .frame(height: LayoutMetrics.toolbarHeight)
@@ -569,12 +630,18 @@ struct TopBar: View {
     }
 
     @ViewBuilder private func trailing(_ priority: ToolbarPriority) -> some View {
-        ExtensionActionButtons(center: model.extensionCenter)
+        // Pinned extension actions fold into the Extensions menu with the other optional buttons, so they never take the address field's room.
+        ExtensionActionButtons(center: model.extensionCenter, limit: priority.showOptional ? 4 : 0)
         if priority.showOptional {
             ToolbarExtras()
-            if model.shows(.share), let url = model.active?.url, model.active?.isBlank == false {
-                ShareLink(item: url) { Image(systemName: "square.and.arrow.up") }
-                    .buttonStyle(ChromeButtonStyle()).help("Share").accessibilityLabel("Share")
+            if model.shows(.share) {
+                // In place even on a blank page (disabled there), so the toolbar does not change width as pages load.
+                if let url = model.active?.url, model.active?.isBlank == false {
+                    ShareLink(item: url) { Image(systemName: "square.and.arrow.up") }
+                        .buttonStyle(ChromeButtonStyle()).help("Share").accessibilityLabel("Share")
+                } else {
+                    ChromeButton(symbol: "square.and.arrow.up", help: "Share", identifier: "share-button") {}.disabled(true)
+                }
             }
             if model.shows(.newTab) { ChromeButton(symbol: "plus", help: "New Tab", identifier: "new-tab-button") { model.newTab() } }
             if model.shows(.tabOverview) {
@@ -601,6 +668,8 @@ struct ExtensionActionButtons: View {
     @ObservedObject var center: ExtensionCenter
     /// The puzzle-piece menu that lists every extension; off where the layout shows it somewhere else.
     var showsMenu = true
+    /// How many pinned actions are shown as buttons; the rest stay in the Extensions menu.
+    var limit = 4
 
     var body: some View {
         buttons
@@ -608,7 +677,7 @@ struct ExtensionActionButtons: View {
     }
 
     @ViewBuilder private var buttons: some View {
-        ForEach(center.pinnedActions.prefix(4)) { item in
+        ForEach(center.pinnedActions.prefix(limit)) { item in
             ExtensionActionButton(center: center, item: item)
         }
     }
@@ -636,7 +705,7 @@ struct ExtensionActionButton: View {
         Group {
             Button { center.noteClick(box.rect); center.perform(actionFor: item.id) } label: {
                 Group {
-                    if let data = item.icon, let image = NSImage(data: data) {
+                    if let data = item.icon, let image = ExtensionIconCache.image(for: data) {
                         Image(nsImage: image).resizable().scaledToFit().frame(width: 16, height: 16)
                     } else {
                         Image(systemName: "puzzlepiece.extension")
@@ -711,11 +780,12 @@ struct NavigationButtons: View {
     var body: some View {
         ChromeButton(symbol: "chevron.left", help: "Back", identifier: "back-button") { tab.goBack() }.disabled(!tab.canGoBack)
             .contextMenu { NavHistoryItems(tab: tab, back: true) }
-        // Forward only shows when there is somewhere to go forward to, as in Safari.
-        if showForward && tab.canGoForward {
+        // Forward is hidden only by the layout's width policy (`showForward`), never by the history: it stays in place, disabled when there is nowhere to go, so
+        // the toolbar does not change shape as pages are visited.
+        if showForward {
             ChromeButton(symbol: "chevron.right", help: "Forward", identifier: "forward-button") { tab.goForward() }
+                .disabled(!tab.canGoForward)
                 .contextMenu { NavHistoryItems(tab: tab, back: false) }
-                .transition(.scale(scale: 0.6).combined(with: .opacity))
         }
         if (alwaysReload || model.shows(.reload)) && !hideReload {
             ChromeButton(symbol: tab.isLoading ? "xmark" : "arrow.clockwise", help: tab.isLoading ? "Stop" : "Reload", identifier: "reload-button") {
@@ -750,9 +820,20 @@ struct MoreMenu: View {
                 Button { model.showFind() } label: { Label("Find in Page…", systemImage: "magnifyingglass") }.disabled(model.active?.isBlank ?? true)
                 Button { model.printActive() } label: { Label("Print…", systemImage: "printer") }.disabled(model.active?.isBlank ?? true)
                 Button { Task { await model.savePageForLater() } } label: { Label("Save Page for Later", systemImage: "square.and.arrow.down") }.disabled(model.active?.isBlank ?? true)
-                Button { model.active?.reload() } label: { Label("Reload", systemImage: "arrow.clockwise") }
+                if model.active?.isLoading == true {
+                    Button { model.active?.stop() } label: { Label("Stop Loading", systemImage: "xmark") }
+                } else {
+                    Button { model.active?.reload() } label: { Label("Reload", systemImage: "arrow.clockwise") }
+                }
+                // The media button folds away with Downloads at narrow widths; this is its way back.
+                if model.shows(.media), !priority.showDownloads {
+                    Button { AppCommands.perform("cmd-library-find-downloadable-media", model) } label: { Label("Find Downloadable Media", systemImage: "film") }
+                        .disabled(model.active?.isBlank ?? true)
+                }
                 if let url = model.active?.url, model.active?.isBlank == false {
                     ShareLink(item: url) { Label("Share…", systemImage: "square.and.arrow.up") }
+                } else {
+                    Button {} label: { Label("Share…", systemImage: "square.and.arrow.up") }.disabled(true)
                 }
             }
             Section("Workspace and Split View") {
@@ -816,5 +897,40 @@ extension ExtensionCenter {
         if let event = NSApp.currentEvent, event.window === window, [.leftMouseDown, .leftMouseUp].contains(event.type) {
             clickPoint = event.locationInWindow
         } else { clickPoint = nil }
+    }
+}
+
+
+/// A window that is not in front shows its own toolbar and tab controls faded and without colour, as AppKit does for its standard controls (custom SwiftUI controls
+/// do not do it by themselves), so the window in front is the one that reads as active.
+struct InactiveWindowDimming: ViewModifier {
+    @Environment(\.controlActiveState) private var state
+    func body(content: Content) -> some View {
+        let inactive = state == .inactive
+        content.opacity(inactive ? 0.62 : 1).saturation(inactive ? 0 : 1)
+    }
+}
+
+extension View {
+    func inactiveWindowDimming() -> some View { modifier(InactiveWindowDimming()) }
+}
+
+
+/// Extension toolbar icons, decoded once and kept small: an icon is redrawn with every toolbar update, and decoding its data each time (some are large PNGs) was
+/// wasted work on the main thread. Bounded: at most 64 icons, each drawn at 32 × 32 pixels.
+@MainActor
+enum ExtensionIconCache {
+    private static let cache: NSCache<NSData, NSImage> = { let c = NSCache<NSData, NSImage>(); c.countLimit = 64; return c }()
+    static func image(for data: Data) -> NSImage? {
+        let key = data as NSData
+        if let hit = cache.object(forKey: key) { return hit }
+        guard data.count <= 512 * 1024, let source = NSImage(data: data) else { return nil }
+        let side: CGFloat = 32
+        let small = NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
+            source.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1)
+            return true
+        }
+        cache.setObject(small, forKey: key)
+        return small
     }
 }

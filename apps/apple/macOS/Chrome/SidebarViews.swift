@@ -24,17 +24,24 @@ final class SidebarPeek: ObservableObject {
     private var menuDepth = 0
     private var holds = 0
     private var isEditing = false
+    /// Opened from the keyboard (or by VoiceOver), where there is no pointer to keep it open: it stays until asked to close, or until the pointer has used it.
+    private var keyboardOpen = false
     private var pending: DispatchWorkItem?
 
     func edge(_ inside: Bool) { edgeInside = inside; update() }
     func panel(_ inside: Bool) {
         panelInside = inside
-        if inside { edgeInside = false }
+        if inside { edgeInside = false; keyboardOpen = false }
         update()
     }
     func menu(_ open: Bool) { menuDepth = max(0, menuDepth + (open ? 1 : -1)); update() }
     func hold(_ open: Bool) { holds = max(0, holds + (open ? 1 : -1)); update() }
     func editing(_ value: Bool) { isEditing = value; update() }
+    /// Show or hide the sidebar without a pointer (a command, a menu item, VoiceOver).
+    func toggleFromKeyboard() {
+        pending?.cancel()
+        if revealed { keyboardOpen = false; revealed = false } else { keyboardOpen = true; revealed = true }
+    }
 
     /// Where the pointer is right now. Only a change does anything, so it is cheap to call often.
     func pointer(inEdge: Bool, inPanel: Bool) {
@@ -49,10 +56,17 @@ final class SidebarPeek: ObservableObject {
         schedule(after: duration) { [weak self] in self?.update() }
     }
 
+    /// Escape puts the sidebar away, however it came out, unless a field in it (or a menu) has the key first. True when it did (so the key is not also passed on).
+    func closeIfKeyboardOpened() -> Bool {
+        guard revealed, !isEditing, menuDepth == 0 else { return false }
+        reset()
+        return true
+    }
+
     func reset() {
         pending?.cancel()
         edgeInside = false; panelInside = false
-        menuDepth = 0; holds = 0; isEditing = false
+        menuDepth = 0; holds = 0; isEditing = false; keyboardOpen = false
         revealed = false
     }
 
@@ -68,7 +82,7 @@ final class SidebarPeek: ObservableObject {
                 self.revealed = true
                 self.update()
             }
-        } else if revealed && menuDepth == 0 && holds == 0 && !isEditing {
+        } else if revealed && menuDepth == 0 && holds == 0 && !isEditing && !keyboardOpen && !NSWorkspace.shared.isVoiceOverEnabled {
             schedule(after: linger) { [weak self] in self?.revealed = false }
         }
     }
@@ -112,22 +126,39 @@ struct PeekPointerTracker: NSViewRepresentable {
     final class TrackerView: NSView {
         var config: PeekPointerTracker?
         private var timer: Timer?
+        private var escapeMonitor: Any?
 
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             timer?.invalidate(); timer = nil
+            if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor); self.escapeMonitor = nil }
             guard window != nil else { return }
-            let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
-                MainActor.assumeIsolated { self?.tick() }
+            // Escape puts the edge sidebar away (when nothing in it is being typed in); with the pointer it also goes by itself after the linger.
+            escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard event.keyCode == 53, event.window === self?.window else { return event }
+                return MainActor.assumeIsolated({ self?.config?.peek.closeIfKeyboardOpened() ?? false }) ? nil : event
             }
-            // Also while a menu is open or a drag is running, so the sidebar is never judged on stale information.
-            RunLoop.main.add(timer, forMode: .common)
-            self.timer = timer
+            syncTimer()
         }
 
-        deinit { timer?.invalidate() }
+        /// The poll runs only while the layout can reveal a sidebar from the edge (Floating, a hidden sidebar): in every other layout there is nothing to watch, so nothing wakes up.
+        func syncTimer() {
+            guard window != nil else { return }
+            if config?.enabled == true, timer == nil {
+                let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.tick() }
+                }
+                // Also while a menu is open or a drag is running, so the sidebar is never judged on stale information.
+                RunLoop.main.add(timer, forMode: .common)
+                self.timer = timer
+            } else if config?.enabled != true, timer != nil {
+                timer?.invalidate(); timer = nil
+            }
+        }
+
+        deinit { timer?.invalidate(); if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) } }
 
         private func tick() {
             guard let config, config.enabled, let window else { return }
@@ -141,7 +172,7 @@ struct PeekPointerTracker: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> TrackerView { let view = TrackerView(); view.config = self; return view }
-    func updateNSView(_ view: TrackerView, context: Context) { view.config = self }
+    func updateNSView(_ view: TrackerView, context: Context) { view.config = self; view.syncTimer() }
 }
 
 /// A thin strip that reports the pointer entering and leaving but never intercepts clicks meant for the page.
@@ -230,6 +261,8 @@ struct SidebarContent: View {
     var body: some View {
         if model.singleToolbar { sidebarLayout }
         else if model.topBarHidden { SidebarLayoutPanel(topInset: topInset, showsAddress: false).accessibilityElement(children: .contain).accessibilityIdentifier("sidebar") }
+        // Vertical tabs with a separate toolbar (the Hybrid arrangement): the same navigator, no address field (the toolbar has it), one sidebar button.
+        else if model.effectiveTabLayout == .sidebar { SidebarLayoutPanel(topInset: topInset, showsAddress: false, hybrid: true, workspaceDeck: model.layoutPreset == .workspaceDeck).accessibilityElement(children: .contain).accessibilityIdentifier("sidebar") }
         else { standard }
     }
 
@@ -249,10 +282,11 @@ struct SidebarContent: View {
         VStack(spacing: 0) {
             // Pin and collapse only mean something where the sidebar can hide itself or shrink to icons: the vertical-tabs layouts and
             // Floating. In Classic it is a panel the toolbar's button opens and closes, so there is nothing to pin, and no header.
-            if managesItself { header } else { Color.clear.frame(height: 6) }
+            if managesItself { header } else { libraryHeader }
             if model.singleToolbar, let tab = model.active { addressRow(tab) }
             // In the Sidebar layout the order is the address field, pinned tabs, then the workspace and its tabs.
-            if !model.singleToolbar { SidebarWorkspaceBar() }
+            // The Library (Classic, Minimal, One Row) is saved resources: the workspace switcher is the toolbar's, so it is repeated here only when the toolbar has none.
+            if !model.singleToolbar && !(isLibrary && model.shows(.workspaces)) { SidebarWorkspaceBar() }
             Group {
                 if model.sidebarShowsDownloads { SidebarDownloads().transition(.opacity) }
                 else if model.tabSearchVisible { TabSearchPanel().transition(.opacity) }
@@ -261,8 +295,10 @@ struct SidebarContent: View {
             }
             .motion(.easeInOut(duration: 0.18), value: model.sidebarShowsDownloads)
             .motion(.easeInOut(duration: 0.18), value: model.tabSearchVisible)
-            if !model.sidebarShowsDownloads { SearchTabsRow() }
-            SidebarFooter()
+            // Searching open tabs belongs to a tab navigator; the Library searches bookmarks and history (⇧⌘A and the palette still open Search Tabs).
+            if !model.sidebarShowsDownloads && !isLibrary { SearchTabsRow() }
+            // The Library has its own bar (add, sort, more; Clear History); Downloads, Profile and Settings are in the toolbar. The utility row stays for the vertical layouts.
+            if !isLibrary { SidebarFooter() }
         }
         .overlay(alignment: .top) {
             // With no top bar, suggestions drop down from the address bar inside the sidebar.
@@ -274,6 +310,9 @@ struct SidebarContent: View {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("sidebar")
     }
+
+    /// The sidebar of the horizontal layouts (Classic, Minimal, One Row): the Library, not a list of open tabs.
+    private var isLibrary: Bool { model.effectiveTabLayout != .sidebar && !model.singleToolbar && !model.topBarHidden }
 
     private var managesItself: Bool { model.effectiveTabLayout == .sidebar || model.topBarHidden || model.singleToolbar }
 
@@ -296,6 +335,17 @@ struct SidebarContent: View {
         .padding(.horizontal, 8)
         .frame(height: topInset)
         .background(WindowDragRegion())
+    }
+
+    /// The Library's own header: its name, and the button that closes it.
+    private var libraryHeader: some View {
+        HStack {
+            Text("Library").font(.system(size: 15, weight: .semibold)).accessibilityAddTraits(.isHeader)
+            Spacer(minLength: 0)
+            ChromeButton(symbol: "xmark", help: "Close Library", identifier: "close-library") { model.setSidebarShown(false) }
+        }
+        .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 6)
+        .accessibilityElement(children: .contain)
     }
 
     private func addressRow(_ tab: TabController) -> some View {
@@ -404,6 +454,7 @@ struct TabSearchPanel: View {
                 TextField("Search open tabs", text: $model.tabSearchQuery)
                     .textFieldStyle(.plain).font(.system(size: 13)).focused($focused)
                     .accessibilityIdentifier("tab-search-field")
+                    .accessibilityLabel("Search open tabs")
                     .onSubmit { activate(list) }
                 Button { close() } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary).accessibilityLabel("Close") }
                     .buttonStyle(.plain).help("Close")
@@ -421,9 +472,17 @@ struct TabSearchPanel: View {
                         ForEach(Array(list.enumerated()), id: \.element.id) { index, tab in
                             row(tab, selected: index == selection).id(tab.id)
                                 .onTapGesture { selection = index; activate(list) }
+                                .accessibilityElement(children: .ignore)
+                                .accessibilityLabel(resultLabel(tab))
+                                .accessibilityAddTraits(index == selection ? [.isButton, .isSelected] : .isButton)
+                                .accessibilityAction { selection = index; activate(list) }
+                                .accessibilityIdentifier("tab-search-result")
                         }
                         if list.isEmpty {
                             Text("No open tab matches “\(model.tabSearchQuery)”.").font(.system(size: 12)).foregroundStyle(.secondary).padding(12)
+                                .accessibilityElement(children: .ignore)
+                                .accessibilityLabel("No open tab matches \(model.tabSearchQuery)")
+                                .accessibilityIdentifier("tab-search-empty")
                         }
                     }
                     .padding(.horizontal, 6)
@@ -431,8 +490,11 @@ struct TabSearchPanel: View {
                 .onChange(of: selection) { _, new in if list.indices.contains(new) { proxy.scrollTo(list[new].id) } }
             }
         }
-        .onAppear { focused = true; selection = 0 }
+        // Focus is asked for after the panel is in place: set during the appearance itself it did not take, and typing went nowhere until the field was clicked.
+        .onAppear { selection = 0; DispatchQueue.main.async { focused = true } }
         .onChange(of: model.tabSearchQuery) { _, _ in selection = 0 }
+        // The panel groups its parts but does not rename them: an identifier set on the whole replaced the field's own, so it could not be found.
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("tab-search")
     }
 
@@ -450,6 +512,14 @@ struct TabSearchPanel: View {
         .padding(.horizontal, 9).frame(height: model.density.searchResultHeight)
         .background(RoundedRectangle(cornerRadius: Radius.tab, style: .continuous).fill(selected ? Theme.accent.opacity(0.18) : Color.clear))
         .contentShape(Rectangle())
+    }
+
+    /// What a result says aloud: the tab's title, where it lives, and that it is the one in front.
+    private func resultLabel(_ tab: TabController) -> String {
+        var parts = [tab.displayTitle, displayHost(tab.url)]
+        if model.isEssentialTab(tab) { parts.append("Essential") } else if tab.workspace != model.activeWorkspace { parts.append(tab.workspace.isEmpty ? "Personal" : tab.workspace) }
+        if tab.id == model.activeID { parts.append("current tab") }
+        return parts.joined(separator: ", ")
     }
 
     private func activate(_ list: [TabController]) {
@@ -483,7 +553,7 @@ struct VerticalTabsList: View {
                 EssentialsGrid()
                 if !pinned.isEmpty {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 38, maximum: 52), spacing: 6)], spacing: 6) {
-                        ForEach(pinned) { PinnedTile(tab: $0, selected: $0.id == model.activeID).trackedWhenSelected($0.id == model.activeID, in: TabListSpace.name) }
+                        ForEach(pinned) { PinnedTile(tab: $0, selected: $0.id == model.activeID).environment(\.tabDropPins, true).trackedWhenSelected($0.id == model.activeID, in: TabListSpace.name) }
                     }
                     .padding(.bottom, 6)
                     Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 0.5).padding(.horizontal, 4).padding(.bottom, 6)
@@ -497,7 +567,7 @@ struct VerticalTabsList: View {
                 }
                 if !model.groupNames.isEmpty { groups }
                 ForEach(model.stackedVisible(model.treeVisible(regular))) {
-                    VerticalTabRow(tab: $0, selected: $0.id == model.activeID).trackedWhenSelected($0.id == model.activeID, in: TabListSpace.name)
+                    VerticalTabRow(tab: $0, selected: $0.id == model.activeID).environment(\.tabDropUnpins, true).trackedWhenSelected($0.id == model.activeID, in: TabListSpace.name)
                 }
                 HStack(spacing: 0) {
                     Button { model.newTab() } label: {
@@ -579,6 +649,11 @@ struct VerticalTabsList: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // A tab dropped on a group's row joins it ("All Tabs" takes it out of every group).
+        .dropDestination(for: String.self) { items, _ in
+            guard let raw = items.first, let dragged = UInt64(raw) else { return false }
+            return model.acceptDroppedTab(dragged, intoGroup: group)
+        }
         .contextMenu {
             if !group.isEmpty {
                 Menu("Colour") {
@@ -629,19 +704,91 @@ struct VerticalTabsList: View {
 /// Shown instead of tab rows when tabs live in the horizontal strip, so tabs are never listed twice.
 struct LibraryList: View {
     @EnvironmentObject var model: BrowserModel
+    /// Reading List and Sessions are chosen here; Bookmarks and History keep using the model's `sidebarSection` (so the menus that open History in the sidebar still work).
+    @State private var extra: LibrarySection?
 
-    private var section: SidebarSection { model.sidebarSection == .history ? .history : .bookmarks }
+    private var section: LibrarySection { extra ?? (model.sidebarSection == .history ? .history : .bookmarks) }
+
+    private func choose(_ new: LibrarySection) {
+        switch new {
+        case .bookmarks: extra = nil; model.sidebarSection = .bookmarks
+        case .history: extra = nil; model.sidebarSection = .history
+        case .readingList, .sessions: extra = new
+        }
+    }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Picker("", selection: Binding(get: { section }, set: { model.sidebarSection = $0 })) {
-                Text("Bookmarks").tag(SidebarSection.bookmarks)
-                Text("History").tag(SidebarSection.history)
+        // The search field comes first, then the section picker under it (each section puts the picker there).
+        let picker = AnyView(LibrarySectionTabs(selection: section, choose: choose))
+        return VStack(spacing: 0) {
+            switch section {
+            case .history: HistoryView(embedded: true, accessory: picker)
+            case .readingList: LibraryReadingList(accessory: picker)
+            case .sessions: LibrarySessions(accessory: picker)
+            case .bookmarks: BookmarksView(embedded: true, accessory: picker)
             }
-            .pickerStyle(.segmented).labelsHidden()
-            .padding(.horizontal, 10).padding(.bottom, 8)
-            if section == .history { HistoryView(embedded: true) } else { BookmarksView(embedded: true) }
         }
+        .onChange(of: model.sidebarSection) { _, _ in extra = nil }
+    }
+}
+
+/// The Library's four sections as one row of equal tabs across the sidebar: an icon over a short name, the chosen one highlighted. When the sidebar is too narrow for the names it falls back to the icons.
+struct LibrarySectionTabs: View {
+    let selection: LibrarySection
+    let choose: (LibrarySection) -> Void
+
+    private func shortName(_ s: LibrarySection) -> String {
+        switch s { case .bookmarks: "Bookmarks"; case .history: "History"; case .readingList: "Reading"; case .sessions: "Sessions" }
+    }
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            row(labeled: true)
+            row(labeled: false)
+        }
+        .padding(2)
+        .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(Color.primary.opacity(0.06)))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Library section")
+    }
+
+    private func row(labeled: Bool) -> some View {
+        HStack(spacing: 1) {
+            ForEach(LibrarySection.allCases) { section in
+                LibrarySectionTab(symbol: section.symbol, name: shortName(section), fullName: section.rawValue, labeled: labeled, selected: section == selection) { choose(section) }
+            }
+        }
+    }
+}
+
+private struct LibrarySectionTab: View {
+    let symbol: String
+    let name: String
+    let fullName: String
+    let labeled: Bool
+    let selected: Bool
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 3) {
+                Image(systemName: symbol).font(.system(size: 14, weight: .medium)).frame(height: 16)
+                if labeled { Text(name).font(.system(size: 9.5, weight: .medium)).lineLimit(1).fixedSize() }
+            }
+            .foregroundStyle(selected ? Color.white : Color.primary.opacity(hovering ? 0.85 : 0.6))
+            // A labelled tab never gets narrower than its longest name needs (about 4 pt clear on each side at the default width): below that the row falls back to icons instead of squeezing the names.
+            .frame(minWidth: labeled ? 54 : 0, maxWidth: .infinity)
+            .padding(.vertical, labeled ? 6 : 7)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(selected ? Theme.accent : Color.primary.opacity(hovering ? 0.07 : 0)))
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(fullName)
+        .accessibilityLabel(fullName)
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityIdentifier("library-section-" + fullName.lowercased().replacingOccurrences(of: " ", with: "-"))
     }
 }
 
@@ -740,7 +887,7 @@ struct SidebarFooter: View {
 
     var body: some View {
         VStack(spacing: 4) {
-            if model.singleToolbar && !model.workspaces.isEmpty { WorkspaceDots().frame(maxWidth: .infinity).padding(.top, 2) }
+            // (The Sidebar layout's workspace switcher is the header menu under the address field; the row of workspace icons that stood here repeated it.)
             if model.sidebarShowsExtensions && model.extensionCenter.hasExtensions {
                 SidebarExtensionList(center: model.extensionCenter)
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
@@ -913,7 +1060,7 @@ struct SidebarFooter: View {
                        tint: model.activeBookmarked ? .yellow : nil) { perform(item) }
                 .disabled(model.active?.isBlank ?? true)
         case .downloads:
-            FooterItem(symbol: item.symbol, label: item.title, identifier: "downloads-button", tint: model.dockedPanel == .downloads ? Theme.accent : nil) { perform(item) }
+            FooterDownloadsItem(coordinator: model.downloads, symbol: item.symbol, label: item.title, active: model.dockedPanel == .downloads) { perform(item) }
         case .extensions:
             FooterItem(symbol: item.symbol, label: item.title, identifier: "extensions-menu", tint: model.sidebarShowsExtensions ? Theme.accent : nil) { perform(item) }
         case .breakMode:
@@ -971,12 +1118,13 @@ struct FooterItemLabel: View {
     let label: String
     let tint: Color?
     @State private var hovering = false
+    @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
         Image(systemName: symbol).font(.system(size: 14, weight: .regular)).symbolRenderingMode(.hierarchical)
-            .foregroundStyle(tint ?? Color.primary.opacity(0.8))
+            .foregroundStyle(tint ?? Color.primary.opacity(contrast == .increased ? 1 : 0.8))
             .frame(maxWidth: .infinity, minHeight: 28)
-            .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.primary.opacity(hovering ? 0.08 : 0)))
+            .modifier(SidebarFill(selected: false, hovering: hovering, radius: 7, rest: 0, hover: 0.08, selection: 0))
             .contentShape(Rectangle())
             .help(label)
             .onHover { hovering = $0 }
@@ -1009,6 +1157,7 @@ struct SidebarExtensionList: View {
 }
 
 struct ExtensionRow: View {
+    @EnvironmentObject var model: BrowserModel
     @ObservedObject var center: ExtensionCenter
     let info: ExtensionInfo
     let action: ExtensionActionItem?
@@ -1019,7 +1168,7 @@ struct ExtensionRow: View {
         let usable = action != nil && action?.enabled == true && info.enabled
         HStack(spacing: 8) {
             Group {
-                if let data = action?.icon, let image = NSImage(data: data) {
+                if let data = action?.icon, let image = ExtensionIconCache.image(for: data) {
                     Image(nsImage: image).resizable().scaledToFit().frame(width: 16, height: 16)
                 } else {
                     Image(systemName: "puzzlepiece.extension").font(.system(size: 13)).foregroundStyle(.secondary)
@@ -1029,13 +1178,15 @@ struct ExtensionRow: View {
             Text(info.name).font(.system(size: 12.5)).lineLimit(1)
             Spacer(minLength: 4)
             if let badge = action?.badge, !badge.isEmpty { Text(badge).font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary) }
-            if action != nil {
+            if action != nil, !model.singleToolbar {
                 Button { center.setPinned(info.id, !center.isPinned(info.id)) } label: {
                     Image(systemName: center.isPinned(info.id) ? "pin.fill" : "pin").font(.system(size: 10))
                         .foregroundStyle(center.isPinned(info.id) ? Theme.accent : Color.secondary)
                 }
-                .buttonStyle(.plain).opacity(hovering || center.isPinned(info.id) ? 1 : 0)
+                .buttonStyle(.plain).frame(width: 24, height: 24).contentShape(Rectangle())
+                .opacity(hovering || center.isPinned(info.id) ? 1 : 0).allowsHitTesting(hovering || center.isPinned(info.id))
                 .help(center.isPinned(info.id) ? "Unpin from toolbar" : "Pin to toolbar")
+                .accessibilityLabel(center.isPinned(info.id) ? "Unpin \(info.name) from the toolbar" : "Pin \(info.name) to the toolbar")
             }
         }
         .padding(.horizontal, 8).frame(minHeight: 30)
@@ -1045,10 +1196,16 @@ struct ExtensionRow: View {
         .reportsFrame(box)
         .onHover { hovering = $0 }
         .onTapGesture { if usable { center.noteClick(box.rect); center.perform(actionFor: info.id) } }
-        .help(info.name)
+        // Reachable from the keyboard: Return and Space open it, as a click does.
+        .focusable().focusEffectDisabled()
+        .onKeyPress(.return) { if usable { center.noteClick(box.rect); center.perform(actionFor: info.id) }; return .handled }
+        .onKeyPress(.space) { if usable { center.noteClick(box.rect); center.perform(actionFor: info.id) }; return .handled }
+        .help(usable || action == nil ? info.name : "\(info.name): not available on this page")
         .accessibilityElement(children: .combine)
         .accessibilityLabel(info.name)
+        .accessibilityValue(usable || action == nil ? "" : "Not available on this page")
         .accessibilityAddTraits(.isButton)
+        .accessibilityAction { if usable { center.noteClick(box.rect); center.perform(actionFor: info.id) } }
     }
 }
 
@@ -1090,6 +1247,7 @@ struct WorkspaceDots: View {
         .buttonStyle(.plain)
         .help(title)
         .accessibilityLabel("Workspace \(title)")
+        .accessibilityAddTraits(active ? .isSelected : [])
     }
 }
 
@@ -1103,6 +1261,7 @@ struct SidebarRail: View {
         VStack(spacing: 6) {
             Color.clear.frame(height: topInset).background(WindowDragRegion())
             ChromeButton(symbol: "sidebar.squares.left", help: "Expand Sidebar") { model.sidebarRail = false }
+            if model.effectiveTabLayout == .sidebar { RailWorkspaceMenu() }
             if model.effectiveTabLayout == .sidebar {
                 ScrollView {
                     VStack(spacing: 4) {
@@ -1118,8 +1277,11 @@ struct SidebarRail: View {
             Divider().padding(.horizontal, 10)
             ChromeButton(symbol: "book", help: "Bookmarks") { model.sheet = .bookmarks }
             ChromeButton(symbol: "clock", help: "History") { model.sheet = .history }
+            // Downloads, with its progress, completion and failure marks, so a rail is not blind to them.
+            FooterDownloadsItem(coordinator: model.downloads, symbol: "arrow.down.circle", label: "Downloads", active: false) { model.sheet = .downloads }.frame(width: 36)
             ChromeButton(symbol: "gearshape", help: "Settings") { SettingsRouter.open() }.padding(.bottom, 8)
         }
+        .inactiveWindowDimming()
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("sidebar-rail")
     }
@@ -1130,19 +1292,30 @@ struct RailTab: View {
     @ObservedObject var tab: TabController
     let selected: Bool
 
+    @State private var hovering = false
+
     var body: some View {
         Button { model.select(tab.id) } label: {
-            TabFavicon(tab: tab, size: 20).frame(width: 34, height: 34)
+            TabFavicon(tab: tab, size: 20).frame(width: model.density == .compact ? 30 : 34, height: model.density == .compact ? 30 : 34)
         }
             .buttonStyle(.plain)
-            .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(selected ? Color.raised : Color.clear).shadow(color: .black.opacity(selected ? 0.14 : 0), radius: 2, y: 1))
+            .onHover { hovering = $0 }
+            // The same selection and hover as the panel's rows (with an outline under Increase Contrast).
+            .modifier(SidebarFill(selected: selected, hovering: hovering, radius: 11, rest: 0, hover: 0.07, selection: 0.20))
+            .overlay(alignment: .bottomLeading) { if tab.isPrivate && !model.isPrivateWindow { Image(systemName: "eye.slash.fill").font(.system(size: 7)).foregroundStyle(Theme.privateAccent).padding(3).accessibilityHidden(true) } }
+            // A pinned tab and a tab in a group are marked, so the rail says more than a column of icons.
+            .overlay(alignment: .topTrailing) { if tab.pinned { Image(systemName: "pin.fill").font(.system(size: 7)).foregroundStyle(.secondary).padding(3).accessibilityHidden(true) } }
+            .overlay(alignment: .bottomTrailing) {
+                if !tab.group.isEmpty { Circle().fill((model.groupColor(tab.group) ?? GroupColor.automatic(for: tab.group)).color).frame(width: 7, height: 7).padding(3).accessibilityHidden(true) }
+            }
             .contentShape(Rectangle())
             .accessibilityLabel(tab.spokenTitle)
+            .accessibilityValue(TabChipRules.spokenState(locked: tab.isLocked, pinned: tab.pinned, playing: tab.playingAudio, muted: tab.muted, asleep: tab.isDiscarded, isPrivate: tab.isPrivate) ?? "")
             .accessibilityAddTraits(selected ? .isSelected : [])
             .accessibilityIdentifier("tab-chip")
-            .contextMenu { TabMenuItems(tab: tab) }
             .modifier(TabTooltip(title: tab.displayTitle))
-            .accessibilityLabel(tab.displayTitle)
+            // The shared tab behaviour: right-click menu, middle-click close, hover preview, drag and drop, keyboard.
+            .tabInteractions(tab)
     }
 }
 
@@ -1151,13 +1324,13 @@ struct RailTab: View {
 struct SidebarContainer: View {
     @EnvironmentObject var model: BrowserModel
     let topInset: CGFloat
-    var availableWidth: CGFloat = 250
+    var availableWidth: CGFloat = CGFloat(sidebarStandardWidth)
     @State private var dragStart: Double?
 
     var body: some View {
         let width = model.sidebarRail ? sidebarRailWidth : availableWidth
         HStack(spacing: 0) {
-            if model.sidebarPosition == .right { handle }
+            if model.sidebarPosition == .right { gap }
             Group {
                 if model.sidebarRail { SidebarRail(topInset: topInset) } else { SidebarContent(topInset: topInset) }
             }
@@ -1165,29 +1338,66 @@ struct SidebarContainer: View {
             .sidebarSurface()
             // The workspace's colour theme, as a faint wash fading down from the top edge of the sidebar.
             .overlay(alignment: .top) { WorkspaceWash() }
-            if model.sidebarPosition == .left { handle }
+            // The grab strip lies inside the sidebar's own bounds, on its inner edge: an overlay on a one-point view is hit-tested only within that point.
+            .overlay(alignment: model.sidebarPosition == .left ? .trailing : .leading) { grip }
+            if model.sidebarPosition == .left { gap }
         }
     }
 
-    private var handle: some View {
-        Rectangle().fill(Color.clear).frame(width: 1)
-            .overlay(
-                Color.clear.frame(width: 8).contentShape(Rectangle())
-                    .onHover { inside in if inside && !model.sidebarRail { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() } }
-                    .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
-                        .onChanged { value in
-                            guard !model.sidebarRail else { return }
-                            if dragStart == nil { dragStart = model.sidebarWidth }
-                            let delta = Double(value.translation.width) * (model.sidebarPosition == .left ? 1 : -1)
-                            let raw = clampedSidebarWidth((dragStart ?? 250) + delta)
-                    // Close to the standard width it settles on it, with a small tap so it can be felt.
-                    let snapped = model.snapSidebarWidth && abs(raw - SidebarSnap.standard) <= SidebarSnap.reach
-                    if snapped && model.sidebarWidth != SidebarSnap.standard { NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now) }
-                    model.sidebarWidth = snapped ? SidebarSnap.standard : raw
-                        }
-                        .onEnded { _ in dragStart = nil })
-            )
-            .accessibilityLabel("Resize sidebar")
+    private var gap: some View { Color.clear.frame(width: 1) }
+
+    private var grip: some View {
+        ResizeGrip(
+            // A drag starts from the width the Library is drawn at, which in a narrow window is the 42% cap, not the stored preference: starting from the stored value made the first movement jump the edge.
+            // Nothing is written until the drag ends, and what is written is the width the person dragged to.
+            began: { dragStart = Double(availableWidth); SidebarWidthTrace.log("grip began: drawn \(availableWidth), stored \(model.sidebarWidth)") },
+            moved: { dx in
+                guard !model.sidebarRail else { return }
+                let delta = Double(dx) * (model.sidebarPosition == .left ? 1 : -1)
+                let raw = clampedSidebarWidth((dragStart ?? Double(availableWidth)) + delta)
+                SidebarWidthTrace.log("grip moved dx \(dx) -> raw \(raw)")
+                // Close to the standard width it settles on it, with a small tap so it can be felt.
+                let snapped = model.snapSidebarWidth && abs(raw - SidebarSnap.standard) <= SidebarSnap.reach
+                if snapped && model.sidebarWidth != SidebarSnap.standard { NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now) }
+                model.sidebarWidth = snapped ? SidebarSnap.standard : raw
+            },
+            ended: { SidebarWidthTrace.log("grip ended at \(model.sidebarWidth)"); dragStart = nil; model.commitSidebarWidth() },
+            step: { direction in   // VoiceOver's increment and decrement
+                guard !model.sidebarRail else { return }
+                model.sidebarWidth = clampedSidebarWidth(Double(availableWidth) + Double(direction) * 10); model.commitSidebarWidth()
+            })
+            .frame(width: 8)
+    }
+}
+
+/// The sidebar's resize strip as a real AppKit view: a SwiftUI gesture laid over a scroll view never receives the mouse (the scroll view's own view is in front), and an AppKit view also gives the
+/// resize cursor by cursor rect (no push/pop to keep balanced) and a VoiceOver increment/decrement.
+struct ResizeGrip: NSViewRepresentable {
+    var began: () -> Void
+    var moved: (CGFloat) -> Void
+    var ended: () -> Void
+    var step: (Int) -> Void
+
+    func makeNSView(context: Context) -> GripView { let v = GripView(); v.configure(self); return v }
+    func updateNSView(_ view: GripView, context: Context) { view.configure(self) }
+
+    final class GripView: NSView {
+        private var owner: ResizeGrip?
+        private var startX: CGFloat = 0
+        func configure(_ grip: ResizeGrip) {
+            owner = grip
+            setAccessibilityElement(true)
+            setAccessibilityRole(.splitter)
+            setAccessibilityLabel("Resize sidebar")
+            setAccessibilityIdentifier("sidebar-resize-handle")
+        }
+        override var mouseDownCanMoveWindow: Bool { false }
+        override func resetCursorRects() { addCursorRect(bounds, cursor: .resizeLeftRight) }
+        override func mouseDown(with event: NSEvent) { startX = event.locationInWindow.x; owner?.began() }
+        override func mouseDragged(with event: NSEvent) { owner?.moved(event.locationInWindow.x - startX) }
+        override func mouseUp(with event: NSEvent) { owner?.ended() }
+        override func accessibilityPerformIncrement() -> Bool { owner?.step(1); return true }
+        override func accessibilityPerformDecrement() -> Bool { owner?.step(-1); return true }
     }
 }
 
@@ -1210,9 +1420,9 @@ struct SidebarResizeHandle: View {
                 .onChanged { value in
                     if dragStart == nil { dragStart = model.sidebarWidth }
                     let delta = Double(value.translation.width) * (model.sidebarPosition == .left ? 1 : -1)
-                    model.sidebarWidth = clampedSidebarWidth((dragStart ?? 250) + delta)
+                    model.sidebarWidth = clampedSidebarWidth((dragStart ?? sidebarStandardWidth) + delta)
                 }
-                .onEnded { _ in dragStart = nil })
+                .onEnded { _ in dragStart = nil; model.commitSidebarWidth() })
             .accessibilityLabel("Resize sidebar")
             .accessibilityIdentifier("sidebar-resize-handle")
     }
@@ -1224,7 +1434,7 @@ struct PeekSidebar: View {
     let topInset: CGFloat
 
     var body: some View {
-        let width = model.sidebarWidth
+        let width = model.windowWidth > 0 ? min(model.sidebarWidth, Double(model.windowWidth) * 0.42) : model.sidebarWidth
         // Floats over the page as a rounded card.
         SidebarContent(topInset: topInset)
         .frame(width: width)
@@ -1309,6 +1519,89 @@ struct SidebarDownloadQueue: View {
 
 /// The sidebar's standard width and how near to it a drag settles on it.
 enum SidebarSnap {
-    static let standard: Double = 260
+    static let standard: Double = sidebarStandardWidth
     static let reach: Double = 6
+}
+
+
+/// The footer's Downloads button with the same status as the toolbar's: a ring of real progress (a turning arc while no size is known), a check for a moment
+/// after a download finishes, a mark when one failed since the list was last opened, and one when downloads are waiting paused.
+struct FooterDownloadsItem: View {
+    @ObservedObject var coordinator: DownloadCoordinator
+    let symbol: String
+    let label: String
+    let active: Bool
+    let action: () -> Void
+    @State private var justFinished = false
+    @State private var finishedTask: Task<Void, Never>?
+    @State private var spin = false
+
+    var body: some View {
+        let items = Array(coordinator.active.values)
+        let known = DownloadsToolbarButton.ringProgress(items)
+        let showsCheck = items.isEmpty && justFinished
+        let failedNew = coordinator.hasUnseenFailure
+        let paused = items.isEmpty && !coordinator.interrupted.isEmpty
+        let status = failedNew ? "a download failed" : items.isEmpty ? (showsCheck ? "finished" : paused ? "paused" : "") : known == nil ? "in progress" : "\(Int(((known ?? 0) * 100).rounded())) percent"
+        Button { coordinator.markFailuresSeen(); action() } label: {
+            ZStack {
+                if !items.isEmpty {
+                    Circle().stroke(Color.primary.opacity(0.15), lineWidth: 2).frame(width: 20, height: 20)
+                    if let known {
+                        Circle().trim(from: 0, to: known).stroke(Theme.accent, style: StrokeStyle(lineWidth: 2, lineCap: .round)).rotationEffect(.degrees(-90)).frame(width: 20, height: 20)
+                    } else {
+                        Circle().trim(from: 0, to: 0.22).stroke(Theme.accent, style: StrokeStyle(lineWidth: 2, lineCap: .round)).frame(width: 20, height: 20)
+                            .rotationEffect(.degrees(spin ? 270 : -90))
+                            .onAppear { if MotionStyle.current != .off && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { withAnimation(.linear(duration: 1.1).repeatForever(autoreverses: false)) { spin = true } } }
+                            .onDisappear { spin = false }
+                    }
+                }
+                FooterItemLabel(symbol: showsCheck ? "checkmark.circle.fill" : symbol, label: label, tint: (active || showsCheck || !items.isEmpty) ? Theme.accent : nil)
+            }
+            .overlay(alignment: .topTrailing) {
+                if failedNew { Image(systemName: "exclamationmark.circle.fill").font(.system(size: 9, weight: .bold)).foregroundStyle(.white, .red).offset(x: -6, y: 1) }
+                else if paused { Image(systemName: "pause.circle.fill").font(.system(size: 9, weight: .bold)).foregroundStyle(.white, .secondary).offset(x: -6, y: 1) }
+            }
+        }
+        .buttonStyle(.plain)
+        .help(status.isEmpty ? label : "\(label): \(status)")
+        .accessibilityLabel(status.isEmpty ? label : "\(label), \(status)")
+        .accessibilityIdentifier("downloads-button")
+        .onChange(of: coordinator.completed.count) { old, new in
+            guard new > old else { return }
+            justFinished = true
+            finishedTask?.cancel()
+            finishedTask = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(2.2))
+                if !Task.isCancelled { justFinished = false }
+            }
+        }
+    }
+}
+
+
+/// The rail's workspace control: the active workspace's icon, with a menu to switch to another (the same commands as the sidebar's selector). The expanded sidebar
+/// has the selector; the toolbar's workspace button can be switched off in Settings; so the rail carries its own.
+struct RailWorkspaceMenu: View {
+    @EnvironmentObject var model: BrowserModel
+    private var title: String { model.activeWorkspace.isEmpty ? "Personal" : model.activeWorkspace }
+    private var icon: String { model.activeWorkspace.isEmpty ? "person.fill" : (model.workspaces.first { $0.name == model.activeWorkspace }?.icon ?? "person") }
+
+    var body: some View {
+        Menu {
+            Button { model.switchWorkspace("") } label: { if model.activeWorkspace.isEmpty { Label("Personal", systemImage: "checkmark") } else { Text("Personal") } }
+            ForEach(model.workspaces) { workspace in
+                Button { model.switchWorkspace(workspace.name) } label: { if model.activeWorkspace == workspace.name { Label(workspace.name, systemImage: "checkmark") } else { Text(workspace.name) } }
+            }
+            Divider()
+            Button("New Workspace…") { promptNewWorkspace(model: model) }
+        } label: {
+            Image(systemName: icon).font(.system(size: 13, weight: .medium)).symbolRenderingMode(.hierarchical).foregroundStyle(Theme.accent)
+                .frame(width: 34, height: 30).contentShape(Rectangle())
+        }
+        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
+        .help("Workspace: \(title)")
+        .accessibilityLabel("Workspace \(title)")
+        .accessibilityIdentifier("rail-workspace-menu")
+    }
 }

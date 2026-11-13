@@ -53,7 +53,8 @@ final class WebKitExtensionManager: NSObject, ExtensionBackend, WKWebExtensionCo
         self.directory = directory
         self.center = center
         self.host = host
-        controller = WKWebExtensionController(configuration: WKWebExtensionController.Configuration(identifier: ProfileIdentity.dataStoreID(for: profile)))
+        // The controller keeps its state under the same identity rule as the website data (a test process never shares a person's own).
+        controller = WKWebExtensionController(configuration: ProfileIdentity.storeID(for: profile).map { WKWebExtensionController.Configuration(identifier: $0) } ?? .nonPersistent())
         super.init()
         controller.delegate = self
     }

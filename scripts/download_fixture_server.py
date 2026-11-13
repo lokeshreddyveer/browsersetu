@@ -5,7 +5,8 @@ The Mac scheme starts it before the tests on port 18766 (see project.yml), as it
 Content is deterministic (byte i of a file is (i * 31 + 7) % 251), so a test can compute what it should have received.
 
 Routes
-  /file/<size>            ordinary file: HEAD, GET, byte ranges, strong ETag, Last-Modified, If-Range. ?cd=<Content-Disposition header value>
+  /file/<size>            ordinary file: HEAD, GET, byte ranges, strong ETag, Last-Modified, If-Range. ?cd=<Content-Disposition header value>, ?ctype=<Content-Type>
+  /htmlpage               a small web page (text/html), HEAD and GET
   /nores/<size>           no ranges, no validators (cannot be resumed)
   /nolength/<size>        chunked, no Content-Length
   /nohead/<size>          HEAD answers 405; GET works
@@ -83,7 +84,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def serve_file(self, size, ranges=True, validators=True, pause_ms=0, cut=None, short=None, chunked=False, bps=0, latency_ms=0, mode="", etag_override=None):
         query = parse_qs(urlparse(self.path).query)
-        headers = {"Content-Type": "application/octet-stream"}
+        headers = {"Content-Type": query["ctype"][0] if "ctype" in query else "application/octet-stream"}
         if latency_ms:
             time.sleep(latency_ms / 1000.0)
         if ranges:
@@ -332,6 +333,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_text(200, b"ok")
         if head == "file":
             return self.serve_file(int(parts[1]))
+        if head == "htmlpage":
+            body = b"<!doctype html><title>a web page</title><p>not a file</p>"
+            return self.send_text(200, body if self.command != "HEAD" else b"", {"Content-Type": "text/html; charset=utf-8"})
         if head == "nores":
             return self.serve_file(int(parts[1]), ranges=False, validators=False)
         if head == "nolength":

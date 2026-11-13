@@ -61,4 +61,19 @@ extension ToolbarPriority {
         let free = window - 2 * max(leadingWidth(inset: leadingInset), trailingWidth) - 24
         return max(160, min(640, min(window * 0.5, free)))
     }
+
+    /// How wide the field is comfortable to type in. Below this the folded toolbar leaves room the centred field cannot use, so it may grow into it.
+    static let comfortableField: CGFloat = 300
+
+    /// The field's width and how far it is moved to the right of the window's centre. At ordinary widths this is `fieldWidth` and no move: the field stays centred, as it always did. In a narrow window
+    /// the centred field is limited by the room needed on its left for the traffic lights (the same on the right), while the right side holds only a few buttons; there the field keeps its left edge, grows
+    /// to the right up to a comfortable width (never into the buttons), and so moves right by half of its growth. Continuous in the window width: no jump where it starts or stops.
+    func fieldPlacement(window: CGFloat, leadingInset: CGFloat) -> (width: CGFloat, shift: CGFloat) {
+        let centred = fieldWidth(window: window, leadingInset: leadingInset)
+        guard centred < Self.comfortableField else { return (centred, 0) }
+        let left = window / 2 - centred / 2
+        let rightLimit = window - trailingWidth - 8
+        let width = max(centred, min(Self.comfortableField, rightLimit - left))
+        return (width, (width - centred) / 2)
+    }
 }

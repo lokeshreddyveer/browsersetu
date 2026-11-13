@@ -22,9 +22,15 @@ public final class ContentRuleInstaller {
     public private(set) var activeIdentifier: String?
     public private(set) var lastReport: InstallReport?
     private var recentIdentifiers: [String] = []
+    private let defaults: UserDefaults?
+    private static let recentKey = "setu.contentRules.recentIdentifiers"
 
-    public init(store: WKContentRuleListStore? = nil) {
+    /// The recently used identifiers are remembered across launches. The app applies a light list first and the full one right after; without this memory the first apply of every launch
+    /// pruned everything but itself, deleted the full compiled list the next apply needed, and the whole list was compiled again on every launch (100% of a core and about 1 GB for 10+ s).
+    public init(store: WKContentRuleListStore? = nil, defaults: UserDefaults? = .standard) {
         self.store = store ?? .default()
+        self.defaults = defaults
+        self.recentIdentifiers = defaults?.stringArray(forKey: Self.recentKey) ?? []    // nil: remembered for this run only (tests, which must not write the person's preferences)
     }
 
     /// Call for every new tab *before* it loads anything, so the first request is already filtered.
@@ -87,6 +93,8 @@ public final class ContentRuleInstaller {
         activeIdentifier = snapshot.identifier
         recentIdentifiers.removeAll { $0 == snapshot.identifier }
         recentIdentifiers.insert(snapshot.identifier, at: 0)
+        if recentIdentifiers.count > Self.cachedListsKept + 1 { recentIdentifiers.removeLast(recentIdentifiers.count - (Self.cachedListsKept + 1)) }
+        defaults?.set(recentIdentifiers, forKey: Self.recentKey)
         await pruneCache()
 
         let report = InstallReport(installed: true, identifier: snapshot.identifier,

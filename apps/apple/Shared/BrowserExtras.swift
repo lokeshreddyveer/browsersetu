@@ -333,10 +333,13 @@ extension BrowserModel {
 
     /// Text dropped on the window: an address opens, anything else is searched, in a new tab. A tab being dragged around (its number) and the
     /// browser's own button drags are not text from outside, so they are left alone.
+    /// What a dragged workspace row carries (so a drop on the page or the address field is not taken for text to search).
+    static let workspaceDragPrefix = "workspace:"
+
     @discardableResult func openDropped(text: String) -> Bool {
         let wanted = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !wanted.isEmpty, wanted.count < 2000, !wanted.contains("\n"), UInt64(wanted) == nil,
-              !wanted.hasPrefix("footer:"), !wanted.hasPrefix("address:") else { return false }
+              !wanted.hasPrefix("footer:"), !wanted.hasPrefix("address:"), !wanted.hasPrefix(Self.workspaceDragPrefix) else { return false }
         _ = openTab(url: nil, isPrivate: active?.isPrivate ?? false)
         navigate(input: wanted)
         return true
@@ -785,4 +788,108 @@ enum AddressBarItem: String, CaseIterable, Identifiable {
         case .reload: "arrow.clockwise"
         }
     }
+}
+
+
+// MARK: - Tab groups inline in the horizontal strips
+
+/// One thing in a horizontal tab strip: a tab, or a group's label (its tabs follow it unless the group is collapsed).
+enum StripItem: Identifiable {
+    case tab(TabController)
+    case group(name: String, count: Int, collapsed: Bool)
+    var id: String {
+        switch self {
+        case .tab(let tab): "t\(tab.id)"
+        case .group(let name, _, _): "g" + name
+        }
+    }
+}
+
+extension BrowserModel {
+    /// Classic, Minimal (and their Reversed forms) and One Row show every tab group inline, as a coloured label with its tabs after it, while no group is chosen
+    /// in the group chip. Choosing a group in the chip still narrows the strip to that group.
+    var stripGroupsInline: Bool { stripShowsGroupsInlineHere && activeGroup.isEmpty && !focusMode }
+
+    /// Every group is shown together with the ungrouped tabs (inline in the horizontal strips, as sections in the sidebar), so no group is a hidden filter: the lists
+    /// that commands (next/previous tab, ⌘1…⌘9, close above/below) and the rail use include the tabs of every group. Mac only; a chosen group still narrows them.
+    var stripShowsGroupsInlineHere: Bool {
+        #if os(macOS)
+        return true
+        #else
+        return false
+        #endif
+    }
+
+    /// Unpinned tabs with each group's tabs brought together at the place of its first tab (the stored order is not changed; this is only how they are shown).
+    /// In the sidebar layouts the order is the one they draw: ungrouped tabs, then each group's tabs in the order the groups are listed.
+    func sidebarDrawnOrder(_ list: [TabController]) -> [TabController] {
+        list.filter { $0.group.isEmpty } + groupNames.flatMap { name in list.filter { $0.group == name } }
+            + list.filter { !$0.group.isEmpty && !groupNames.contains($0.group) }
+    }
+
+    static func groupsTogether(_ list: [TabController]) -> [TabController] {
+        var out: [TabController] = [], placed = Set<String>()
+        for tab in list {
+            if tab.group.isEmpty { out.append(tab); continue }
+            guard placed.insert(tab.group).inserted else { continue }
+            out += list.filter { $0.group == tab.group }
+        }
+        return out
+    }
+
+    /// What the strip draws, in order: pinned tabs, then the rest with a label before each group. A collapsed group shows only its label, unless the tab in front
+    /// is in it (a chosen tab is never hidden).
+    func stripItems(_ tabs: [TabController]) -> [StripItem] {
+        guard stripGroupsInline else { return tabs.map { .tab($0) } }
+        var out: [StripItem] = [], seen = Set<String>()
+        for tab in tabs {
+            if tab.pinned || tab.group.isEmpty { out.append(.tab(tab)); continue }
+            if seen.insert(tab.group).inserted {
+                let members = tabs.filter { !$0.pinned && $0.group == tab.group }
+                let collapsed = collapsedGroups.contains(tab.group) && !members.contains { $0.id == activeID }
+                out.append(.group(name: tab.group, count: members.count, collapsed: collapsed))
+            }
+            let collapsed = collapsedGroups.contains(tab.group) && !(tabs.contains { $0.group == tab.group && $0.id == activeID })
+            if !collapsed { out.append(.tab(tab)) }
+        }
+        return out
+    }
+
+    /// The tabs a strip shows (in its order), for the arrow keys: collapsed groups' tabs are left out.
+    func stripShownTabs(_ tabs: [TabController]) -> [TabController] {
+        stripItems(tabs).compactMap { if case .tab(let t) = $0 { t } else { nil } }
+    }
+
+    /// Opens or closes a group in the strip. Closing the group of the tab in front moves to the nearest tab outside it, as other browsers do.
+    func toggleStripGroup(_ name: String) {
+        if collapsedGroups.contains(name) { collapsedGroups.remove(name); return }
+        if let active, active.group == name {
+            let shown = visibleTabs
+            let outside = shown.filter { $0.group != name }
+            let index = shown.firstIndex { $0.id == active.id } ?? 0
+            if let next = outside.first(where: { t in (shown.firstIndex { $0.id == t.id } ?? 0) > index }) ?? outside.last { select(next.id) } else { return }
+        }
+        collapsedGroups.insert(name)
+    }
+
+    /// The tabs "Close N Tabs in Group" would close: this workspace's tabs in the group (and its subgroups), except pinned and locked ones, which stay (as for the other
+    /// bulk closes). Independent of which group the strip or sidebar is showing.
+    func closableTabs(inGroup name: String) -> [TabController] {
+        listedTabs(inWorkspace: activeWorkspace).filter { GroupPath.isInside($0.group, of: name) && !$0.pinned && !$0.isLocked }
+    }
+
+    func closeStripGroup(_ name: String) {
+        closeInBulk(closableTabs(inGroup: name), reason: "Before closing the group \(name)")
+    }
+
+    /// A new tab placed in the group.
+    func newTab(inGroup name: String) {
+        let tab = openTab(url: nil, isPrivate: activeIsPrivate)
+        moveTab(tab, to: name)
+    }
+}
+
+extension Notification.Name {
+    /// Show or hide the edge sidebar without a pointer (Floating): the keyboard, the menu bar and VoiceOver reach it this way.
+    static let toggleEdgeTabs = Notification.Name("BrowserSetu.toggleEdgeTabs")
 }

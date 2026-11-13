@@ -23,7 +23,7 @@ final class DownloadsWindowUITests: XCTestCase {
 
     private func shot(_ name: String, element: XCUIElement? = nil) {
         let target = element ?? app.windows["browser-AppWindow-1"]
-        let image = target.safeScreenshot()
+        guard let image = target.safeScreenshot() else { return }
         try? image.pngRepresentation.write(to: URL(fileURLWithPath: "\(dir)/\(name).png"))
         let a = XCTAttachment(screenshot: image); a.name = name; a.lifetime = .keepAlways; add(a)
     }

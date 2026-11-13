@@ -190,6 +190,9 @@ final class BrowserModel: ObservableObject {
     var pendingAddressPrefill: String?
     @Published var floatingFocusTick = 0
     @Published var sidebarSection: SidebarSection = .tabs
+    /// How the Library lists the bookmarks within a folder. Only the order shown; nothing is saved.
+    enum LibrarySort: String, CaseIterable { case saved = "As saved", title = "Title", address = "Address" }
+    @Published var librarySort: LibrarySort = .saved
     @Published var overviewVisible = false
     /// Settings as a page inside this window (true) or in their own window; and whether that page is showing now.
     @Published var settingsInTab = false { didSet { saveSetting("settings_in_tab", settingsInTab ? "1" : "0") } }
@@ -205,8 +208,8 @@ final class BrowserModel: ObservableObject {
     @Published var keepMediaHistory = true { didSet { saveSetting("media_history_on", keepMediaHistory ? "1" : "0") } }
     /// When playing media in every tab is paused by the sleep timer.
     @Published var mediaSleepAt: Date?
-    /// Groups folded shut in the sidebar's group list.
-    @Published var collapsedGroups: Set<String> = []
+    /// Groups folded shut, in the sidebar's group list and in the horizontal strips (one state per group, kept across launches).
+    @Published var collapsedGroups: Set<String> = [] { didSet { saveSetting("collapsed_groups", collapsedGroups.sorted().joined(separator: "\n")) } }
     @Published var protectPinned = true { didSet { saveSetting("protect_pinned", protectPinned ? "1" : "0") } }
     var watchTask: Task<Void, Never>?
     /// The tab groups of each workspace, keyed by the workspace's name (Personal is ""). A group is a path such as "Work/Project A", and belongs to one workspace:
@@ -244,6 +247,8 @@ final class BrowserModel: ObservableObject {
     @Published var settingsReveal: SettingsReveal?
     /// The width the standard top bar gives its address field, so the suggestions drop down at exactly that width in every layout (0 until the bar has been drawn).
     @Published var topBarFieldWidth: CGFloat = 0
+    /// How far the top bar's address field sits right of centre (only in a narrow window), so its suggestions line up with it.
+    @Published var topBarFieldShift: CGFloat = 0
     /// The card shown for a download that has just finished.
     @Published var downloadBanner: DownloadBanner?
     var bannerTask: Task<Void, Never>?
@@ -323,9 +328,33 @@ final class BrowserModel: ObservableObject {
         if phoneSpec.staysFolded { foldChrome() } else { expandChrome(userRequested: true) }
         #endif
     }
-    @Published var layoutPreset: LayoutPreset = .classic { didSet { saveSetting("layout_preset", layoutPreset.rawValue); applyLayoutIfNeeded() } }
+    @Published var layoutPreset: LayoutPreset = .classic { didSet { ChromeTrace.log("PRESET \(oldValue) -> \(layoutPreset) applying=\(applyingSettings)"); saveSetting("layout_preset", layoutPreset.rawValue); applyLayoutIfNeeded(); presetChanged(from: oldValue) } }
+    /// The layout to go back to when Canvas is left (not saved: a new launch leaves Canvas to Classic's place in the gallery).
+    var layoutBeforeCanvas: LayoutPreset?
+    /// The rail choice the Research Desk replaced, given back when another layout is chosen.
+    private var railBeforeDesk: Bool?
+    /// The Desk is waiting for a second tab to pair with the one in front (it was chosen, or the window opened in it, before the tabs were there). Cleared once the
+    /// two pages are shown, when the person closes the split, or when another layout is chosen.
+    var deskSplitPending = false
     @Published var sidebarPosition: SidebarPosition = .left { didSet { saveSetting("sidebar_position", sidebarPosition.rawValue) } }
-    @Published var sidebarWidth: Double = 260 { didSet { saveSetting("sidebar_width", String(Int(sidebarWidth))) } }
+    @Published var sidebarWidth: Double = sidebarStandardWidth { didSet { SidebarWidthTrace.log("sidebarWidth \(oldValue) -> \(sidebarWidth) applyingSettings=\(applyingSettings) via \(SidebarWidthTrace.caller())"); if !applyingSettings { scheduleSidebarWidthSave() } } }
+    private var sidebarWidthSave: Task<Void, Never>?
+    /// The end of a drag: the final (already clamped) width is written now, once, and any pending delayed write is dropped.
+    func commitSidebarWidth() {
+        sidebarWidthSave?.cancel(); sidebarWidthSave = nil
+        SidebarWidthTrace.log("commit writes \(Int(sidebarWidth))")
+        saveSetting("sidebar_width", String(Int(sidebarWidth)))
+    }
+    /// A drag changes the width every frame; the setting is written once the width has settled instead of on every frame.
+    private func scheduleSidebarWidthSave() {
+        sidebarWidthSave?.cancel()
+        sidebarWidthSave = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled, let self else { return }
+            SidebarWidthTrace.log("delayed save writes \(Int(self.sidebarWidth))")
+            self.saveSetting("sidebar_width", String(Int(self.sidebarWidth)))
+        }
+    }
     @Published var sidebarRail = false { didSet { saveSetting("sidebar_rail", sidebarRail ? "1" : "0") } }
     @Published var density: InterfaceDensity = .comfortable { didSet { saveSetting("density", density.rawValue) } }
     @Published var paletteVisible = false
@@ -725,7 +754,7 @@ final class BrowserModel: ObservableObject {
         // The iPhone's floating dock (the default, and Reading) replaces the bars: a pill at the bottom. Bottom Bar and Top Bar bring the bars back. The iPad keeps its sidebar.
         return UIDevice.current.userInterfaceIdiom == .phone && phoneSpec.usesDock
         #else
-        return layoutPreset == .floating
+        return layoutPreset == .floating || layoutPreset == .canvas
         #endif
     }
     /// Full screen hides the toolbar until the pointer reaches the top edge (the sidebar layout has none to hide).
@@ -1025,13 +1054,47 @@ final class BrowserModel: ObservableObject {
         }
     }
 
+    /// What a newly chosen layout sets up beyond its resolved composition: the Research Desk's rail and split, and the way back from Canvas. Nothing here navigates,
+    /// replaces or reloads a tab.
+    private func presetChanged(from old: LayoutPreset) {
+        guard !applyingSettings, old != layoutPreset else { return }
+        if layoutPreset == .canvas { layoutBeforeCanvas = old == .canvas ? layoutBeforeCanvas : old; saveSetting("layout_before_canvas", layoutBeforeCanvas?.rawValue ?? "") }
+        if layoutPreset == .researchDesk {
+            railBeforeDesk = sidebarRail
+            sidebarRail = true
+            deskSplitPending = true
+            openResearchSplitIfPossible()
+        } else if old == .researchDesk {
+            deskSplitPending = false
+            if let rail = railBeforeDesk { sidebarRail = rail; railBeforeDesk = nil }
+        }
+    }
+
+    /// Two pages side by side: the tab in front and the next tab in the list (the split that is already open is kept). With only one tab there is nothing to pair, and
+    /// nothing is opened in its place.
+    func openResearchSplitIfPossible(announce: Bool = true) {
+        guard splitTabID == nil else { deskSplitPending = false; return }
+        guard let current = active else { return }
+        let list = visibleTabs.filter { $0.id != current.id && $0.isPrivate == current.isPrivate && !$0.isBlank }
+        let index = visibleTabs.firstIndex { $0.id == current.id } ?? 0
+        let after = list.first { tab in (visibleTabs.firstIndex { $0.id == tab.id } ?? 0) > index } ?? list.first
+        if let after { openSplit(with: after); deskSplitPending = splitTabID == nil } else if announce { notice = "Open a second tab to see two pages side by side." }
+    }
+
+    /// Leaves Canvas for the layout it was entered from (Classic if that is not known).
+    func leaveCanvas() {
+        guard layoutPreset == .canvas else { return }
+        layoutPreset = layoutBeforeCanvas ?? .classic
+        layoutBeforeCanvas = nil
+    }
+
     private func applyLayoutIfNeeded() {
         guard !applyingSettings else { return }
         let resolved = resolvedLayout
         if layoutPreset != .custom {
-            // The pin choice belongs to the Sidebar layout. Applied to the others it put a docked sidebar into Minimal and Classic ("no sidebar") and into
-            // Floating (a sidebar that slides in), whatever the person had pinned somewhere else.
-            if layoutPreset == .sidebar {
+            // The pin choice belongs to the layouts with a docked tab navigator (Sidebar, Hybrid, Research Desk, Workspace Deck). Applied to the others it put a
+            // docked sidebar into Minimal and Classic ("no sidebar") and into Floating (a sidebar that slides in), whatever the person had pinned somewhere else.
+            if layoutPreset.usesSidebarPin {
                 switch sidebarPinChoice {
                 case true?: sidebarVisible = true
                 case false?: sidebarVisible = false
@@ -1042,6 +1105,8 @@ final class BrowserModel: ObservableObject {
             }
         }
         else if tabLayout == .sidebar { sidebarVisible = true; sidebarSection = .tabs }
+        // Back in Custom: its own sidebar choice comes back (a ready-made layout set the shared value while it was chosen; Custom's is kept apart).
+        else { sidebarVisible = ((try? core.getSetting(key: "custom_sidebar")) ?? nil) == "1" }
     }
 
     var activeIsPrivate: Bool { active?.isPrivate ?? false }
@@ -1056,8 +1121,11 @@ final class BrowserModel: ObservableObject {
 
     /// Tabs shown in the strip, sidebar and overview: current group (and privacy set on iOS), pinned first.
     var visibleTabs: [TabController] {
-        let filtered = listedTabs(inWorkspace: activeWorkspace).filter { inActiveGroup($0.group) && (!separatesPrivate || $0.isPrivate == privateMode) }
-        return filtered.filter(\.pinned) + filtered.filter { !$0.pinned }
+        // A horizontal strip with no group chosen shows every group inline, each one's tabs together after its label (see `stripItems`).
+        let inline = stripGroupsInline
+        let filtered = listedTabs(inWorkspace: activeWorkspace).filter { (inline || inActiveGroup($0.group)) && (!separatesPrivate || $0.isPrivate == privateMode) }
+        let unpinned = filtered.filter { !$0.pinned }
+        return filtered.filter(\.pinned) + (inline ? (effectiveTabLayout == .sidebar ? sidebarDrawnOrder(unpinned) : Self.groupsTogether(unpinned)) : unpinned)
     }
 
     /// The profile's search engine: the one the user chose, or Google until they do.
@@ -1317,6 +1385,18 @@ final class BrowserModel: ObservableObject {
             openLinkPreview(.preview(text: text))
             return true
         }
+    }
+
+    /// What the server says an address is, asked once, for the "Add a download" form. It is asked with the SAME origin rules the download itself would get (an address that came from a web page is held to the page rules: no private network, no stored account). Bounded by `seconds`; nil when it could not be asked (offline, refused, slow): the form then behaves as it always did.
+    func probeAddress(_ url: URL, origin: DownloadRequestOrigin = .user, seconds: Double = 8) async -> (contentType: String?, finalURL: URL?)? {
+        let engine = self.engine.downloads.http.engine, profile = profileName
+        let work = Task { () -> (String?, URL?)? in
+            guard let source = try? await engine.resolve(DownloadSourceRequest(url: url, profile: profile, isPrivate: false, origin: origin)) else { return nil }
+            return (source.contentType, source.finalURL)
+        }
+        let timer = Task { try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)); work.cancel() }
+        defer { timer.cancel() }
+        return await withTaskCancellationHandler { await work.value.map { (contentType: $0.0, finalURL: $0.1) } } onCancel: { work.cancel() }
     }
 
     func openLinkPreview(_ route: LinkRoute) {
@@ -2105,7 +2185,8 @@ final class BrowserModel: ObservableObject {
         if let size = environment["BS_WINDOW_SIZE"]?.split(separator: "x").compactMap({ Double($0) }), size.count == 2 {
             Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(1500))
-                if let window = NSApp.windows.first(where: { $0.isVisible }) { window.setFrame(NSRect(x: window.frame.minX, y: window.frame.minY, width: size[0], height: size[1]), display: true, animate: false) }
+                // Not display: true, which lays the window out inside setFrame while SwiftUI is still settling (a constraint-update crash seen only through this hook).
+                if let window = NSApp.windows.first(where: { $0.isVisible }) { window.setFrameForTest(NSRect(x: window.frame.minX, y: window.frame.minY, width: size[0], height: size[1]), display: false, animate: false) }
             }
         }
         if let scenario = environment["BS_SCENARIO"] {
@@ -2126,7 +2207,7 @@ final class BrowserModel: ObservableObject {
                 case "resize":
                     for (w, h) in [(1200.0, 800.0), (1710.0, 1074.0), (900.0, 700.0), (1500.0, 950.0), (1710.0, 1074.0)] {
                         try? await Task.sleep(for: .seconds(2)); WallpaperDebug.log("scenario: resize \(Int(w))x\(Int(h))")
-                        if let window = NSApp.windows.first(where: { $0.isVisible }) { window.setFrame(NSRect(x: window.frame.minX, y: window.frame.minY, width: w, height: h), display: true, animate: false) }
+                        if let window = NSApp.windows.first(where: { $0.isVisible }) { window.setFrameForTest(NSRect(x: window.frame.minX, y: window.frame.minY, width: w, height: h), display: true, animate: false) }
                     }
                 default: break
                 }
@@ -2296,6 +2377,71 @@ final class BrowserModel: ObservableObject {
             active?.load(URL(string: base + "/p/Documentation")!)
             for name in ["Inbox", "Calendar", "News", "Maps"] { openTab(url: URL(string: base + "/p/" + name), isPrivate: false, select: false) }
         case "sidebar": layoutPreset = .sidebar
+        // Debug only: the Custom layout with vertical tabs and a SEPARATE toolbar (the top bar sits beside the sidebar), the one place the top bar is shared with the sidebar layouts.
+        // Debug only (a throwaway -UITestRoot): `-UITabCount N` tabs at once (default 25), the last one selected, so a test of many tabs does not open them one key press at a time.
+        case "bulk-tabs":
+            let count = max(1, UserDefaults.standard.integer(forKey: "UITabCount") == 0 ? 25 : UserDefaults.standard.integer(forKey: "UITabCount"))
+            layoutPreset = LayoutPreset(rawValue: UserDefaults.standard.string(forKey: "UILayout") ?? "") ?? .classic
+            active?.load(URL(string: base + "/p/Bulk0")!)
+            for i in 1..<max(count, 1) { openTab(url: URL(string: base + "/p/Bulk\(i)"), isPrivate: false, select: false) }
+            // Debug only: the Sidebar's other states, for repeatable pictures and measurements (-UIWorkspaces 1, -UIGroups 1, -UIPinned n, -UILocked 1, -UISidebarPosition right, -UISidebarRail 1, -UISidebarAutoHide 1, -UISidebarWidth n).
+            let d = UserDefaults.standard
+            let extraWorkspaces = d.integer(forKey: "UIWorkspaces")
+            if extraWorkspaces >= 1 {
+                createWorkspace("Dev", icon: "hammer"); createWorkspace("Research", icon: "book")
+                // More than one: that many workspaces in all (for the long-list states).
+                if extraWorkspaces > 2 { for number in 3...extraWorkspaces { createWorkspace("Space \(number)", icon: "folder") } }
+            }
+            let pinCount = d.integer(forKey: "UIPinned")
+            for tab in tabs.prefix(pinCount) where !tab.pinned { togglePin(tab) }
+            // Debug only: the tab settings the Section 14 tests switch (-UIHideClose, -UIDoubleClickClose, -UIHideSingleStrip, -UIHoverPreviews 0, -UIHoverDelay seconds).
+            if d.integer(forKey: "UIHideClose") == 1 { hideTabCloseButtons = true }
+            if d.integer(forKey: "UIDoubleClickClose") == 1 { doubleClickClosesTab = true }
+            if d.integer(forKey: "UIHideSingleStrip") == 1 { hideSingleTabStrip = true }
+            if d.object(forKey: "UIHoverPreviews") != nil, d.integer(forKey: "UIHoverPreviews") == 0 { hoverPreviews = false }
+            if d.double(forKey: "UIHoverDelay") > 0 { hoverDelay = d.double(forKey: "UIHoverDelay") }
+            // Debug only: some of the following tabs become Essentials (-UIEssentials n).
+            for tab in tabs.dropFirst(pinCount).prefix(d.integer(forKey: "UIEssentials")) { _ = addToEssentials(tab) }
+            if d.integer(forKey: "UIGroups") == 1, tabs.count > pinCount + 3 {
+                createGroup("Reading", moving: tabs[pinCount + 1])
+                moveTab(tabs[pinCount + 2], to: "Reading")
+            }
+            if d.integer(forKey: "UILocked") == 1, tabs.count > pinCount + 5 { toggleLock(tabs[pinCount + 4]) }
+            // Debug only, for the Library's pictures: bookmarks in folders, the sidebar open, and the History section.
+            if d.integer(forKey: "UIBookmarks") == 1 {
+                for (i, folder) in ["", "Favorites", "Favorites", "Project Resources", "Project Resources", "Reading"].enumerated() {
+                    try? core.addBookmark(url: base + "/p/Mark\(i)", title: "Bookmark \(i)", folder: folder)
+                }
+            }
+            if d.integer(forKey: "UISidebarOpen") == 1 { setSidebarShown(true) }
+            if d.string(forKey: "UILibrarySection") == "history" { sidebarSection = .history }
+            if d.integer(forKey: "UITree") == 1 { tabTree = true }
+            if d.integer(forKey: "UIStacks") == 1 { tabStacks = true }
+            if d.string(forKey: "UISidebarPosition") == "right" { sidebarPosition = .right }
+            if d.integer(forKey: "UISidebarRail") == 1 { sidebarRail = true }
+            if d.integer(forKey: "UISidebarAutoHide") == 1 { hideSidebarToEdge() }
+            if d.integer(forKey: "UISidebarWidth") > 0 { sidebarWidth = clampedSidebarWidth(Double(d.integer(forKey: "UISidebarWidth"))) }
+            if let last = tabs.last { select(last.id) }
+        // Debug only (a throwaway -UITestRoot): 100 tabs, then random tab selections, window widths and Minimal/Classic switches for about three minutes, to look for crashes under heavy tab load.
+        case "stress-tabs":
+            layoutPreset = LayoutPreset(rawValue: UserDefaults.standard.string(forKey: "UILayout") ?? "") ?? .minimal
+            active?.load(URL(string: base + "/p/Stress0")!)
+            for i in 1..<100 { openTab(url: URL(string: base + "/p/Stress\(i)"), isPrivate: false, select: false) }
+            try? await Task.sleep(for: .seconds(8))
+            for step in 1...400 {
+                if let tab = tabs.randomElement() { select(tab.id) }
+                #if os(macOS)
+                if step % 7 == 0, let window = NSApp.windows.first(where: { $0.isVisible && $0.frame.width > 300 }) {
+                    window.setFrameForTest(NSRect(x: window.frame.minX, y: window.frame.minY, width: [520, 700, 900, 1200].randomElement()!, height: 800), display: true, animate: false)
+                }
+                #endif
+                if step % 23 == 0 { layoutPreset = [.minimal, .classic].randomElement()! }
+                if step % 41 == 0 { toggleSidebar() }
+                try? await Task.sleep(for: .milliseconds(450))
+            }
+        // Debug only: every optional toolbar button switched on (for checking that a crowded toolbar still fits).
+        case "all-toolbar": toolbarItems = ToolbarItemID.allCases.filter { $0 != .reload }
+        case "custom-vertical-bar": layoutPreset = .custom; tabLayout = .sidebar; singleToolbarCustom = false
         case "workspaces":
             createWorkspace("Dev", icon: "hammer"); createWorkspace("Research", icon: "book"); setWorkspaceAccent("Research", accent: .purple)
             layoutPreset = .sidebar
@@ -2554,10 +2700,14 @@ final class BrowserModel: ObservableObject {
     var stripHiddenForSingleTab: Bool { hideSingleTabStrip && effectiveTabLayout == .separate && !singleRow && visibleTabs.count <= 1 }
 
     private func selectTab(id: UInt64) {
+        ChromeTrace.log("SELECT tab \(id) (was \(activeID.map(String.init) ?? "none"))")
         FrameMonitor.mark("Switching tab")
         // Choosing any other tab ends a Glance preview (one that is promoted selects its own tab after it has stopped being a preview).
         if let preview = glance.session, preview.tabID != id { glance.dismiss(animated: false) }
         if let previous = active, previous.id != id {
+            // Choosing another tab abandons a half-typed address: its draft and suggestions belong to the tab that was in front (they stayed up under the next tab in every layout; in One Row the field itself is replaced
+            // and never said it had lost the keyboard). The field lets go of the keyboard when it sees editing has ended.
+            if addressBar.isEditing { addressBar.isEditing = false; addressBar.clear() }
             closeReturn[previous.id] = nil
             previous.lastActive = Date()
             Task { await previous.captureSnapshot() }
@@ -2578,7 +2728,8 @@ final class BrowserModel: ObservableObject {
         // An Essential is shown in whichever workspace is in front; opening one never moves the person to another workspace.
         if let tab = active, !isEssentialTab(tab) {
             if tab.workspace != activeWorkspace { activeWorkspace = tab.workspace }
-            if tab.group != activeGroup { activeGroup = tab.group }
+            // A strip showing every group inline keeps showing them all: choosing a grouped tab there does not narrow it to that group.
+            if tab.group != activeGroup, !(stripShowsGroupsInlineHere && activeGroup.isEmpty) { activeGroup = tab.group }
         }
         if separatesPrivate, let tab = active { privateMode = tab.isPrivate }
         refreshBookmarkState()
@@ -2670,7 +2821,8 @@ final class BrowserModel: ObservableObject {
     }
 
     func closeOtherTabs(except id: UInt64) {
-        closeInBulk(visibleTabs.filter { $0.id != id && !$0.pinned }, reason: "Before closing other tabs")
+        // Pinned and locked tabs stay (as for Close Tabs Above/Below): a locked one would only be refused one by one, each with its own "locked" notice.
+        closeInBulk(visibleTabs.filter { $0.id != id && !$0.pinned && !lockedTabIDs.contains($0.id) }, reason: "Before closing other tabs")
     }
 
     /// The one place that closes several tabs for the person: a restore point first when there are many, then each tab through the ordinary close (so locked
@@ -2707,7 +2859,8 @@ final class BrowserModel: ObservableObject {
     }
 
     func selectAdjacent(_ offset: Int) {
-        let list = visibleTabs
+        // With groups inline, a collapsed group's tabs are skipped, as in Chrome and Edge.
+        let list = stripGroupsInline ? stripShownTabs(visibleTabs) : visibleTabs
         guard !list.isEmpty else { return }
         // An Essential's page is in no list: from it, next goes to the first tab and previous to the last, so the keys never get stuck there.
         guard let current = list.firstIndex(where: { $0.id == activeID }) else {
@@ -2756,8 +2909,10 @@ final class BrowserModel: ObservableObject {
     func reorder(_ tabID: UInt64, before targetID: UInt64?) {
         guard let from = tabs.firstIndex(where: { $0.id == tabID }), tabID != targetID else { return }
         let moving = tabs.remove(at: from)
-        let to = targetID.flatMap { id in tabs.firstIndex { $0.id == id } } ?? tabs.count
-        // Pinned tabs stay ahead of unpinned ones within the same view.
+        var to = targetID.flatMap { id in tabs.firstIndex { $0.id == id } } ?? tabs.count
+        // Pinned tabs stay ahead of unpinned ones: a pinned tab cannot land after an unpinned one, nor an unpinned one before a pinned one (it goes to the edge of its own run).
+        let firstUnpinned = tabs.firstIndex { !$0.pinned } ?? tabs.count
+        to = moving.pinned ? min(to, firstUnpinned) : max(to, firstUnpinned)
         tabs.insert(moving, at: to)
         try? core.moveTab(tabId: tabID, index: UInt32(to))
         saveSoon()
@@ -2767,7 +2922,10 @@ final class BrowserModel: ObservableObject {
 
     func createWorkspace(_ name: String, icon: String = "person") {
         let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !clean.isEmpty, clean.count <= 30, !workspaces.contains(where: { $0.name == clean }) else { return }
+        guard !clean.isEmpty else { return }
+        // Said, not silent: why a name was not taken.
+        guard clean.count <= 30 else { notice = "A workspace name can have up to 30 characters."; return }
+        guard !workspaces.contains(where: { $0.name == clean }), clean.caseInsensitiveCompare("Personal") != .orderedSame else { notice = "There is already a workspace called “\(clean)”."; return }
         workspaces.append(Workspace(name: clean, icon: icon, preset: nil, uid: UUID().uuidString))
         saveWorkspaces()
     }
@@ -2828,6 +2986,17 @@ final class BrowserModel: ObservableObject {
             tab.workspace = ""
             try? core.setTabWorkspace(tabId: tab.id, workspace: "")
         }
+        // Other windows follow: their tabs in it move to Personal too (they would otherwise be listed nowhere), and one that was showing it goes to Personal.
+        for other in windows.all where other !== self {
+            for tab in other.tabs where tab.workspace == name {
+                tab.workspace = ""
+                try? other.core.setTabWorkspace(tabId: tab.id, workspace: "")
+            }
+            other.workspaces.removeAll { $0.name == name }
+            other.groupLists[name] = nil
+            if other.activeWorkspace == name { other.switchWorkspace("") }
+            other.objectWillChange.send()
+        }
         workspaces.removeAll { $0.name == name }
         groupLists[name] = nil
         if activeWorkspace == name { switchWorkspace("") }
@@ -2844,7 +3013,11 @@ final class BrowserModel: ObservableObject {
         activeWorkspace = name
         activeGroup = ""
         applyWorkspaceTheme()
-        if rememberLayoutPerWorkspace, let remembered = layout(forWorkspace: name) {
+        // The Workspace Deck is the person's own choice of how to switch: a workspace's remembered arrangement does not take the window out of it
+        // (and take away the list they just used).
+        if layoutPreset == .workspaceDeck {
+            // stays as it is
+        } else if rememberLayoutPerWorkspace, let remembered = layout(forWorkspace: name) {
             apply(remembered)
         } else if let preset = workspaces.first(where: { $0.name == name })?.preset.flatMap(LayoutPreset.init(rawValue:)) {
             layoutPreset = preset
@@ -2854,8 +3027,16 @@ final class BrowserModel: ObservableObject {
         if let first = visibleTabs.first { select(first.id) } else { newTab() }
     }
 
+    /// The workspace after (or before) the open one, going round: Personal first, then each in its order. Nothing to do with one workspace.
+    func switchWorkspace(by offset: Int) {
+        let order = [""] + workspaces.map(\.name)
+        guard order.count > 1, let index = order.firstIndex(of: activeWorkspace) else { return }
+        switchWorkspace(order[((index + offset) % order.count + order.count) % order.count])
+    }
+
+    /// The same tabs the list shows for that workspace (private ones are counted where they are listed, and not in a window that keeps them apart).
     func workspaceTabCount(_ name: String) -> Int {
-        listedTabs(inWorkspace: name, includePrivate: false).count
+        listedTabs(inWorkspace: name).filter { !separatesPrivate || $0.isPrivate == privateMode }.count
     }
 
     // MARK: Dark pages and low power
@@ -3084,6 +3265,14 @@ final class BrowserModel: ObservableObject {
 
     func closeSplit() { splitTabID = nil }
 
+    /// Takes one page out of the split without closing its tab (it stays in the tab list). The focused page hands the focus to the next panel first.
+    func removeFromSplit(_ id: UInt64) {
+        let panels = splitPanels
+        guard panels.count > 1, panels.contains(where: { $0.id == id }) else { return }
+        if id == activeID, let other = panels.first(where: { $0.id != id }) { swapSplit(with: other.id) }
+        if panels.count == 2 { closeSplit() } else { forgetSplitPanel(id) }
+    }
+
     /// A tab that was in a panel is gone: the panels after it move up one place.
     func forgetSplitPanel(_ id: UInt64) {
         var rest = [splitTabID, thirdSplitTabID, fourthSplitTabID].compactMap { $0 }
@@ -3092,6 +3281,30 @@ final class BrowserModel: ObservableObject {
         splitTabID = rest.first
         thirdSplitTabID = rest.count > 1 ? rest[1] : nil
         fourthSplitTabID = rest.count > 2 ? rest[2] : nil
+    }
+
+    /// Puts another open tab in a panel's place, keeping the panel where it is. The tab it replaces stays open, just not in the split.
+    func replaceSplitPanel(_ id: UInt64, with tab: TabController) {
+        guard splitPanels.count > 1, splitPanels.contains(where: { $0.id == id }), !splitPanels.contains(where: { $0.id == tab.id }) else { return }
+        guard tab.isPrivate == activeIsPrivate else { notice = "Private and normal tabs can’t share a split view."; return }
+        tab.ensureLoaded()
+        if id == activeID {
+            select(tab.id)               // the front tab takes the panel's place in the display order
+        } else if id == splitTabID { splitTabID = tab.id }
+        else if id == thirdSplitTabID { thirdSplitTabID = tab.id }
+        else if id == fourthSplitTabID { fourthSplitTabID = tab.id }
+    }
+
+    /// The open tabs that could take a panel's place (up to 20).
+    func tabsAvailableForPanel() -> [TabController] {
+        visibleTabs.filter { tab in !splitPanels.contains { $0.id == tab.id } && tab.isPrivate == activeIsPrivate }.prefix(20).map { $0 }
+    }
+
+    /// Moves the focus to the next panel (and back to the first after the last): the keyboard's way of choosing a panel.
+    func focusNextPanel() {
+        let panels = orderedSplitPanels()
+        guard panels.count > 1, let index = panels.firstIndex(where: { $0.id == activeID }) else { return }
+        swapSplit(with: panels[(index + 1) % panels.count].id)
     }
 
     /// Makes another panel the active one and puts the active tab in its place. With no argument, swaps with the second panel.
@@ -3157,12 +3370,39 @@ final class BrowserModel: ObservableObject {
     func moveTab(_ tab: TabController, to group: String) {
         tab.group = group
         try? core.setTabGroup(tabId: tab.id, group: group)
-        if tab.id == activeID, group != activeGroup {
+        if tab.id == activeID, group != activeGroup, !(stripShowsGroupsInlineHere && activeGroup.isEmpty) {
             activeGroup = group
         } else if group != activeGroup, tab.id != activeID {
             objectWillChange.send()
         }
         saveSoon()
+    }
+
+    /// A tab dropped on a workspace's row: it moves there (and leaves its group), like the tab menu's Move to Workspace. A tab from another window comes into this one first, by
+    /// the same rules as any move between windows (a private tab never changes who can see its cookies), then goes to the workspace.
+    @discardableResult
+    func acceptDroppedTabToWorkspace(_ id: UInt64, workspace name: String) -> Bool {
+        guard name.isEmpty || workspaces.contains(where: { $0.name == name }) else { return false }
+        var cameFromAnotherWindow = false
+        if !tabs.contains(where: { $0.id == id }) {
+            guard acceptDroppedTab(id, before: nil) else { return false }
+            cameFromAnotherWindow = true
+        }
+        guard let tab = tabs.first(where: { $0.id == id }) else { return false }
+        // Already there: nothing to do (and nothing said), unless it has only just arrived from another window.
+        guard tab.workspace != name || cameFromAnotherWindow else { return false }
+        if tab.workspace != name { moveTab(tab, toWorkspace: name) }
+        notice = "Moved to \(name.isEmpty ? "Personal" : name)."
+        return true
+    }
+
+    /// Reorders the workspaces by drag: `name` goes where `target` is (Personal, which is always first, is `""`: dropping on it puts the workspace first among the others).
+    func moveWorkspace(_ name: String, before target: String) {
+        guard name != target, let from = workspaces.firstIndex(where: { $0.name == name }) else { return }
+        let item = workspaces.remove(at: from)
+        let to = target.isEmpty ? 0 : (workspaces.firstIndex(where: { $0.name == target }) ?? workspaces.count)
+        workspaces.insert(item, at: to)
+        saveWorkspaces()
     }
 
     func moveTab(_ tab: TabController, toWorkspace name: String) {
@@ -3589,8 +3829,10 @@ final class BrowserModel: ObservableObject {
         if let forced = ProcessInfo.processInfo.environment["BS_PHONE_PRESET"], let preset = PhonePreset(rawValue: forced) { phonePreset = preset }
         #endif
         layoutPreset = LayoutPreset(rawValue: get("layout_preset") ?? "") ?? .classic
+        layoutBeforeCanvas = LayoutPreset(rawValue: get("layout_before_canvas") ?? "")
         sidebarPosition = SidebarPosition(rawValue: get("sidebar_position") ?? "") ?? .left
-        sidebarWidth = clampedSidebarWidth(Double(get("sidebar_width") ?? "") ?? 260)
+        SidebarWidthTrace.log("load: stored sidebar_width = \(get("sidebar_width") ?? "nil")")
+        sidebarWidth = clampedSidebarWidth(Double(get("sidebar_width") ?? "") ?? sidebarStandardWidth)
         sidebarRail = get("sidebar_rail") == "1"
         sidebarAutoHide = get("sidebar_autohide") == "1"
         density = InterfaceDensity(rawValue: get("density") ?? "") ?? .comfortable
@@ -3657,6 +3899,7 @@ final class BrowserModel: ObservableObject {
         ed2kSettings = ED2KSettings.decode(get("download_ed2k"))
         tabSchedules = ((get("tab_schedules")?.data(using: .utf8)).flatMap { try? JSONDecoder().decode([TabSchedule].self, from: $0) }) ?? []
         protectPinned = get("protect_pinned") != "0"
+        collapsedGroups = Set((get("collapsed_groups") ?? "").split(separator: "\n").map(String.init))
         keepMediaHistory = get("media_history_on") != "0"
         loadReaderStyle()
         mediaHistory = ((get("media_history")?.data(using: .utf8)).flatMap { try? JSONDecoder().decode([MediaHistoryEntry].self, from: $0) }) ?? []
@@ -3781,8 +4024,8 @@ final class BrowserModel: ObservableObject {
         sidebarVisible = !sidebarAutoHide && resolveLayout(preset: layoutPreset, customTabLayout: tabLayout, customSidebarVisible: get("custom_sidebar") == "1", customSingleToolbar: singleToolbarCustom).sidebarVisible
         // An explicit pin choice wins over what the layout would do, and over auto-hide.
         switch get("sidebar_pinned") {
-        case "1": sidebarPinChoice = true; if layoutPreset == .sidebar { sidebarAutoHide = false; sidebarVisible = true }
-        case "0": sidebarPinChoice = false; if layoutPreset == .sidebar { sidebarAutoHide = true; sidebarVisible = false }
+        case "1": sidebarPinChoice = true; if layoutPreset.usesSidebarPin { sidebarAutoHide = false; sidebarVisible = true }
+        case "0": sidebarPinChoice = false; if layoutPreset.usesSidebarPin { sidebarAutoHide = true; sidebarVisible = false }
         default: sidebarPinChoice = nil
         }
         addressBarPosition = AddressBarPosition(rawValue: get("address_bar") ?? "") ?? Self.defaultAddressBarPosition
@@ -3870,8 +4113,17 @@ final class BrowserModel: ObservableObject {
     /// and the pin button agrees with it; in the other layouts it only opens or closes the sidebar for now.
     func toggleSidebar() { setSidebarShown(!sidebarVisible) }
 
+    /// Whether the tabs come out of the window's edge (Floating): the only layout where the sidebar has no place of its own to be shown.
+    var hasEdgeTabs: Bool { layoutPreset == .floating && !sidebarVisible }
+    /// Floating: slides the tab sidebar in or out from the keyboard, the menu or VoiceOver. Elsewhere it is Toggle Sidebar.
+    func toggleEdgeTabs() {
+        if hasEdgeTabs { NotificationCenter.default.post(name: .toggleEdgeTabs, object: nil) } else { toggleSidebar() }
+    }
+
     func setSidebarShown(_ shown: Bool) {
-        if layoutPreset == .sidebar {
+        // Canvas has no sidebar: the tabs are the overview (⇧⌘A), so ⇧⌘L shows that instead of docking a panel the layout does not have.
+        if layoutPreset == .canvas { if shown { showOverview() }; return }
+        if layoutPreset.usesSidebarPin {
             if shown { sidebarRail = false; pinSidebar() } else { hideSidebarToEdge() }
         } else {
             sidebarVisible = shown
@@ -3908,6 +4160,19 @@ final class BrowserModel: ObservableObject {
     var sidebarIsPinned: Bool { sidebarVisible && !sidebarRail }
 
     func shows(_ item: ToolbarItemID) -> Bool { toolbarItems.contains(item) }
+
+    /// Vertical tabs with a separate toolbar (Hybrid, Research Desk, Workspace Deck, and Custom set up that way): while the sidebar is on screen, docked or as icons, it carries the sidebar toggle itself (its header buttons, or the rail's Expand button), so the
+    /// toolbar's own sidebar button would be a second one. It comes back when the sidebar is hidden, because it is then the way to bring the sidebar back.
+    var sidebarCarriesToggle: Bool { effectiveTabLayout == .sidebar && !singleToolbar && !topBarHidden && sidebarVisible }
+    /// The expanded sidebar also carries the workspace switcher (the icon rail does not), so the toolbar's workspace menu is left out while it is on screen.
+    var sidebarCarriesWorkspaces: Bool { sidebarCarriesToggle && !sidebarRail }
+    /// Whether the toolbar draws `item`: it is switched on, and the sidebar is not already offering the same control.
+    func showsOnToolbar(_ item: ToolbarItemID) -> Bool {
+        guard shows(item) else { return false }
+        if item == .sidebar { return !sidebarCarriesToggle }
+        if item == .workspaces { return !sidebarCarriesWorkspaces }
+        return true
+    }
     /// How many of the added toolbar buttons are switched on, so the bar can leave room for them.
     /// What the top bar shows, for working out how much room its buttons take.
     var toolbarVisibility: ToolbarVisibility {
@@ -3916,10 +4181,10 @@ final class BrowserModel: ObservableObject {
         #else
         let extensionButtons = 0
         #endif
-        return ToolbarVisibility(sidebar: shows(.sidebar), backForward: shows(.backForward), share: shows(.share), newTab: shows(.newTab), overview: shows(.tabOverview),
+        return ToolbarVisibility(sidebar: showsOnToolbar(.sidebar), backForward: shows(.backForward), share: shows(.share), newTab: shows(.newTab), overview: shows(.tabOverview),
                                  bookmark: shows(.bookmark), downloads: shows(.downloads), extensionButtons: extensionButtons)
     }
-    var toolbarExtrasCount: Int { [ToolbarItemID.workspaces, .profile, .splitView, .history, .library, .find, .palette].filter(shows).count }
+    var toolbarExtrasCount: Int { [ToolbarItemID.workspaces, .profile, .splitView, .history, .library, .find, .palette].filter(showsOnToolbar).count }
 
     /// Saves a search address if it is valid (https, with `{}` exactly once). Returns whether it was saved.
     @discardableResult
@@ -4044,7 +4309,7 @@ final class BrowserModel: ObservableObject {
     static let backupSettingKeys: Set<String> = [
         // Scripts come back switched off and with nothing allowed (see restore). The consent for SponsorBlock and its server, and a search server's suggestions, are never carried in a file.
         "user_scripts", "web_apps", "download_duplicate", "download_template", "searxng_instance", "cookie_banners_hide", "debounce_links", "redirect_skip_off", "consent_off", "sponsor_actions", "sponsor_off",
-        "accent", "accent_chosen", "lookalike_guard", "focus_rules", "address_bar", "address_bar_items", "appearance", "density", "keep_pinned", "layout_preset", "memory_mode", "show_favorites", "show_continue",
+        "accent", "accent_chosen", "lookalike_guard", "focus_rules", "address_bar", "address_bar_items", "appearance", "density", "keep_pinned", "layout_preset", "layout_before_canvas", "memory_mode", "show_favorites", "show_continue",
         "show_frequent", "show_greeting", "show_recently_closed", "sidebar_autohide", "sidebar_position", "sidebar_rail",
         "organize_downloads_domain", "download_notify", "last_split", "track_time", "break_minutes", "clipboard_history", "feeds", "backdrop_intensity", "icon_weight", "site_icon_shape", "site_looks", "motion_style", "download_segments", "start_title", "start_font", "start_search_style", "start_width", "start_image_dim", "start_image_blur", "history_retention_days", "new_tab_mode", "new_tab_url", "start_color_a", "start_color_b", "reader_style", "media_history_on", "referrer_mode", "gpc", "block_link_pings", "lockdown_hosts", "tab_groups_v2", "essentials", "pinned_addresses", "glance_enabled", "glance_trigger", "glance_temporary", "learn_suggestions", "suggestion_excluded", "space_request_new_window", "clear_includes_sleeping", "clear_tabs_asks", "debounce_links", "block_local_network", "local_network_allowed", "block_google_services", "block_social_widgets", "private_search", "double_click_closes_tab", "hide_tab_close", "close_window_last_tab", "custom_keep", "custom_idle", "battery_aware", "security_events", "tab_schedules", "protect_pinned", "sidebar_width", "single_toolbar", "split_orientation", "start_background", "startup", "startup_workspace",
         "strip_tracking", "tab_groups", "tab_layout", "tab_previews", "tint_toolbar", "toolbar_autohide", "toolbar_items",
@@ -4396,7 +4661,7 @@ extension BrowserModel {
         if !activeWorkspace.isEmpty {
             all.append(.init(id: "ws-default", title: "Switch Workspace: Personal", subtitle: "", symbol: "person", shortcut: "") { [self] in switchWorkspace("") })
         }
-        for preset in LayoutPreset.allCases {
+        for preset in LayoutPreset.allCases where preset.isOffered || preset == layoutPreset {
             all.append(.init(id: "layout-\(preset.rawValue)", title: "Layout: \(preset.title)", subtitle: preset.summary,
                              symbol: "rectangle.split.3x1", shortcut: "") { [self] in layoutPreset = preset })
         }
@@ -4476,3 +4741,13 @@ extension BrowserModel: ExtensionHost {
         await Dialogs.choose(title: title, message: message, buttons: [allow, "Don’t Allow"]) == 0
     }
 }
+
+#if os(macOS) && DEBUG
+extension NSWindow {
+    /// Debug test hooks resize windows with this: the window's saved frame is written into the person's own preferences under its autosave name, so the name is dropped before the frame changes.
+    func setFrameForTest(_ frame: NSRect, display: Bool, animate: Bool) {
+        if !frameAutosaveName.isEmpty { setFrameAutosaveName("") }
+        setFrame(frame, display: display, animate: animate)
+    }
+}
+#endif

@@ -48,7 +48,7 @@ final class ResourceDetectionUITests: XCTestCase {
         // A local address found on a page is refused by the download engine (a page cannot point the browser at the local network), so the local file is not fetched; the notice says so.
         any("category-archive").click()
         XCTAssertTrue(any("category-download-selected").waitForExistence(timeout: 4))
-        let shot = XCTAttachment(screenshot: app.windows.firstMatch.safeScreenshot()); shot.name = "archive-popover"; shot.lifetime = .keepAlways; add(shot)
+        let shot = app.windows.firstMatch.safeAttachment(); shot.name = "archive-popover"; shot.lifetime = .keepAlways; add(shot)
         let before = hits("\(n)/bundle.zip")
         any("category-download-selected").click()
         Thread.sleep(forTimeInterval: 4)
@@ -119,7 +119,7 @@ final class ResourceDetectionUITests: XCTestCase {
         app.radioButtons.matching(NSPredicate(format: "label CONTAINS 'Audio only (M4A)'")).firstMatch.click()
         XCTAssertTrue(any("consent-prompt").waitForExistence(timeout: 3), "converting asks first")
         XCTAssertFalse(any("video-sheet-download").isEnabled, "Download waits for the answer")
-        let shot = XCTAttachment(screenshot: app.windows.firstMatch.safeScreenshot()); shot.name = "video-sheet-consent"; shot.lifetime = .keepAlways; add(shot)
+        let shot = app.windows.firstMatch.safeAttachment(); shot.name = "video-sheet-consent"; shot.lifetime = .keepAlways; add(shot)
         any("consent-once").click()
         XCTAssertTrue(waitEnabled(any("video-sheet-download")))
         any("video-sheet-download").click()
@@ -347,7 +347,7 @@ final class ResourceDetectionUITests: XCTestCase {
         let download = any("media-download")
         XCTAssertTrue(download.waitForExistence(timeout: 5), "the picker offers Download for a plain stream on a provider's page")
         XCTAssertTrue(download.isEnabled)
-        let shot = XCTAttachment(screenshot: app.windows.firstMatch.safeScreenshot()); shot.name = "provider-page-picker"; shot.lifetime = .keepAlways; add(shot)
+        let shot = app.windows.firstMatch.safeAttachment(); shot.name = "provider-page-picker"; shot.lifetime = .keepAlways; add(shot)
         download.click()
         Thread.sleep(forTimeInterval: 3)
         app.typeKey(.escape, modifierFlags: [])          // closes the picker; the Downloads list it sits in stays
@@ -392,11 +392,11 @@ final class ResourceDetectionUITests: XCTestCase {
         // Allow once: formats appear; choose; download.
         openSheet()
         XCTAssertTrue(any("extractor-consent").waitForExistence(timeout: 4))
-        let shot = XCTAttachment(screenshot: app.windows.firstMatch.safeScreenshot()); shot.name = "extractor-consent"; shot.lifetime = .keepAlways; add(shot)
+        let shot = app.windows.firstMatch.safeAttachment(); shot.name = "extractor-consent"; shot.lifetime = .keepAlways; add(shot)
         any("extractor-consent-once").click()
         let quality = any("extractor-quality")
         XCTAssertTrue(quality.waitForExistence(timeout: 20) || any("extractor-download").waitForExistence(timeout: 2), "the extractor's formats are shown")
-        let shot2 = XCTAttachment(screenshot: app.windows.firstMatch.safeScreenshot()); shot2.name = "extractor-formats"; shot2.lifetime = .keepAlways; add(shot2)
+        let shot2 = app.windows.firstMatch.safeAttachment(); shot2.name = "extractor-formats"; shot2.lifetime = .keepAlways; add(shot2)
         XCTAssertTrue(any("extractor-download").waitForExistence(timeout: 5), "Download button")
         XCTAssertTrue(any("extractor-download").isEnabled)
         any("extractor-download").click()
@@ -448,7 +448,7 @@ final class ResourceDetectionUITests: XCTestCase {
         let chips = ["media-button", "category-audio", "category-image", "category-document", "category-archive", "category-code", "category-config", "category-data", "category-torrent", "category-installer", "category-feed", "category-cloud", "category-other", "category-all"]
         let present = chips.filter { any($0).exists }
         print("LIVE chips shown: \(present.map { $0 + "=" + any($0).label })")
-        let shot = XCTAttachment(screenshot: app.windows.firstMatch.safeScreenshot()); shot.name = "live-page"; shot.lifetime = .keepAlways; add(shot)
+        let shot = app.windows.firstMatch.safeAttachment(); shot.name = "live-page"; shot.lifetime = .keepAlways; add(shot)
         if any("media-button").exists {
             any("media-button").click()
             Thread.sleep(forTimeInterval: 1)
@@ -469,7 +469,7 @@ final class ResourceDetectionUITests: XCTestCase {
             let texts = sheet.descendants(matching: .staticText).allElementsBoundByIndex.prefix(12).map { ($0.value as? String) ?? $0.label }
             print("LIVE sheet text: \(texts)")
             print("LIVE sheet buttons: \(sheet.descendants(matching: .button).allElementsBoundByIndex.map { $0.identifier + "/" + $0.label })")
-            let shot2 = XCTAttachment(screenshot: app.windows.firstMatch.safeScreenshot()); shot2.name = "live-sheet"; shot2.lifetime = .keepAlways; add(shot2)
+            let shot2 = app.windows.firstMatch.safeAttachment(); shot2.name = "live-sheet"; shot2.lifetime = .keepAlways; add(shot2)
         }
         let lines = app.debugDescription.split(separator: "\n").filter { $0.contains("Video") || $0.contains("media-") }.prefix(6).map { String($0.trimmingCharacters(in: .whitespaces).prefix(160)) }
         print("LIVE window mentions: \(lines)")

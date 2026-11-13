@@ -97,6 +97,9 @@ fi
 RELEASE_COMMIT="$(git rev-parse HEAD)"
 rm -rf "$DIST" "$DERIVED"; mkdir -p "$DIST"
 
+# Local text check, kept outside the repository (folder: $SETU_GUARD, default ~/.config/setu-guard).
+python3 -I "${SETU_GUARD:-$HOME/.config/setu-guard}/check.py" || fail "the local text check failed (see above)."
+
 # The permanent architecture decision (docs/decisions/0001): documents, manifests, build files and scripts must not contradict it.
 python3 -I scripts/check-architecture.py || fail "the repository contradicts docs/decisions/0001-media-tools-optional-downloads.md (see above)."
 
@@ -204,5 +207,6 @@ assert m.get("source_commit") == commit and m.get("source_dirty") is False, "bui
 m["artifacts"] = {os.path.basename(dmg): {"sha256": hashlib.sha256(open(dmg, "rb").read()).hexdigest(), "bytes": os.path.getsize(dmg)}}
 json.dump(m, open(p, "w"), indent=2); open(p, "a").write("\n")
 PY
+python3 -I "${SETU_GUARD:-$HOME/.config/setu-guard}/check.py" --files "$DIST/build-metadata.json" "$DIST/sbom.cdx.json" || fail "the local text check failed on the release metadata."
 echo "✔ $DMG is signed, notarized and stapled"
 shasum -a 256 "$DMG"

@@ -447,16 +447,31 @@ struct SetupAssistantView: View {
 
     @ViewBuilder private var layoutStep: some View {
         #if os(macOS)
-        VStack(alignment: .leading, spacing: 12) {
-            heading("How should the window be laid out?", "Where your tabs and the address bar sit. Each picture shows what moves. You can switch at any time from the toolbar’s right-click menu.")
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 158, maximum: 300), spacing: 12, alignment: .top)], alignment: .leading, spacing: 12) {
-                ForEach(LayoutPreset.allCases.filter { $0 != .custom }) { preset in
-                    let selected = model.layoutPreset == preset
-                    SetupChoiceCard(title: preset.title, summary: Self.shortSummary(preset), selected: selected) {
-                        SetupWindowGlyph(preset: preset, selected: selected)
-                    } action: { animated(.easeOut(duration: 0.2)) { model.layoutPreset = preset } }
+        VStack(alignment: .leading, spacing: 18) {
+            heading("Choose your layout", "Where your tabs and the address bar sit. Each picture shows what moves. Every layout keeps the same tabs, pages and settings, so nothing is lost when you change your mind.")
+            ForEach(LayoutPreset.Family.allCases.filter { $0 != .own }) { family in
+                let members = LayoutPreset.allCases.filter { $0.family == family && $0.isOffered && !$0.tabsOnTop }
+                if !members.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(family.rawValue).font(.system(size: 13, weight: .semibold)).accessibilityAddTraits(.isHeader)
+                            Text(Self.familyLine(family)).font(.system(size: 11.5)).foregroundStyle(.secondary)
+                        }
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 158, maximum: 300), spacing: 12, alignment: .top)], alignment: .leading, spacing: 12) {
+                            ForEach(members) { preset in
+                                let selected = model.layoutPreset == preset
+                                SetupChoiceCard(title: preset.title, summary: Self.shortSummary(preset), selected: selected) {
+                                    SetupWindowGlyph(preset: preset, selected: selected)
+                                } action: { animated(.easeOut(duration: 0.2)) { model.layoutPreset = preset } }
+                            }
+                        }
+                    }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel("\(family.rawValue) layouts")
                 }
             }
+            Text("You can change it at any time: right-click the toolbar and choose Layout, or use Settings. ⌥⇧⌘0 always brings back the standard layout.")
+                .font(.system(size: 11.5)).foregroundStyle(.secondary)
         }
         #else
         VStack(alignment: .leading, spacing: 12) {
@@ -466,15 +481,32 @@ struct SetupAssistantView: View {
         #endif
     }
 
+    /// What the layouts in a group have in common, beside its name.
+    private static func familyLine(_ family: LayoutPreset.Family) -> String {
+        switch family {
+        case .horizontal: "Tabs across the top"
+        case .vertical: "Tabs down the side"
+        case .immersive: "Just the page, the rest on demand"
+        case .workflow: "Built around a way of working"
+        case .own: ""
+        }
+    }
+
     /// One short line for each layout, so the cards are the same height. The full descriptions are in Settings.
     private static func shortSummary(_ preset: LayoutPreset) -> String {
         switch preset {
-        case .classic: "Tabs on top, standard toolbar"
-        case .sidebar: "Vertical tabs, address bar in the sidebar"
-        case .minimal: "Compact tabs, no sidebar"
-        case .floating: "No top bar; a pill shows the site"
-        case .inline: "Tabs and address on one line"
+        case .classic: "A strip of tabs and a standard toolbar"
+        case .classicReversed: "Tabs above the toolbar"
+        case .sidebar: "Tabs in a sidebar, with the address bar in it"
+        case .minimal: "A compact strip of small tabs"
+        case .minimalReversed: "Compact tabs above the toolbar"
+        case .floating: "No bar: a small pill, and tabs from the edge"
+        case .inline: "Tabs and address in a single row"
         case .custom: preset.summary
+        case .hybrid: "Tabs in a sidebar, a full toolbar over the page"
+        case .canvas: "Only the page: ⌘L for the address, ⇧⌘A for tabs"
+        case .researchDesk: "Two pages side by side, tabs in a slim rail"
+        case .workspaceDeck: "Every workspace listed, then its tabs"
         }
     }
 

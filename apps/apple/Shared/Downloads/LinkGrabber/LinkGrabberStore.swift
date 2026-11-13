@@ -118,7 +118,7 @@ enum LinkRouter {
             return .mediaPreview(url)
         case .httpResource, .webpage, .torrentURL:
             guard let url = URL(string: link.original), DownloadSchedule.canSchedule(url) else { return .refused("That web address cannot be downloaded.") }
-            if link.kind != .torrentURL, let m = ProviderRecognizer.recognize(url), m.mediaID != nil, [.video, .short, .reel].contains(m.kind), !m.isEmbed { return .videoPage(url) }
+            if link.kind != .torrentURL, ProviderRecognizer.isVideoPage(url) { return .videoPage(url) }
             return .download(url)
         case .unsupported(let why), .invalid(let why): return .refused(why)
         }

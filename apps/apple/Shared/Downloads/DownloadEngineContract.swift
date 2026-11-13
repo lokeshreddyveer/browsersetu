@@ -56,6 +56,10 @@ struct DownloadResolvedSource: Sendable {
     var totalBytes: Int64?
     var acceptsRanges: Bool
     var metadata: [String: String]
+    /// What the server said the thing is ("text/html", "video/mp4"), lower case and without parameters. Not stored with a download.
+    var contentType: String? = nil
+    /// Where the address ended up after redirects. Not stored (it may carry a token); only used to tell what the address really is.
+    var finalURL: URL? = nil
 }
 
 enum DownloadEngineError: Error, Equatable, Sendable {
