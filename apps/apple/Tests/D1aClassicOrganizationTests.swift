@@ -36,8 +36,10 @@ final class D1aClassicOrganizationTests: XCTestCase {
         m.createGroup("Work", moving: a)
         XCTAssertEqual(a.group, "Work")
         m.selectGroup("")
-        XCTAssertFalse(m.visibleTabs.contains { $0.id == a.id }, "a grouped tab is not in the ungrouped strip")
+        // Every group is shown inline in the strip beside the ungrouped tabs (Mac), so a grouped tab does not leave the strip...
+        XCTAssertTrue(m.visibleTabs.contains { $0.id == a.id }, "a grouped tab stays in the strip, inside its group")
         XCTAssertTrue(m.visibleTabs.contains { $0.id == b.id })
+        // ...and choosing the group in the chip narrows the strip to it.
         m.selectGroup("Work")
         XCTAssertEqual(m.visibleTabs.map(\.id), [a.id], "the Work group shows only its own tab")
     }
@@ -88,10 +90,15 @@ final class D1aClassicOrganizationTests: XCTestCase {
     /// Selecting a tab that is in another group brings that group's view with it.
     func testSelectingATabInAnotherGroupSwitchesTheStripToIt() {
         let m = model()
-        let a = tab(m, 1)
+        let a = tab(m, 1), b = tab(m, 2)
         m.createGroup("Work", moving: a)
+        m.createGroup("Play", moving: b)
         m.selectGroup("")
         XCTAssertEqual(m.activeGroup, "")
+        m.select(a.id)
+        XCTAssertEqual(m.activeGroup, "", "with every group shown inline, choosing a tab leaves the strip as it is")
+        // With the strip narrowed to one group, choosing a tab in another group takes the strip there.
+        m.selectGroup("Play")
         m.select(a.id)
         XCTAssertEqual(m.activeGroup, "Work", "the strip follows the selected tab")
     }

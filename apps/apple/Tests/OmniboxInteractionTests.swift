@@ -149,16 +149,29 @@ final class OmniboxInteractionTests: XCTestCase {
         XCTAssertEqual(tab.title, "Page Two", "the suggestion's page actually loaded")
     }
 
-    func testSwitchingTabsWhileEditingPreservesDraft() {
+    /// Choosing another tab ends the edit: a half-typed address, and the suggestions under it, belong to the tab that was in front and do not follow to the next one (the rule
+    /// in `selectTab`). Nothing is lost silently: the field says it has let go, and shows the tab's own address again.
+    func testSwitchingTabsWhileEditingEndsTheEditAndDropsTheDraft() {
         let other = model.newTab()
         other.engineURLChanged(URL(string: "https://second.example/")!)
         model.select(tab.id)
         pump(0.2)
         focus(); userSets("half typed")
+        XCTAssertTrue(model.addressBar.isEditing)
         model.select(other.id)
         pump(0.3)
+        XCTAssertFalse(model.addressBar.isEditing, "choosing another tab ends the edit")
+        XCTAssertNotEqual(field.stringValue, "half typed", "the draft does not stay up under another tab")
+    }
+
+    /// What must never happen: the page changing under the person's hands. A title or address update from the page they are on, while they type, leaves the draft alone.
+    func testAPageUpdateWhileTypingDoesNotOverwriteTheDraft() {
+        focus(); userSets("half typed")
+        tab.engineURLChanged(URL(string: "https://redirected.example/landing")!)
+        tab.engineTitleChanged("Redirected")
+        pump(0.3)
         XCTAssertTrue(model.addressBar.isEditing)
-        XCTAssertEqual(field.stringValue, "half typed", "a tab update must not overwrite active typing")
+        XCTAssertEqual(field.stringValue, "half typed", "a page update must not overwrite active typing")
     }
 
     func testArrowKeysMoveThroughSuggestions() throws {

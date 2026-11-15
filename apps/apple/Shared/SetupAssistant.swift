@@ -153,7 +153,7 @@ struct SetupAssistantView: View {
     }
 
     private var brand: some View {
-        HStack { SetuLockup(size: 13); Spacer() }
+        HStack { SetuLockup(size: 13, showsMark: false); Spacer() }
     }
 
     /// Every step, in order: done ones checked, the current one lit, the rest quiet, joined by a thin line. Read-only (the buttons move between steps), and hidden from VoiceOver

@@ -64,9 +64,11 @@ struct SetuMark: View {
 struct SetuLockup: View {
     var size: CGFloat = 14
     var latin = true
+    /// The round icon beside the name. Off where only the name is wanted (the Setup screen).
+    var showsMark = true
     var body: some View {
         HStack(spacing: size * 0.55) {
-            SetuMark(size: size * (latin ? 2.7 : 4.2))
+            if showsMark { SetuMark(size: size * (latin ? 2.7 : 4.2)) }
             if latin {
                 HStack(spacing: size * 0.24) {
                     Text("Browser").font(.system(size: size * 1.4, weight: .regular, design: .serif)).tracking(size * 0.02).foregroundStyle(.primary.opacity(0.88))

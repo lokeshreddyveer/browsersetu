@@ -184,6 +184,7 @@ struct StartPrivacyControls: View {
             Text("Sections that draw on your browsing").font(.subheadline.weight(.semibold))
             Toggle("Continue browsing", isOn: $model.showContinue)
             Toggle("Often visited", isOn: $model.showFrequent)
+            OftenVisitedControls()
             Toggle("Recently closed", isOn: $model.showRecentlyClosed)
             Text("These never appear in a private tab. Each profile keeps its own choices.").font(.caption).foregroundStyle(.secondary)
         }

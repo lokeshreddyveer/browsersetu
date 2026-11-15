@@ -236,7 +236,6 @@ struct StartPageView: View {
         let custom = model.startTitle.trimmingCharacters(in: .whitespaces)
         let title = isPrivate ? "Private Browsing" : (welcoming ? "Welcome to Browser Setu" : (!custom.isEmpty ? custom : (model.showGreeting ? word : "Browser Setu")))
         return VStack(spacing: 6) {
-            if !isPrivate { SetuLockup(size: 12, latin: false).padding(.bottom, 10) }
             if !isPrivate, model.showGreeting || welcoming {
                 Text(welcoming ? "You’re all set" : Date().formatted(.dateTime.weekday(.wide).day().month(.wide)))
                     .font(.system(size: 12, weight: .semibold)).tracking(0.9).textCase(.uppercase)
@@ -645,92 +644,333 @@ private struct CardGrid<Content: View>: View {
 
 // MARK: - Favorites
 
+/// The width the favorites row has, so the arrow keys know how many tiles are on a line.
+private struct FavoritesWidthKey: PreferenceKey {
+    static let defaultValue: CGFloat = 640
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
+/// A tile's surface in the chosen style: plain (Classic), translucent (Glass) or the smaller translucent one (Compact).
+private struct FavoriteSurface: ViewModifier {
+    let style: FavoriteStyle
+    let radius: CGFloat
+    @Environment(\.colorScheme) private var scheme
+
+    func body(content: Content) -> some View {
+        switch style {
+        case .classic:
+            content.background(RoundedRectangle(cornerRadius: radius, style: .continuous).fill(Color.primary.opacity(scheme == .dark ? 0.09 : 0.055)))
+        case .glass, .compact:
+            content.startCard(radius: radius)
+        }
+    }
+}
+
+/// A folder's tile: up to four of its sites' icons in a square, or an empty folder.
+private struct FolderGlyph: View {
+    let items: [BookmarkItem]
+    let size: CGFloat
+
+    var body: some View {
+        let cell = size * 0.42, gap = size * 0.06
+        // One or two sites are one centred row; three or four fill the square.
+        let rows = items.count > 2 ? 2 : 1
+        if items.isEmpty {
+            Image(systemName: "folder").font(.system(size: size * 0.5, weight: .regular)).foregroundStyle(.secondary)
+        } else {
+            VStack(spacing: gap) {
+                ForEach(0..<rows, id: \.self) { row in
+                    HStack(spacing: gap) {
+                        ForEach(0..<2, id: \.self) { column in
+                            let index = row * 2 + column
+                            if index < items.count { SiteTile(url: items[index].url, title: items[index].title, size: cell) }
+                            else { Color.clear.frame(width: cell, height: cell) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 private struct FavoritesGrid: View {
     @EnvironmentObject var model: BrowserModel
     @Binding var addingFavorite: Bool
 
-    private var tileSize: CGFloat { model.startTile.points }
+    private var style: FavoriteStyle { model.favoriteStyle }
+    private var tileSize: CGFloat { model.startTile.points * style.scale }
+    private var spacing: CGFloat { style == .compact ? 8 : 12 }
     private let capacity = 12
     @State private var showAll = false
     @State private var editing: BookmarkItem?
     @State private var editURL = ""
     @State private var editName = ""
-    private let columns = [GridItem(.adaptive(minimum: 84, maximum: 110), spacing: 12, alignment: .top)]
+    @State private var creatingFolder = false
+    @State private var moveAfterCreate: String?
+    @State private var folderName = ""
+    @State private var renamingFolder: String?
+    @State private var deletingFolder: String?
+    @State private var openFolder: String?
+    @State private var dropTarget: String?
+    @State private var rowWidth: CGFloat = 640
+    @FocusState private var focused: String?
+    private var columns: [GridItem] { [GridItem(.adaptive(minimum: style == .compact ? 72 : 84, maximum: style == .compact ? 92 : 110), spacing: spacing, alignment: .top)] }
     private var accentColor: Color { Theme.accent }
 
     var body: some View {
-        let all = model.orderedFavorites
+        let snap = model.favoriteSnapshot(flattened: !model.favoriteFoldersShown)
+        let entries = snap.entries
         let limit = 8
-        let items = showAll ? Array(all.prefix(capacity)) : Array(all.prefix(limit))
+        let visible = showAll ? Array(entries.prefix(capacity)) : Array(entries.prefix(limit))
         VStack(spacing: 12) {
-            if !all.isEmpty { SectionHeader(title: "Favorites", count: all.count) }
-            if all.isEmpty {
-                emptyCard.frame(maxWidth: .infinity).transition(.opacity)
+            if !entries.isEmpty { SectionHeader(title: "Favorites", count: snap.favorites.count) }
+            if entries.isEmpty {
+                emptyCard(snap).frame(maxWidth: .infinity).transition(.opacity)
             } else {
-                LazyVGrid(columns: columns, spacing: 12) {
-                    ForEach(items, id: \.url) { favorite in tile(favorite) }
-                    if all.count < capacity || showAll { addTile }
+                LazyVGrid(columns: columns, spacing: spacing) {
+                    ForEach(visible) { entry in entryView(entry, snap) }
+                    if entries.count < capacity || showAll { addTile(snap) }
                 }
-                if all.count > limit { ShowMoreButton(expanded: $showAll, hidden: min(all.count, capacity) - limit) }
+                .background(GeometryReader { geometry in Color.clear.preference(key: FavoritesWidthKey.self, value: geometry.size.width) })
+                .onPreferenceChange(FavoritesWidthKey.self) { rowWidth = $0 }
+                // Arrow keys move between the tiles (Return opens the one in focus: it is a button).
+                .onKeyPress(.leftArrow) { step(-1, in: visible.map(\.id)) }
+                .onKeyPress(.rightArrow) { step(1, in: visible.map(\.id)) }
+                .onKeyPress(.upArrow) { step(-perLine, in: visible.map(\.id)) }
+                .onKeyPress(.downArrow) { step(perLine, in: visible.map(\.id)) }
+                .onKeyPress(.escape) { if openFolder != nil { openFolder = nil; return .handled } else { return .ignored } }
+                if entries.count > limit { ShowMoreButton(expanded: $showAll, hidden: min(entries.count, capacity) - limit) }
             }
         }
-        .motion(.easeOut(duration: 0.2), value: all.map(\.url))
+        .motion(.easeOut(duration: 0.2), value: entries.map(\.id))
         .alert("Edit Favorite", isPresented: Binding(get: { editing != nil }, set: { if !$0 { editing = nil } })) {
             TextField("Website address", text: $editURL)
             TextField("Name", text: $editName)
             Button("Save") { if let old = editing?.url { model.editFavorite(old, address: editURL, name: editName) }; editing = nil }
             Button("Cancel", role: .cancel) { editing = nil }
         }
+        .alert("New Folder", isPresented: $creatingFolder) {
+            TextField("Folder name", text: $folderName)
+            Button("Create") {
+                if let name = model.createFavoriteFolder(folderName) {
+                    if let url = moveAfterCreate { model.moveFavorite(url, toFolder: name) }
+                    announce("Folder \(name) created")
+                }
+                moveAfterCreate = nil
+            }
+            Button("Cancel", role: .cancel) { moveAfterCreate = nil }
+        }
+        .alert("Rename Folder", isPresented: Binding(get: { renamingFolder != nil }, set: { if !$0 { renamingFolder = nil } })) {
+            TextField("Folder name", text: $folderName)
+            Button("Rename") { if let old = renamingFolder { model.renameFavoriteFolder(old, to: folderName); openFolder = nil }; renamingFolder = nil }
+            Button("Cancel", role: .cancel) { renamingFolder = nil }
+        }
+        .confirmationDialog("Delete the folder “\(deletingFolder ?? "")”?", isPresented: Binding(get: { deletingFolder != nil }, set: { if !$0 { deletingFolder = nil } }), titleVisibility: .visible) {
+            Button("Delete Folder", role: .destructive) { if let name = deletingFolder { model.deleteFavoriteFolder(name); openFolder = nil; announce("Folder \(name) deleted") }; deletingFolder = nil }
+            Button("Cancel", role: .cancel) { deletingFolder = nil }
+        } message: {
+            Text("Its favorites move back to the Favorites row. No bookmark is deleted.")
+        }
     }
 
-    private func tile(_ favorite: BookmarkItem) -> some View {
-        Button { model.open(urlString: favorite.url) } label: {
-            VStack(spacing: 8) {
+    // MARK: Keyboard
+
+    /// How many tiles fit on a line, for the up and down arrows.
+    private var perLine: Int { max(1, Int((rowWidth + spacing) / (max(style == .compact ? 72 : 84, tileSize + 22) + spacing))) }
+
+    private func step(_ delta: Int, in ids: [String]) -> KeyPress.Result {
+        guard !ids.isEmpty else { return .ignored }
+        guard let current = focused, let index = ids.firstIndex(of: current) else { focused = ids.first; return .handled }
+        focused = ids[max(0, min(ids.count - 1, index + delta))]
+        return .handled
+    }
+
+    private func announce(_ text: String) { AccessibilityNotification.Announcement(text).post() }
+
+    // MARK: Tiles
+
+    @ViewBuilder private func entryView(_ entry: FavoriteEntry, _ snap: FavoriteSnapshot) -> some View {
+        switch entry {
+        case .item(let favorite): tile(favorite, snap)
+        case .folder(let folder): folderTile(folder, snap)
+        }
+    }
+
+    private func label(_ text: String) -> some View {
+        Text(text).scaledFont(12).lineLimit(1).truncationMode(.tail).foregroundStyle(.primary.opacity(0.85)).frame(maxWidth: 92)
+    }
+
+    /// The outline that shows where a drop will land.
+    private func dropOutline(_ id: String, radius: CGFloat) -> some View {
+        RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(accentColor, lineWidth: 2).opacity(dropTarget == id ? 1 : 0).allowsHitTesting(false)
+    }
+
+    private func targeted(_ id: String) -> (Bool) -> Void {
+        { inside in if inside { dropTarget = id } else if dropTarget == id { dropTarget = nil } }
+    }
+
+    private func tile(_ favorite: BookmarkItem, _ snap: FavoriteSnapshot) -> some View {
+        let title = favorite.title.isEmpty ? displayHost(URL(string: favorite.url)) : favorite.title
+        let radius = (tileSize + 22) * 0.28
+        return Button { openFolder = nil; model.open(urlString: favorite.url) } label: {
+            VStack(spacing: model.favoriteLabels ? 8 : 0) {
                 SiteTile(url: favorite.url, title: favorite.title, size: tileSize)
                     .frame(width: tileSize + 22, height: tileSize + 22)
-                    .startCard(radius: (tileSize + 22) * 0.28)
-                Text(favorite.title.isEmpty ? displayHost(URL(string: favorite.url)) : favorite.title)
-                    .scaledFont(12).lineLimit(1).truncationMode(.tail).foregroundStyle(.primary.opacity(0.85)).frame(maxWidth: 92)
+                    .modifier(FavoriteSurface(style: style, radius: radius))
+                    .overlay(dropOutline(favorite.url, radius: radius))
+                if model.favoriteLabels { label(title) }
             }
             .frame(maxWidth: .infinity)
             .keyboardFocusRing(radius: 14)
         }
         .buttonStyle(.plain).focusEffectDisabled()
+        .focused($focused, equals: favorite.url)
         .hoverLift()
         .draggable(favorite.url) { SiteTile(url: favorite.url, title: favorite.title, size: tileSize) }
-        .dropDestination(for: String.self) { dropped, _ in
-            guard let url = dropped.first else { return false }
-            model.moveFavorite(url, before: favorite.url)
-            return true
-        }
-        .contextMenu {
-            Button("Open in New Tab") { model.open(urlString: favorite.url, newTab: true) }
-            Button("Edit…") { editURL = favorite.url; editName = favorite.title; editing = favorite }
-            Button("Remove from Favorites", role: .destructive) { model.removeFavorite(favorite.url) }
-        }
-        .accessibilityLabel(favorite.title.isEmpty ? displayHost(URL(string: favorite.url)) : favorite.title)
-        .accessibilityAction(named: "Move earlier") { model.nudgeFavorite(favorite.url, by: -1) }
-        .accessibilityAction(named: "Move later") { model.nudgeFavorite(favorite.url, by: 1) }
+        .dropDestination(for: String.self) { dropped, _ in dropOnItem(dropped.first, target: favorite.url) } isTargeted: { targeted(favorite.url)($0) }
+        .contextMenu { itemMenu(favorite, title: title, snap) }
+        .accessibilityLabel(title)
+        .accessibilityAction(named: "Move earlier") { nudge(favorite.url, by: -1, title: title) }
+        .accessibilityAction(named: "Move later") { nudge(favorite.url, by: 1, title: title) }
     }
 
+    private func folderTile(_ folder: FavoriteFolder, _ snap: FavoriteSnapshot) -> some View {
+        let radius = (tileSize + 22) * 0.28
+        let spoken = "\(folder.name), folder, \(folder.items.count) favorite\(folder.items.count == 1 ? "" : "s")"
+        return Button { openFolder = folder.name; focused = folder.id } label: {
+            VStack(spacing: model.favoriteLabels ? 8 : 0) {
+                FolderGlyph(items: folder.items, size: tileSize)
+                    .frame(width: tileSize + 22, height: tileSize + 22)
+                    .modifier(FavoriteSurface(style: style, radius: radius))
+                    .overlay(dropOutline(folder.id, radius: radius))
+                if model.favoriteLabels { label(folder.name) }
+            }
+            .frame(maxWidth: .infinity)
+            .keyboardFocusRing(radius: 14)
+        }
+        .buttonStyle(.plain).focusEffectDisabled()
+        .focused($focused, equals: folder.id)
+        .hoverLift()
+        .draggable(folder.id) { Image(systemName: "folder.fill").font(.system(size: tileSize * 0.6)).foregroundStyle(.secondary) }
+        .dropDestination(for: String.self) { dropped, _ in dropOnFolder(dropped.first, folder: folder) } isTargeted: { targeted(folder.id)($0) }
+        .popover(isPresented: Binding(get: { openFolder == folder.name }, set: { if !$0, openFolder == folder.name { openFolder = nil } }), arrowEdge: .bottom) { folderContents(folder, snap) }
+        .contextMenu {
+            Button("Open Folder") { openFolder = folder.name }
+            Button("Rename…") { folderName = folder.name; renamingFolder = folder.name }
+            Button("Move Earlier") { nudge(folder.id, by: -1, title: folder.name) }
+            Button("Move Later") { nudge(folder.id, by: 1, title: folder.name) }
+            Divider()
+            Button("Delete Folder…", role: .destructive) { deletingFolder = folder.name }
+        }
+        .accessibilityLabel(spoken)
+        .accessibilityAction(named: "Move earlier") { nudge(folder.id, by: -1, title: folder.name) }
+        .accessibilityAction(named: "Move later") { nudge(folder.id, by: 1, title: folder.name) }
+    }
+
+    private func folderContents(_ folder: FavoriteFolder, _ snap: FavoriteSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "folder").foregroundStyle(.secondary)
+                Text(folder.name).scaledFont(14, weight: .semibold)
+                Spacer(minLength: 0)
+                Text("\(folder.items.count)").scaledFont(12).foregroundStyle(.tertiary)
+                // Closes the folder: a button for the pointer, and Escape for the keyboard.
+                Button { openFolder = nil } label: {
+                    Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary).frame(width: 22, height: 22).contentShape(Circle())
+                }
+                .buttonStyle(.plain).keyboardShortcut(.cancelAction).help("Close the folder").accessibilityLabel("Close folder")
+            }
+            if folder.items.isEmpty {
+                Text("Empty. Drag a favorite onto this folder, or choose Move to Folder in a favorite's menu.").scaledFont(12).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            } else {
+                LazyVGrid(columns: columns, spacing: spacing) { ForEach(folder.items, id: \.url) { tile($0, snap) } }
+            }
+        }
+        .padding(16).frame(width: 380)
+        .focusable().focusEffectDisabled()
+        .onKeyPress(.escape) { openFolder = nil; return .handled }
+    }
+
+    // MARK: Menus
+
+    @ViewBuilder private func itemMenu(_ favorite: BookmarkItem, title: String, _ snap: FavoriteSnapshot) -> some View {
+        Button("Open in New Tab") { model.open(urlString: favorite.url, newTab: true) }
+        Button("Open in Background Tab") { model.openFavoriteInBackground(favorite.url) }
+        #if os(macOS)
+        Button("Open in New Window") { model.openFavoriteInNewWindow(favorite.url) }
+        #endif
+        Button("Open in Private Tab") { model.openFavoritePrivately(favorite.url) }
+        Button("Copy Address") { copyToPasteboard(favorite.url); model.notice = "Address copied." }
+        Divider()
+        Button("Edit…") { editURL = favorite.url; editName = favorite.title; editing = favorite }
+        Menu("Move to Folder") {
+            let current = snap.folderOf[favorite.url]
+            if current != nil { Button("Favorites row") { model.moveFavorite(favorite.url, toFolder: nil); announce("\(title) moved to the Favorites row") } }
+            ForEach(snap.folderNames.filter { $0 != current }, id: \.self) { name in
+                Button(name) { model.moveFavorite(favorite.url, toFolder: name); announce("\(title) moved to \(name)") }
+            }
+            Divider()
+            Button("New Folder…") { moveAfterCreate = favorite.url; folderName = ""; creatingFolder = true }
+        }
+        Button("Move Earlier") { nudge(favorite.url, by: -1, title: title) }
+        Button("Move Later") { nudge(favorite.url, by: 1, title: title) }
+        Divider()
+        Button("Remove from Favorites", role: .destructive) { model.removeFavorite(favorite.url); announce("\(title) removed from Favorites") }
+    }
+
+    private func nudge(_ id: String, by step: Int, title: String) {
+        model.nudgeFavorite(id, by: step)
+        announce("\(title) moved \(step < 0 ? "earlier" : "later")")
+    }
+
+    // MARK: Drops
+
+    /// A favorite or a folder dropped on a favorite: it goes before it (and joins its folder when that favorite is in one). A folder is never put inside a folder.
+    private func dropOnItem(_ dropped: String?, target: String) -> Bool {
+        guard let dropped, dropped != target else { return false }
+        if FavoriteToken.folderName(dropped) != nil {
+            guard model.favoriteFolder(of: target) == nil else { return false }
+            model.moveFavoriteEntry(dropped, before: target)
+        } else {
+            guard model.favorites.contains(where: { $0.url == dropped }) else { return false }
+            model.moveFavorite(dropped, before: target)
+        }
+        announce("Moved")
+        return true
+    }
+
+    /// A favorite dropped on a folder goes into it; a folder dropped on a folder goes before it (never inside, and never onto itself).
+    private func dropOnFolder(_ dropped: String?, folder: FavoriteFolder) -> Bool {
+        guard let dropped, dropped != folder.id else { return false }
+        if FavoriteToken.folderName(dropped) != nil {
+            model.moveFavoriteEntry(dropped, before: folder.id)
+        } else {
+            guard model.favorites.contains(where: { $0.url == dropped }) else { return false }
+            model.moveFavorite(dropped, toFolder: folder.name)
+            announce("Moved to \(folder.name)")
+        }
+        return true
+    }
+
+    // MARK: Adding
+
     /// Never filled in for you: suggestions are only offered here, and nothing is added until you choose it.
-    private var addTile: some View {
-        addMenu {
-            VStack(spacing: 8) {
+    private func addTile(_ snap: FavoriteSnapshot) -> some View {
+        addMenu(snap) {
+            VStack(spacing: model.favoriteLabels ? 8 : 0) {
                 Image(systemName: "plus").font(.system(size: 18, weight: .regular)).foregroundStyle(.secondary)
                     .frame(width: tileSize + 22, height: tileSize + 22)
-                    .background(RoundedRectangle(cornerRadius: (tileSize + 22) * 0.28, style: .continuous).strokeBorder(Color.secondary.opacity(0.45), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
-                Text("Add").font(.system(size: 12)).foregroundStyle(.secondary)
+                    .background(RoundedRectangle(cornerRadius: (tileSize + 22) * 0.28, style: .continuous).strokeBorder(Color.secondary.opacity(0.45), style: StrokeStyle(lineWidth: 1, dash: [4, 4])))
+                if model.favoriteLabels { Text("Add").font(.system(size: 12)).foregroundStyle(.secondary) }
             }
             .frame(maxWidth: .infinity)
             .keyboardFocusRing(radius: 14)
         }
     }
 
-    /// With no favorites yet, one clear dashed box says what this row is for and how to fill it.
-    private var emptyCard: some View {
-        addMenu {
-            // One small line, not a box: nothing is added unless you choose it.
+    /// With no favorites yet, one clear action says what this row is for and how to fill it.
+    private func emptyCard(_ snap: FavoriteSnapshot) -> some View {
+        addMenu(snap) {
             VStack(spacing: 14) {
                 SetuGhostTiles()
                 HStack(spacing: 8) {
@@ -741,22 +981,29 @@ private struct FavoritesGrid: View {
                 .startCard(radius: 19)
                 .contentShape(Capsule())
                 .keyboardFocusRing(radius: 19)
+                Text("Sites you add stay here, in the order you choose.").scaledFont(12).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .center)
         }
         .accessibilityLabel("Add a favorite site")
     }
 
-    private func addMenu<Label: View>(@ViewBuilder label: () -> Label) -> some View {
+    private func addMenu<Label: View>(_ snap: FavoriteSnapshot, @ViewBuilder label: () -> Label) -> some View {
         Menu {
-            if let tab = model.continueTab ?? model.active, let url = tab.url?.absoluteString, !tab.isBlank, !model.isFavorite(url) {
+            if let tab = model.continueTab ?? model.active, let url = tab.url?.absoluteString, !tab.isBlank, !snap.isFavorite(url) {
                 Button("Add “\(tab.displayTitle)”") { model.toggleFavorite(url: url, title: tab.displayTitle) }
             }
             Button("Add a Website…") { addingFavorite = true }
-            let suggestions = FavoriteSuggestions.all.filter { !model.isFavorite($0.url) }
+            let picks = snap.picks
+            if !picks.isEmpty {
+                Menu("Choose from Bookmarks") { ForEach(picks, id: \.url) { pick in Button(pick.title.isEmpty ? displayHost(URL(string: pick.url)) : pick.title) { model.makeFavorite(pick) } } }
+            }
+            let suggestions = FavoriteSuggestions.all.filter { !snap.isFavorite($0.url) }
             if !suggestions.isEmpty {
                 Menu("Suggestions") { ForEach(suggestions, id: \.url) { s in Button(s.title) { model.toggleFavorite(url: s.url, title: s.title) } } }
             }
+            Divider()
+            Button("New Folder…") { moveAfterCreate = nil; folderName = ""; creatingFolder = true }
         } label: {
             label()
         }
@@ -839,9 +1086,9 @@ private struct HistoryChips: View {
     /// One card per page (no repeats), local development addresses folded into a single "Local" card, readable titles.
     private func load() {
         guard model.showFrequent else { often = []; return }
-        let favorites = Set(model.favorites.map(\.url))
+        let favorites = Set(model.favorites.map { FavoriteURL.key($0.url) })
         var seen = Set<String>(), titles = Set<String>(), result: [OftenSite] = [], localCount = 0, firstLocal: OftenSite?
-        for site in model.frequentSites(limit: 24) where !favorites.contains(site.url) {
+        for site in model.frequentSites(limit: 24) where !favorites.contains(FavoriteURL.key(site.url)) && !model.isDismissedOften(site.url) {
             let url = URL(string: site.url)
             let key = SiteName.key(url?.host)
             guard seen.insert(key).inserted else { continue }
@@ -859,11 +1106,7 @@ private struct HistoryChips: View {
     }
 
     var body: some View {
-        #if os(iOS)
-        let limit = 8
-        #else
-        let limit = 12
-        #endif
+        let limit = model.oftenCount
         let shown = !model.showFrequent ? [] : (showAllOften ? often : Array(often.prefix(limit)))
         let continueURL = model.continueTab?.url?.absoluteString
         let allClosed = model.showRecentlyClosed
@@ -878,7 +1121,15 @@ private struct HistoryChips: View {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 84, maximum: 110), spacing: 12, alignment: .top)], spacing: 12) {
                         ForEach(shown) { site in
                             ShortcutTile(title: site.isLocal ? site.title : SiteName.display(URL(string: site.url)?.host), url: site.url, symbol: site.isLocal ? "laptopcomputer" : nil) { model.open(urlString: site.url) }
-                                .contextMenu { Button("Open in New Tab") { model.open(urlString: site.url, newTab: true) } }
+                                .contextMenu {
+                                    Button("Open in New Tab") { model.open(urlString: site.url, newTab: true) }
+                                    if !site.isLocal {
+                                        Button("Add to Favorites") { model.toggleFavorite(url: site.url, title: site.title) }
+                                        Button("Copy Address") { copyToPasteboard(site.url); model.notice = "Address copied." }
+                                        Divider()
+                                        Button("Don’t Show Again") { model.dismissOften(site.url); load() }
+                                    }
+                                }
                         }
                     }
                     if often.count > limit { ShowMoreButton(expanded: $showAllOften, hidden: often.count - limit) }
@@ -913,6 +1164,7 @@ private struct HistoryChips: View {
         // The list is read when the switch changes, not only when the section first appears; and it follows the favorites, which it leaves out.
         .onChange(of: model.showFrequent) { _, _ in load() }
         .onChange(of: model.favorites.map(\.url)) { _, _ in load() }
+        .onChange(of: model.dismissedOftenCount) { _, _ in load() }
         .motion(.easeOut(duration: 0.2), value: model.showFrequent)
     }
 }

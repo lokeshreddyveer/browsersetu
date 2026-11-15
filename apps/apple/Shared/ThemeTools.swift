@@ -458,6 +458,7 @@ struct StartDrawer: View {
                         labeled("Page width") { Picker("", selection: $model.startWidth) { ForEach(StartWidth.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented).labelsHidden() }
                         labeled("Icon size (favorites density)") { Picker("", selection: $model.startTile) { ForEach(StartTile.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented).labelsHidden() }
                     }
+                    card("Favorites") { FavoritesAppearanceControls() }
                     card("Show on the page") {
                         Toggle("Greeting", isOn: $model.showGreeting)
                         Toggle("Favorites", isOn: $model.showFavorites)

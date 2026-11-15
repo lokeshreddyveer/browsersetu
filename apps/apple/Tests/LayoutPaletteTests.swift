@@ -47,6 +47,7 @@ final class LayoutPaletteTests: XCTestCase {
         a.layoutPreset = .sidebar
         a.sidebarPosition = .right
         a.sidebarWidth = 333
+        a.commitSidebarWidth()      // the width is written when a drag ends (or settles), not on every change
         a.sidebarRail = true
         a.density = .compact
         XCTAssertTrue(a.sidebarVisible, "sidebar preset shows the sidebar")

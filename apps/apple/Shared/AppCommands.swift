@@ -168,6 +168,8 @@ enum AppCommands {
         AppCommand(id: "cmd-view-show-tab-overview", section: "View", title: "Show Tab Overview", symbol: "square.on.square", shortcut: .tabOverview, isEnabled: { _ in true }) { m in m.overviewVisible ? m.hideOverview() : m.showOverview() },
         AppCommand(id: "cmd-view-new-tab-group", section: "View", title: "New Tab Group…", symbol: "sidebar.left", shortcut: nil, isEnabled: { _ in true }) { m in promptNewGroup(model: m) },
         AppCommand(id: "cmd-view-restore-standard-layout", section: "View", title: "Restore Standard Layout", symbol: "sidebar.left", shortcut: .restoreLayout, isEnabled: { _ in true }) { m in m.restoreStandardLayout() },
+        AppCommand(id: "cmd-view-show-tabs-at-the-edge", section: "View", title: "Show Tabs at the Edge", symbol: "sidebar.left", shortcut: nil, isEnabled: { m in m.hasEdgeTabs }) { m in m.toggleEdgeTabs() },
+        AppCommand(id: "cmd-split-view-focus-next-panel", section: "Split View", title: "Focus Next Panel", symbol: "rectangle.split.2x1", shortcut: nil, isEnabled: { m in m.splitTabID != nil }) { m in m.focusNextPanel() },
         AppCommand(id: "cmd-view-zoom-in", section: "View", title: "Zoom In", symbol: "plus.magnifyingglass", shortcut: .zoomIn, isEnabled: { _ in true }) { m in m.active?.zoom(by: 0.1) },
         AppCommand(id: "cmd-view-zoom-out", section: "View", title: "Zoom Out", symbol: "minus.magnifyingglass", shortcut: .zoomOut, isEnabled: { _ in true }) { m in m.active?.zoom(by: -0.1) },
         AppCommand(id: "cmd-view-actual-size", section: "View", title: "Actual Size", symbol: "1.magnifyingglass", shortcut: .actualSize, isEnabled: { _ in true }) { m in m.active?.resetZoom() },

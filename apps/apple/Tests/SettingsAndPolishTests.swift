@@ -410,6 +410,7 @@ final class SearchChoiceTests: XCTestCase {
         a.sidebarWidth = clampedSidebarWidth(9_000)
         XCTAssertEqual(a.sidebarWidth, 340)
         a.sidebarWidth = clampedSidebarWidth(300)
+        a.commitSidebarWidth()      // what the end of a drag does: the width is written once it has settled, not on every frame
         let b = model(root)
         await b.start()
         XCTAssertEqual(b.sidebarWidth, 300, "a width dragged out stays")

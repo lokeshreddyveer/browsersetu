@@ -576,6 +576,11 @@ final class BrowserModel: ObservableObject {
     @Published var showContinue = true { didSet { saveSetting("show_continue", showContinue ? "1" : "0") } }
     @Published var showFavorites = true { didSet { saveSetting("show_favorites", showFavorites ? "1" : "0") } }
     @Published var showFrequent = true { didSet { saveSetting("show_frequent", showFrequent ? "1" : "0") } }
+    /// How the favorites tiles look, whether they carry their names, whether folders show as folders (off: their favorites sit in the row), and how many frequently visited sites show.
+    @Published var favoriteStyle: FavoriteStyle = .classic { didSet { saveSetting("fav_style", favoriteStyle.rawValue) } }
+    @Published var favoriteLabels = true { didSet { saveSetting("fav_labels", favoriteLabels ? "1" : "0") } }
+    @Published var favoriteFoldersShown = true { didSet { saveSetting("fav_folders_shown", favoriteFoldersShown ? "1" : "0") } }
+    @Published var oftenCount = BrowserModel.defaultOftenCount { didSet { saveSetting("often_count", String(oftenCount)) } }
     @Published var toolbarItems: [ToolbarItemID] = ToolbarItemID.defaults {
         didSet { saveSetting("toolbar_items", toolbarItems.map(\.rawValue).joined(separator: ",")) }
     }
@@ -2364,6 +2369,17 @@ final class BrowserModel: ObservableObject {
             for name in ["Inbox", "Calendar", "Project-plan", "News"] { openTab(url: URL(string: base + "/p/" + name), isPrivate: false, select: false) }
             if let first = tabs.first { togglePin(first) }
             favoritesDemo()
+        case "favorites":
+            // Debug only: the start page with favorites. `-UIFavorites n` makes n favorites, `-UIFavoriteFolder 1` puts the first two in a folder called Work, and
+            // `-UIFavoriteStyle classic|glass|compact` sets the look. The tab stays blank, so the start page is what shows.
+            let d = UserDefaults.standard
+            let seeded = d.integer(forKey: "UIFavorites")
+            for index in 0..<max(0, seeded) { addFavorite(address: "https://site\(index).example/", name: "Site \(index)") }
+            if seeded >= 2, d.integer(forKey: "UIFavoriteFolder") == 1, let folder = createFavoriteFolder("Work") {
+                moveFavorite("https://site0.example/", toFolder: folder)
+                moveFavorite("https://site1.example/", toFolder: folder)
+            }
+            if let style = FavoriteStyle(rawValue: d.string(forKey: "UIFavoriteStyle") ?? "") { favoriteStyle = style }
         case "floating": layoutPreset = .floating
         case "sidebar-url":
             layoutPreset = LayoutPreset(rawValue: UserDefaults.standard.string(forKey: "UILayout") ?? "") ?? .sidebar
@@ -2427,9 +2443,19 @@ final class BrowserModel: ObservableObject {
             layoutPreset = LayoutPreset(rawValue: UserDefaults.standard.string(forKey: "UILayout") ?? "") ?? .minimal
             active?.load(URL(string: base + "/p/Stress0")!)
             for i in 1..<100 { openTab(url: URL(string: base + "/p/Stress\(i)"), isPrivate: false, select: false) }
+            // `-UIStressAllLayouts 1`: every layout (not only Minimal and Classic), and private tabs, workspaces and split view as well.
+            let everything = UserDefaults.standard.integer(forKey: "UIStressAllLayouts") == 1
+            if everything { createWorkspace("StressA", icon: "bolt"); createWorkspace("StressB", icon: "flame") }
             try? await Task.sleep(for: .seconds(8))
             for step in 1...400 {
                 if let tab = tabs.randomElement() { select(tab.id) }
+                if everything {
+                    if step % 11 == 0 { layoutPreset = LayoutPreset.allCases.filter(\.isOffered).randomElement()! }
+                    if step % 31 == 0 { _ = openTab(url: URL(string: base + "/p/StressPrivate\(step)"), isPrivate: true) }
+                    if step % 37 == 0 { switchWorkspace(["", "StressA", "StressB"].randomElement()!) }
+                    if step % 59 == 0 { if splitTabID == nil { openSplitNewTab() } else { closeSplit() } }
+                    if step % 83 == 0, let secret = tabs.last(where: { $0.isPrivate }) { closeTab(id: secret.id, force: true) }
+                }
                 #if os(macOS)
                 if step % 7 == 0, let window = NSApp.windows.first(where: { $0.isVisible && $0.frame.width > 300 }) {
                     window.setFrameForTest(NSRect(x: window.frame.minX, y: window.frame.minY, width: [520, 700, 900, 1200].randomElement()!, height: 800), display: true, animate: false)
@@ -2701,6 +2727,8 @@ final class BrowserModel: ObservableObject {
 
     private func selectTab(id: UInt64) {
         ChromeTrace.log("SELECT tab \(id) (was \(activeID.map(String.init) ?? "none"))")
+        let selectBegan = ProcessInfo.processInfo.systemUptime
+        defer { ChromeTrace.log("SELECT done tab \(id) in \(Int((ProcessInfo.processInfo.systemUptime - selectBegan) * 1000)) ms") }
         FrameMonitor.mark("Switching tab")
         // Choosing any other tab ends a Glance preview (one that is promoted selects its own tab after it has stopped being a preview).
         if let preview = glance.session, preview.tabID != id { glance.dismiss(animated: false) }
@@ -3649,8 +3677,9 @@ final class BrowserModel: ObservableObject {
 
     static let favoritesFolder = "Favorites"
 
+    /// Every favorite: on the top level of the start page's row ("Favorites") or inside one of its folders ("Favorites/<name>"). See Favorites.swift.
     var favorites: [BookmarkItem] {
-        ((try? core.listBookmarks(query: "")) ?? []).filter { $0.folder == Self.favoritesFolder }
+        ((try? core.listBookmarks(query: "")) ?? []).filter { Self.isFavoritesFolder($0.folder) }
     }
 
     func frequentSites(limit: Int = 8) -> [HistoryItem] {
@@ -3659,7 +3688,8 @@ final class BrowserModel: ObservableObject {
     }
 
     func isFavorite(_ url: String) -> Bool {
-        favorites.contains { $0.url == url }
+        let key = FavoriteURL.key(url)
+        return favorites.contains { $0.url == url || FavoriteURL.key($0.url) == key }
     }
 
     /// Favorites in the order the person arranged them (the rest, in name order, after).
@@ -3673,25 +3703,9 @@ final class BrowserModel: ObservableObject {
         }.map(\.element)
     }
 
-    private func saveFavoritesOrder(_ urls: [String]) {
-        saveSetting("favorites_order", (try? String(data: JSONEncoder().encode(urls), encoding: .utf8)) ?? "[]")
+    func saveFavoritesOrder(_ tokens: [String]) {
+        saveSetting("favorites_order", (try? String(data: JSONEncoder().encode(tokens), encoding: .utf8)) ?? "[]")
         objectWillChange.send()
-    }
-
-    func moveFavorite(_ url: String, before target: String) {
-        var urls = orderedFavorites.map(\.url)
-        guard url != target, let from = urls.firstIndex(of: url) else { return }
-        urls.remove(at: from)
-        urls.insert(url, at: urls.firstIndex(of: target) ?? urls.count)
-        saveFavoritesOrder(urls)
-    }
-
-    func nudgeFavorite(_ url: String, by step: Int) {
-        var urls = orderedFavorites.map(\.url)
-        guard let from = urls.firstIndex(of: url) else { return }
-        let to = max(0, min(urls.count - 1, from + step))
-        urls.insert(urls.remove(at: from), at: to)
-        saveFavoritesOrder(urls)
     }
 
     func removeFavorite(_ url: String) {
@@ -3702,7 +3716,7 @@ final class BrowserModel: ObservableObject {
     }
 
     /// A website typed in by hand: "example.com" becomes https://example.com.
-    func addFavorite(address: String, name: String) {
+    func addFavorite(address: String, name: String, folder: String? = nil) {
         var text = address.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !text.contains(" ") else { return }
         if !text.contains("://") { text = "https://" + text }
@@ -3710,7 +3724,10 @@ final class BrowserModel: ObservableObject {
             notice = "That does not look like a website address."
             return
         }
-        try? core.addBookmark(url: url.absoluteString, title: name.isEmpty ? (url.host ?? text) : name, folder: Self.favoritesFolder)
+        // The same page written another way (www., a trailing slash, a fragment) is the bookmark it already is: updated, never a second one.
+        let address = bookmarkedAddress(equivalentTo: url.absoluteString) ?? url.absoluteString
+        let destination = folder.map { Self.favoritesFolderPrefix + $0 } ?? Self.favoritesFolder
+        try? core.addBookmark(url: address, title: name.isEmpty ? (url.host ?? text) : name, folder: destination)
         refreshBookmarkState()
         objectWillChange.send()
     }
@@ -4034,6 +4051,10 @@ final class BrowserModel: ObservableObject {
         lookalikeGuard = get("lookalike_guard") != "0"
         focusRules = Self.decodeMap(get("focus_rules"), as: [FocusRule].self)["list"] ?? []
         showFrequent = get("show_frequent") != "0"
+        favoriteStyle = FavoriteStyle(rawValue: get("fav_style") ?? "") ?? .classic
+        favoriteLabels = get("fav_labels") != "0"
+        favoriteFoldersShown = get("fav_folders_shown") != "0"
+        oftenCount = [4, 6, 8, 12].contains(Int(get("often_count") ?? "") ?? 0) ? Int(get("often_count")!)! : BrowserModel.defaultOftenCount
         if let raw = get("toolbar_items") {
             var chosen = raw.split(separator: ",").compactMap { ToolbarItemID(rawValue: String($0)) }
             // The workspace and split-view buttons came later; a toolbar chosen before them gets them once, and can switch them off.
@@ -4313,7 +4334,7 @@ final class BrowserModel: ObservableObject {
         "show_frequent", "show_greeting", "show_recently_closed", "sidebar_autohide", "sidebar_position", "sidebar_rail",
         "organize_downloads_domain", "download_notify", "last_split", "track_time", "break_minutes", "clipboard_history", "feeds", "backdrop_intensity", "icon_weight", "site_icon_shape", "site_looks", "motion_style", "download_segments", "start_title", "start_font", "start_search_style", "start_width", "start_image_dim", "start_image_blur", "history_retention_days", "new_tab_mode", "new_tab_url", "start_color_a", "start_color_b", "reader_style", "media_history_on", "referrer_mode", "gpc", "block_link_pings", "lockdown_hosts", "tab_groups_v2", "essentials", "pinned_addresses", "glance_enabled", "glance_trigger", "glance_temporary", "learn_suggestions", "suggestion_excluded", "space_request_new_window", "clear_includes_sleeping", "clear_tabs_asks", "debounce_links", "block_local_network", "local_network_allowed", "block_google_services", "block_social_widgets", "private_search", "double_click_closes_tab", "hide_tab_close", "close_window_last_tab", "custom_keep", "custom_idle", "battery_aware", "security_events", "tab_schedules", "protect_pinned", "sidebar_width", "single_toolbar", "split_orientation", "start_background", "startup", "startup_workspace",
         "strip_tracking", "tab_groups", "tab_layout", "tab_previews", "tint_toolbar", "toolbar_autohide", "toolbar_items",
-        "workspaces", "double_click", "collapse_on_scroll", "search_template", "search_suggestions", "speed_pill", "pill_collapsed", "site_icons", "shortcuts", "homepage", "saved_sessions", "organize_downloads", "site_notes", "search_shortcuts", "bookmark_tags", "site_styles", "phone_toolbar", "address_display", "address_icon", "search_panel_bottom", "search_panel_bottom2", "swipe_address", "app_links", "app_link_sites", "blur_private_switcher", "permission_expiry", "favorites_order", "overview_style", "overview_grouped", "overview_sort", "dark_pages", "dark_sites", "website_appearance", "site_appearance", "theme", "theme_custom", "low_power_memory", "clear_on_quit", "remember_reading", "keep_form_drafts", "site_zoom", "group_colors",
+        "workspaces", "double_click", "collapse_on_scroll", "search_template", "search_suggestions", "speed_pill", "pill_collapsed", "site_icons", "shortcuts", "homepage", "saved_sessions", "organize_downloads", "site_notes", "search_shortcuts", "bookmark_tags", "site_styles", "phone_toolbar", "address_display", "address_icon", "search_panel_bottom", "search_panel_bottom2", "swipe_address", "app_links", "app_link_sites", "blur_private_switcher", "permission_expiry", "favorites_order", "favorites_folders", "fav_style", "fav_labels", "fav_folders_shown", "often_count", "often_dismissed", "overview_style", "overview_grouped", "overview_sort", "dark_pages", "dark_sites", "website_appearance", "site_appearance", "theme", "theme_custom", "low_power_memory", "clear_on_quit", "remember_reading", "keep_form_drafts", "site_zoom", "group_colors",
         "save_logins", "mouse_gestures", "mouse_gesture_map", "site_open_rules", "download_concurrent", "spotlight_bookmarks", "vim_on", "vim_keymap", "workflows", "download_rules", "extension_profiles", "site_delete_rules", "site_user_agents", "containers", "split_templates", "tab_tree", "block_webrtc", "webrtc_exceptions",
         "site_js_off", "never_sleep_sites", "dark_sites_off", "custom_sidebar", "phone_preset", "phone_custom_layout", "fingerprint_noise", "fingerprint_exceptions", "de_amp", "video_ads", "cookie_banners", "user_themes", "start_tile", "block_autoplay", "autoplay_exceptions",
         "block_popups", "popup_allowed_hosts", "youtube_rules_auto", "command_chains", "web_panels", "theme_schedule", "hidden_menu_items", "hover_previews", "hover_delay", "tab_stacks", "address_sources", "sidebar_footer",

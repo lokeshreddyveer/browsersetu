@@ -130,6 +130,11 @@ final class TabLifecycle {
         thermalObserver = nil
     }
 
+    /// Whether a tab is on screen: the selected tab or any split pane. A tab that is visible is never released.
+    private static func isVisible(_ id: UInt64, in model: BrowserModel) -> Bool {
+        id == model.activeID || id == model.splitTabID || id == model.thirdSplitTabID || id == model.fourthSplitTabID
+    }
+
     /// Releases the tabs the policy picks, skipping any that are playing media, capturing the camera or microphone,
     /// or still loading.
     @discardableResult
@@ -139,15 +144,15 @@ final class TabLifecycle {
         if event != .timer { MemoryTrim.run(model: model, aggressive: event == .critical) }
         let candidates = model.tabs.map { tab in
             TabCandidate(id: tab.id, lastActive: tab.lastActive, pinned: tab.pinned, isPrivate: tab.isPrivate,
-                         isActive: tab.id == model.activeID || tab.id == model.splitTabID || tab.id == model.thirdSplitTabID || tab.id == model.fourthSplitTabID,
+                         isActive: Self.isVisible(tab.id, in: model),
                          loaded: tab.hasLoadedPage, discarded: tab.isDiscarded, exempt: model.neverSleeps(host: tab.url?.host) || tab.playingAudio)
         }
         var released: [UInt64] = []
         for id in TabLifecyclePolicy.victims(candidates, mode: model.effectiveMemoryMode, event: event, now: now, keepPinned: model.keepPinnedTabs, custom: model.customMemory) {
-            guard let tab = model.tabs.first(where: { $0.id == id }), id != model.activeID else { continue }
+            guard let tab = model.tabs.first(where: { $0.id == id }), !Self.isVisible(id, in: model) else { continue }
             if await tab.engine.isBusy() { continue }
-            // The tab may have been selected while we were asking.
-            guard id != model.activeID else { continue }
+            // The tab may have been selected, or put in a split pane, while we were asking.
+            guard !Self.isVisible(id, in: model) else { continue }
             tab.discard()
             released.append(id)
         }

@@ -98,14 +98,29 @@ struct WindowDragStrip: NSViewRepresentable {
 /// The floating control pill at the top centre. One capsule, read left to right the way the toolbar would be:
 /// back and forward, the site, then reload, the protection shield and the tab count. In the Floating layout it is always there and
 /// the site name opens search; when the toolbar has been folded away while reading, the site name brings the toolbar back.
-/// How solid the dark pill and handles are: opaque with Increase Contrast or Reduce Transparency, with a clearer edge.
+/// The look of the pill, the folded handle, the search pill and the Canvas handle: the theme's own surface and light or dark appearance when a theme with colours is in use
+/// (dark Obsidian otherwise), your accent colour on its edge, and fully solid with Increase Contrast or Reduce Transparency.
 struct ObsidianLook {
     var contrast: ColorSchemeContrast
     var reduceTransparency: Bool
+    /// The appearance the pill is drawn in: the theme's, or dark.
+    var scheme: ColorScheme = .dark
     var solid: Bool { contrast == .increased || reduceTransparency }
-    func fill(_ opacity: Double) -> Color { Obsidian.fill.opacity(solid ? 1 : opacity) }
-    var edgeWidth: CGFloat { contrast == .increased ? 1.4 : 0.6 }
-    var edgeColor: AnyShapeStyle { contrast == .increased ? AnyShapeStyle(Color.white.opacity(0.75)) : AnyShapeStyle(Obsidian.edge) }
+    func fill(_ opacity: Double) -> Color { (ThemeState.raised ?? Obsidian.fill).opacity(solid ? 1 : opacity) }
+    var edgeWidth: CGFloat { contrast == .increased ? 1.4 : 0.8 }
+    var edgeColor: AnyShapeStyle {
+        if contrast == .increased { return AnyShapeStyle((scheme == .dark ? Color.white : Color.black).opacity(0.75)) }
+        return AnyShapeStyle(Theme.accent.opacity(0.5))
+    }
+
+    /// The theme's light or dark appearance (from its own setting, else from how light its surface is); dark when no theme with colours is in use.
+    @MainActor static func scheme(_ model: BrowserModel) -> ColorScheme {
+        guard model.themeIsActive else { return .dark }
+        if let own = model.activeTheme.scheme?.colorScheme { return own }
+        guard let raised = ThemeState.raised, let c = NSColor(raised).usingColorSpace(.sRGB) else { return .dark }
+        let luminance = 0.2126 * c.redComponent + 0.7152 * c.greenComponent + 0.0722 * c.blueComponent
+        return luminance > 0.6 ? .light : .dark
+    }
 }
 
 /// The floating control pill for whichever tab is in front.
@@ -124,12 +139,12 @@ struct PillHandle: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
-        let look = ObsidianLook(contrast: contrast, reduceTransparency: reduceTransparency)
+        let look = ObsidianLook(contrast: contrast, reduceTransparency: reduceTransparency, scheme: ObsidianLook.scheme(model))
         Button { model.pillCollapsed = false } label: {
             Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
                 .foregroundStyle(.secondary)
                 .frame(width: 44, height: 24)
-                .environment(\.colorScheme, .dark)
+                .environment(\.colorScheme, look.scheme)
                 .background(look.fill(0.94), in: Capsule(style: .continuous))
                 .overlay(Capsule(style: .continuous).strokeBorder(look.edgeColor, lineWidth: look.edgeWidth))
                 .shadow(color: .black.opacity(0.35), radius: 5, y: 1)
@@ -154,7 +169,7 @@ struct FloatingPillContent: View {
     @State private var dwell: DispatchWorkItem?
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    private var look: ObsidianLook { ObsidianLook(contrast: contrast, reduceTransparency: reduceTransparency) }
+    private var look: ObsidianLook { ObsidianLook(contrast: contrast, reduceTransparency: reduceTransparency, scheme: ObsidianLook.scheme(model)) }
 
     /// The Floating layout keeps the pill on screen all the time; otherwise it only stands in for a folded toolbar.
     private var permanent: Bool { model.topBarHidden }
@@ -213,8 +228,8 @@ struct FloatingPillContent: View {
         .font(.system(size: 12, weight: .medium))
         .padding(.horizontal, 3)
         .frame(height: 30)
-        // The deep black the iPhone uses: white text on near-black, a light along the top edge, a soft shadow.
-        .environment(\.colorScheme, .dark)
+        // The deep black the iPhone uses (white text on near-black) unless a theme sets its own surface; your accent colour on the edge; a soft shadow.
+        .environment(\.colorScheme, look.scheme)
         .background(look.fill(0.94), in: Capsule(style: .continuous))
         .overlay(Capsule(style: .continuous).strokeBorder(look.edgeColor, lineWidth: hovering ? max(0.9, look.edgeWidth) : look.edgeWidth))
         .shadow(color: .black.opacity(hovering ? 0.5 : 0.38), radius: hovering ? 13 : 9, y: 3)
@@ -340,6 +355,9 @@ struct FloatingSearchPill: View {
     @State private var hovering = false
     @State private var closeTask: DispatchWorkItem?
     @State private var engineMenuOpen = false
+    @Environment(\.colorSchemeContrast) private var searchContrast
+    @Environment(\.accessibilityReduceTransparency) private var searchReduceTransparency
+    private var searchLook: ObsidianLook { ObsidianLook(contrast: searchContrast, reduceTransparency: searchReduceTransparency, scheme: ObsidianLook.scheme(model)) }
 
     static let collapsedWidth: CGFloat = 108
     static let height: CGFloat = 30
@@ -361,10 +379,10 @@ struct FloatingSearchPill: View {
         .frame(width: expanded ? expandedWidth : Self.collapsedWidth, height: Self.height)
         // Only the width and the faces' opacity animate: this modifier covers what is above it, and nothing below.
         .motion(.spring(response: 0.34, dampingFraction: 0.92), value: expanded)
-        .environment(\.colorScheme, .dark)
-        .background(Capsule(style: .continuous).fill(Obsidian.fill.opacity(0.96)))
-        .overlay(Capsule(style: .continuous).strokeBorder(expanded ? Theme.accent.opacity(0.7) : Color.clear, lineWidth: 1).allowsHitTesting(false))
-        .overlay(Capsule(style: .continuous).strokeBorder(Obsidian.edge, lineWidth: hovering && !expanded ? 0.9 : 0.6).allowsHitTesting(false))
+        .environment(\.colorScheme, searchLook.scheme)
+        .background(Capsule(style: .continuous).fill(searchLook.fill(0.96)))
+        .overlay(Capsule(style: .continuous).strokeBorder(expanded ? Theme.accent.opacity(0.9) : Color.clear, lineWidth: 1.2).allowsHitTesting(false))
+        .overlay(Capsule(style: .continuous).strokeBorder(searchLook.edgeColor, lineWidth: hovering && !expanded ? max(0.9, searchLook.edgeWidth) : searchLook.edgeWidth).allowsHitTesting(false))
         .shadow(color: .black.opacity(0.38), radius: 9, y: 3)
         .contentShape(Capsule(style: .continuous))
         .onTapGesture { if !expanded { model.openSearch() } }
@@ -505,6 +523,7 @@ struct CanvasHandle: View {
     @EnvironmentObject var model: BrowserModel
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    private var canvasLook: ObsidianLook { ObsidianLook(contrast: contrast, reduceTransparency: reduceTransparency, scheme: ObsidianLook.scheme(model)) }
 
     var body: some View {
         Menu {
@@ -568,9 +587,9 @@ struct CanvasHandle: View {
             }
             .foregroundStyle(.secondary)
             .padding(.horizontal, 10).frame(height: 24)
-            .environment(\.colorScheme, .dark)
-            .background(ObsidianLook(contrast: contrast, reduceTransparency: reduceTransparency).fill(0.9), in: Capsule(style: .continuous))
-            .overlay(Capsule(style: .continuous).strokeBorder(ObsidianLook(contrast: contrast, reduceTransparency: reduceTransparency).edgeColor, lineWidth: ObsidianLook(contrast: contrast, reduceTransparency: reduceTransparency).edgeWidth))
+            .environment(\.colorScheme, canvasLook.scheme)
+            .background(canvasLook.fill(0.9), in: Capsule(style: .continuous))
+            .overlay(Capsule(style: .continuous).strokeBorder(canvasLook.edgeColor, lineWidth: canvasLook.edgeWidth))
             .keyboardFocusRing(radius: 12)
             .contentShape(Capsule())
         }

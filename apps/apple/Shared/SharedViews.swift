@@ -1137,7 +1137,9 @@ struct StartPageSettingsSection: View {
         Section("Start Page") {
             Toggle("Greeting", isOn: $model.showGreeting)
             Toggle("Favorites", isOn: $model.showFavorites)
+            FavoritesAppearanceControls()
             Toggle("Frequently Visited", isOn: $model.showFrequent)
+            OftenVisitedControls()
             Toggle("Recently Closed", isOn: $model.showRecentlyClosed)
             Picker("Background", selection: $model.startBackground) {
                 ForEach(StartBackground.allCases) { Text($0.title).tag($0) }

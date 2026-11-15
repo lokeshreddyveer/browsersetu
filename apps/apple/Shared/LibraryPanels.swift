@@ -23,7 +23,7 @@ struct BookmarksPanel: View {
     private var shown: [BookmarkItem] {
         switch filter {
         case .all: items
-        case .favorites: items.filter { $0.folder == BrowserModel.favoritesFolder }
+        case .favorites: items.filter { BrowserModel.isFavoritesFolder($0.folder) }
         case .tagged: items.filter { !model.tags(forBookmark: $0.url).isEmpty }
         }
     }
@@ -68,7 +68,7 @@ struct BookmarksPanel: View {
     private func count(for filter: Filter) -> Int {
         switch filter {
         case .all: items.count
-        case .favorites: items.filter { $0.folder == BrowserModel.favoritesFolder }.count
+        case .favorites: items.filter { BrowserModel.isFavoritesFolder($0.folder) }.count
         case .tagged: items.filter { !model.tags(forBookmark: $0.url).isEmpty }.count
         }
     }

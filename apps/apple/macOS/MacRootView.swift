@@ -471,9 +471,9 @@ struct FloatingAddressBar: View {
             }
             SuggestionsOverlay(address: model.addressBar, embedded: true)
         }
-        .environment(\.colorScheme, .dark)
-        .background(Obsidian.fill.opacity(0.97), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Obsidian.edge, lineWidth: 0.6))
+        .environment(\.colorScheme, ObsidianLook.scheme(model))
+        .background((ThemeState.raised ?? Obsidian.fill).opacity(0.97), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Theme.accent.opacity(0.5), lineWidth: 0.8))
         .shadow(color: .black.opacity(0.4), radius: 36, y: 20)
         .frame(maxWidth: 620)
         .padding(.horizontal, 20)
@@ -935,9 +935,9 @@ struct FloatingExtensions: View {
                                                bottomTrailingRadius: onRight ? 0 : 12, topTrailingRadius: onRight ? 0 : 12, style: .continuous)
             VStack(spacing: 2) { ExtensionActionButtons(center: model.extensionCenter) }
                 .padding(.vertical, 4).padding(.horizontal, 3)
-                .environment(\.colorScheme, .dark)
-                .background(shape.fill(Obsidian.fill.opacity(0.96)))
-                .overlay(shape.strokeBorder(Obsidian.edge, lineWidth: 0.6).allowsHitTesting(false))
+                .environment(\.colorScheme, ObsidianLook.scheme(model))
+                .background(shape.fill((ThemeState.raised ?? Obsidian.fill).opacity(0.96)))
+                .overlay(shape.strokeBorder(Theme.accent.opacity(0.5), lineWidth: 0.8).allowsHitTesting(false))
                 .shadow(color: .black.opacity(0.3), radius: 7, x: onRight ? -2 : 2, y: 2)
         }
     }
