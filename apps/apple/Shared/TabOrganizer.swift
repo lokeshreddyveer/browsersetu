@@ -261,7 +261,8 @@ extension BrowserModel {
         var slept = 0
         for tab in tabs where !keep.contains(tab.id) && tab.id != activeID && tab.id != splitTabID && tab.id != thirdSplitTabID && tab.id != fourthSplitTabID && !tab.pinned && !isLocked(tab) && !tab.isPrivate && !tab.isBlank && !tab.isDiscarded && !neverSleeps(host: tab.url?.host) {
             if await tab.engine.isBusy() { continue }
-            guard tab.id != activeID else { continue }
+            // Checked again after the wait: a tab brought to the front or into a split pane meanwhile is visible now and stays awake (as S0-1 in `TabLifecycle`).
+            guard tab.id != activeID, tab.id != splitTabID, tab.id != thirdSplitTabID, tab.id != fourthSplitTabID else { continue }
             tab.discard(reason: "you put all other tabs to sleep")
             slept += 1
         }

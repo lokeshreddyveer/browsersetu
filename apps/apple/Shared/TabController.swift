@@ -55,13 +55,13 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
     @Published var blockedPopup: URL?
     /// A name and password just typed on this page, held in memory only until the page changes, so "Save password?" can be offered even when the sign-in itself is not noticed.
     @Published var typedLogin: PendingLogin?
-    @Published var group: String
-    @Published var pinned: Bool
+    @Published var group: String { didSet { owner?.forgetMoveNeighbours() } }
+    @Published var pinned: Bool { didSet { owner?.forgetMoveNeighbours() } }
     /// Sound is coming from a player on the page; refreshed every few seconds by the window.
     @Published private(set) var playingAudio = false
     /// The person muted this tab. Held again after each page load.
     @Published private(set) var muted = false
-    @Published var workspace: String
+    @Published var workspace: String { didSet { owner?.forgetMoveNeighbours() } }
     /// The filters in use on this page (grayscale, invert…); kept for the tab, re-applied after each load.
     @Published var pageActions: Set<PageAction> = []
     /// Refused loads on this page so far (an estimate), and how many of them are already in the running totals.

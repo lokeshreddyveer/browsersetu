@@ -108,4 +108,70 @@ final class TestIsolationTests: XCTestCase {
         XCTAssertNotNil(id, "the unit-test host has no safe store identity (is its home relocated?)")
         XCTAssertNotEqual(id, ProfileIdentity.dataStoreID(for: "default"), "this test process would open the production default store")
     }
+
+    // MARK: Preferences (Stage 3 closure)
+
+    /// What the person's own preferences file for this app looks like now (read only: whether it exists, its size, date and bytes). `cfprefsd` keeps it under the real home whatever the relocated home is.
+    private struct PreferencesFileState: Equatable { let exists: Bool; let size: Int; let modified: Date?; let bytes: Data? }
+    private func realPreferencesState(_ domain: String = "com.browsersetu.mac") -> PreferencesFileState {
+        let path = TestIsolation.realHome + "/Library/Preferences/\(domain).plist"
+        let attributes = try? FileManager.default.attributesOfItem(atPath: path)
+        return PreferencesFileState(exists: attributes != nil, size: (attributes?[.size] as? Int) ?? 0, modified: attributes?[.modificationDate] as? Date,
+                                    bytes: FileManager.default.contents(atPath: path))
+    }
+
+    /// The standard defaults of this test process are the in-memory store, installed before anything else ran.
+    func testThisTestProcessHasInMemoryStandardDefaults() {
+        #if DEBUG
+        XCTAssertTrue(TestPreferencesGuard.installed)
+        XCTAssertTrue(UserDefaults.standard is TestProcessDefaults, "a test process writes the person's own preferences")
+        XCTAssertTrue(UserDefaults.standard === UserDefaults.standard)
+        #endif
+    }
+
+    /// The writes `removeProfile` and the rest of the app make (set, typed set, removing a present key, removing a key that was never there, synchronizing) leave the person's own preferences file
+    /// exactly as it was: not created, not changed. Removing an absent key is the call that used to create an empty file there.
+    func testWritingAndRemovingStandardDefaultsLeavesThePersonsPreferencesUntouched() {
+        #if DEBUG
+        let before = realPreferencesState()
+        let defaults = UserDefaults.standard
+        let key = "bs.test.isolation.\(UUID().uuidString)"
+        defaults.set("value", forKey: key)
+        XCTAssertEqual(defaults.string(forKey: key), "value")
+        defaults.set(true, forKey: key + ".bool"); defaults.set(7, forKey: key + ".int"); defaults.set(2.5, forKey: key + ".double")
+        XCTAssertTrue(defaults.bool(forKey: key + ".bool")); XCTAssertEqual(defaults.integer(forKey: key + ".int"), 7); XCTAssertEqual(defaults.double(forKey: key + ".double"), 2.5)
+        defaults.set(["a", "b"], forKey: key + ".list"); XCTAssertEqual(defaults.stringArray(forKey: key + ".list"), ["a", "b"])
+        defaults.removeObject(forKey: key)
+        XCTAssertNil(defaults.object(forKey: key))
+        defaults.removeObject(forKey: "bs.tiktok.export.never-existed-\(UUID().uuidString)")
+        for k in [".bool", ".int", ".double", ".list"] { defaults.removeObject(forKey: key + k) }
+        _ = defaults.synchronize()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))      // cfprefsd writes after the call returns; give it the time it took before the guard
+        XCTAssertEqual(realPreferencesState(), before, "a test process created or changed the person's own preferences file")
+        #endif
+    }
+
+    /// Removing a value shows the registered default again, and observers still hear every change (SwiftUI's `@AppStorage` and `didChangeNotification` listeners depend on that).
+    func testInMemoryDefaultsKeepRegisteredValuesAndChangeNotices() {
+        #if DEBUG
+        let defaults = UserDefaults.standard
+        let key = "bs.test.isolation.registered.\(UUID().uuidString)"
+        defaults.register(defaults: [key: "registered"])
+        XCTAssertEqual(defaults.string(forKey: key), "registered")
+        var notices = 0
+        let token = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: defaults, queue: nil) { _ in notices += 1 }
+        defer { NotificationCenter.default.removeObserver(token) }
+        final class Watcher: NSObject { var seen = 0; override func observeValue(forKeyPath _: String?, of _: Any?, change _: [NSKeyValueChangeKey: Any]?, context _: UnsafeMutableRawPointer?) { seen += 1 } }
+        let watcher = Watcher()
+        defaults.addObserver(watcher, forKeyPath: key, options: [.new], context: nil)
+        defer { defaults.removeObserver(watcher, forKeyPath: key) }
+        defaults.set("written", forKey: key)
+        XCTAssertEqual(defaults.string(forKey: key), "written")
+        defaults.removeObject(forKey: key)
+        XCTAssertEqual(defaults.string(forKey: key), "registered")
+        XCTAssertEqual(notices, 2)
+        XCTAssertEqual(watcher.seen, 2)
+        #endif
+    }
 }
+

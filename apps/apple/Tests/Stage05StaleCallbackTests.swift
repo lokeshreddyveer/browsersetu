@@ -41,13 +41,9 @@ final class Stage05StaleCallbackTests: XCTestCase {
         oldEngine.webViewWebContentProcessDidTerminate(oldEngine.webView)                // the old web view's process "ends" late
         await pump(0.5)
         print("S05DIAG after late old-engine crash: showingError=\(tab.isShowingError) discarded=\(tab.isDiscarded) crashesCounted=\(ReliabilityStats.shared.tabCrashes - before)")
-        // LATENT EXPOSURE S0-5 (Stage 0.5, not changed in production): `WebKitTab.close()` does not clear its event target, so a late callback from a replaced engine that is somehow still alive
-        // reaches the tab. The previous test shows the old engine is freed in practice, so this has not been seen outside this injection. Strict expected failure: when `close()` is made to drop its
-        // events (the one-line correction proposed in STAGE_0_5_REPORT.md) this reports an unexpected pass and the wrapper should be removed. It is NOT a passing behavioral guarantee.
-        XCTExpectFailure("S0-5: a replaced engine that is still alive can still change the tab it used to belong to") {
-            XCTAssertFalse(tab.isShowingError, "a late crash notice from a replaced engine put an error page on the sleeping tab")
-            XCTAssertEqual(ReliabilityStats.shared.tabCrashes, before, "a late crash notice from a replaced engine was counted against the tab")
-        }
+        // S0-5, fixed in Stage 3: `WebKitTab.close()` drops its event target, so a late callback from a replaced engine that is still alive no longer reaches the tab.
+        XCTAssertFalse(tab.isShowingError, "a late crash notice from a replaced engine put an error page on the sleeping tab")
+        XCTAssertEqual(ReliabilityStats.shared.tabCrashes, before, "a late crash notice from a replaced engine was counted against the tab")
         XCTAssertTrue(tab.isDiscarded)
     }
 }

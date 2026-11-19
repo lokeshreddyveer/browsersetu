@@ -62,6 +62,19 @@ private struct ChromeTraceModifier: ViewModifier {
     }
 }
 extension View { func chromeTrace(_ name: String) -> some View { modifier(ChromeTraceModifier(name: name)) } }
+/// Stage 3, development only: when web views join or leave a window, on the system-uptime clock, by object identity only (no address, no title). Off unless a test
+/// turns it on; it only records.
+@MainActor
+enum ActivationProbe {
+    static var enabled = false
+    struct Event { let view: ObjectIdentifier; let attached: Bool; let at: Double }
+    private(set) static var events: [Event] = []
+    static func moved(_ view: AnyObject, attached: Bool) {
+        guard enabled else { return }
+        events.append(Event(view: ObjectIdentifier(view), attached: attached, at: ProcessInfo.processInfo.systemUptime))
+    }
+    static func reset() { events.removeAll() }
+}
 #else
 /// Release builds: nothing is logged and the message is never built.
 enum ChromeTrace { static func log(_ text: @autoclosure () -> String) {} }

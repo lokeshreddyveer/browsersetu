@@ -158,10 +158,51 @@ extension BrowserModel {
         else { reorder(tab.id, before: i + delta + 1 < list.count ? list[i + delta + 1].id : nil) }
     }
 
+    /// Whether a tab can step `delta` places among its neighbours. Every tab in a strip asks this twice on each redraw (for its accessibility actions), and each
+    /// answer used to rebuild the whole visible list, so one tab switch with 100 tabs rebuilt it about 200 times (Stage 3: about a fifth of the main thread's time
+    /// during switching). Tabs with the same pinned state and group share one list, so the list is worked out once per redraw and remembered until anything
+    /// changes (`forgetMoveNeighbours`).
     func canMoveTab(_ tab: TabController, by delta: Int) -> Bool {
+        let key = MoveNeighbourKey(pinned: tab.pinned, group: tab.group)
+        let entry: MoveNeighbourEntry
+        if let remembered = moveNeighbourMemo[key] {
+            entry = remembered
+        } else {
+            let list = moveNeighbours(of: tab)
+            var index: [UInt64: Int] = [:]
+            for (i, t) in list.enumerated() where index[t.id] == nil { index[t.id] = i }
+            entry = MoveNeighbourEntry(count: list.count, index: index)
+            rememberMoveNeighbours(entry, for: key)
+        }
+        guard let i = entry.index[tab.id] else { return false }
+        return (0..<entry.count).contains(i + delta)
+    }
+
+    /// The same answer worked out afresh, with nothing remembered (tests compare the two).
+    func canMoveTabUncached(_ tab: TabController, by delta: Int) -> Bool {
         let list = moveNeighbours(of: tab)
         guard let i = list.firstIndex(where: { $0.id == tab.id }) else { return false }
         return list.indices.contains(i + delta)
+    }
+
+    /// Drops every remembered move list. Called on any change to the model (`objectWillChange`), on any change to a tab's pinned state, group or workspace, and at the
+    /// end of the run-loop turn in which a list was remembered, so a remembered list never outlives one round of drawing.
+    func forgetMoveNeighbours() {
+        if !moveNeighbourMemo.isEmpty { moveNeighbourMemo.removeAll(keepingCapacity: true) }
+    }
+
+    private func rememberMoveNeighbours(_ entry: MoveNeighbourEntry, for key: MoveNeighbourKey) {
+        if moveNeighbourMemoWatch == nil {
+            moveNeighbourMemoWatch = objectWillChange.sink { [weak self] _ in MainActor.assumeIsolated { self?.forgetMoveNeighbours() } }
+        }
+        moveNeighbourMemo[key] = entry
+        if !moveNeighbourMemoClearScheduled {
+            moveNeighbourMemoClearScheduled = true
+            DispatchQueue.main.async { [weak self] in
+                self?.moveNeighbourMemoClearScheduled = false
+                self?.forgetMoveNeighbours()
+            }
+        }
     }
 
     /// The tabs a move steps among, in the order they are drawn: the pinned ones, or the unpinned ones of the same group where the layout draws groups as sections
@@ -379,4 +420,16 @@ extension View {
             return model.acceptDroppedTab(dragged, before: nil)
         }
     }
+}
+
+/// Tabs that share these share one move list (`BrowserModel.moveNeighbours`): the list depends on the tab only through its pinned state and its group.
+struct MoveNeighbourKey: Hashable {
+    let pinned: Bool
+    let group: String
+}
+
+/// A remembered move list: its length and each tab's place in it.
+struct MoveNeighbourEntry {
+    let count: Int
+    let index: [UInt64: Int]
 }

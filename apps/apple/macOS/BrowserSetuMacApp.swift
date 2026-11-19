@@ -11,6 +11,7 @@ struct BrowserSetuMacApp: App {
         #if DEBUG
         // Before anything else: a test process never keeps the person's own home (WebKit's web data lives under it).
         TestIsolation.relocateHomeIfNeeded()
+        TestPreferencesGuard.installIfTestProcess()      // and never writes the person's own preferences, which do not follow the relocated home
         TestWindowFrameGuard.installIfTestProcess()
         WindowProbe.startIfRequested()
         ClickTrace.installIfRequested()

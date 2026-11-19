@@ -1275,8 +1275,9 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
     func goForward() { webView.goForward() }
     func close() {
         observers.removeAll()
-        #if os(iOS)
-        #endif
+        // A closed engine (its tab was put to sleep and given a new engine, or the tab was closed) never reaches the tab again: every callback goes through `events`,
+        // so a late one (a web content process ending, a load finishing) from an engine that is still alive cannot change the tab that replaced it (S0-5).
+        events = nil
     }
 
     func find(_ text: String, backwards: Bool) async -> Bool {
@@ -2054,6 +2055,12 @@ final class SafeAreaReportingWebView: WKWebView {
         super.safeAreaInsetsDidChange()
         onSafeAreaChange?()
     }
+    #if DEBUG
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        ActivationProbe.moved(self, attached: window != nil)
+    }
+    #endif
 }
 #endif
 
@@ -2082,6 +2089,9 @@ final class ScrollReportingWebView: WKWebView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         applyRestingColor()
+        #if DEBUG
+        ActivationProbe.moved(self, attached: window != nil)
+        #endif
     }
 
     // The page's right-click menu on a link: WebKit's own choices, with the ones a tabbed browser is expected to have added after "Open Link".

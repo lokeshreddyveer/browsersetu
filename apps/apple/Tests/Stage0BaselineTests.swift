@@ -229,3 +229,24 @@ final class Stage0BaselineTests: XCTestCase {
         XCTAssertTrue(loadedNow.isEmpty, "restored background tabs must not load until selected")
     }
 }
+
+extension Stage0BaselineTests {
+    /// Stage 3: "Put All Other Tabs to Sleep" leaves out the split panes before it waits for each tab's busy check. A tab moved into a pane during that wait must not be
+    /// put to sleep either (the command's own rule; the S0-1 pattern). Counts only if the command really was waiting when the pane changed.
+    func testPuttingAllOtherTabsToSleepSparesATabMovedIntoASplitPaneDuringTheBusyCheck() async throws {
+        let m = model()
+        guard let tabs = await idleLiveTabs(m, count: 4) else { throw XCTSkip("the blank pages did not finish loading in time") }
+        m.select(tabs[3].id)
+        let victim = tabs[0]
+        let finished = Box()
+        let pass = Task { @MainActor () -> Int in let n = await m.suspendAll(); finished.value = true; return n }
+        await Task.yield()
+        let suspended = !finished.value
+        m.splitTabID = victim.id
+        let slept = await pass.value
+        print("S3DIAG suspendAll race: suspendedWhenPaneChanged=\(suspended) slept=\(slept) victimDiscarded=\(victim.isDiscarded)")
+        try XCTSkipUnless(suspended, "the command finished before the pane changed, so the window was not exercised")
+        XCTAssertFalse(victim.isDiscarded, "a tab that became a visible split pane during the busy check was put to sleep")
+        XCTAssertTrue(tabs[1].isDiscarded || tabs[2].isDiscarded, "other idle tabs are still put to sleep")
+    }
+}

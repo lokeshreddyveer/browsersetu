@@ -451,6 +451,10 @@ final class BrowserModel: ObservableObject {
     @Published var closedTabs: [ClosedTab] = []
     /// What the user wrote down about each tab (see TabOrganizer.swift), the containers they made, their saved split layouts, and whether tabs are drawn as a tree.
     @Published var tabMeta: [UInt64: TabMeta] = [:]
+    /// `canMoveTab`'s remembered move lists, for one round of drawing (see `forgetMoveNeighbours`).
+    var moveNeighbourMemo: [MoveNeighbourKey: MoveNeighbourEntry] = [:]
+    var moveNeighbourMemoWatch: AnyCancellable?
+    var moveNeighbourMemoClearScheduled = false
     @Published var containers: [String] = []
     @Published var splitTemplates: [SplitTemplate] = []
     /// Each workspace remembers its own layout (on by default).
@@ -543,7 +547,9 @@ final class BrowserModel: ObservableObject {
     /// Pop-ups: whether pages are stopped from opening windows without a click, and the sites that may.
     @Published var blockPopups = true { didSet { saveSetting("block_popups", blockPopups ? "1" : "0") } }
     @Published var popupAllowedHosts: Set<String> = [] { didSet { saveSetting("popup_allowed_hosts", popupAllowedHosts.sorted().joined(separator: ",")) } }
-    var panelTabID: UInt64?
+    /// Not published, but it decides which tabs are listed (`isHiddenTab`), so a change drops `canMoveTab`'s remembered lists on its own rather than relying on a
+    /// published change made next to it.
+    var panelTabID: UInt64? { didSet { if oldValue != panelTabID { forgetMoveNeighbours() } } }
     @Published var collapsedStacks: Set<String> = []
     @Published var hiddenMenuItems: Set<String> = [] { didSet { saveSetting("hidden_menu_items", hiddenMenuItems.sorted().joined(separator: ",")) } }
     @Published var tabStacks = false { didSet { saveSetting("tab_stacks", tabStacks ? "1" : "0") } }
@@ -2748,9 +2754,14 @@ final class BrowserModel: ObservableObject {
         let previousTab = active
         if previousTab?.id != id { Haptics.selection() }
         expandChrome()
-        activeID = id
+        // Each of these is published, and a published property tells every view watching the model on every assignment, even of the same value: choosing the tab
+        // that is already in front redrew the whole window (every tab of the strip included). Stage 3: they are set only when they change.
+        if activeID != id { activeID = id }
         if !recencyFrozen { recency.noteSelected(id) }
-        if let tab = active { activeFixedTop = tab.fixedTop; activeFixedBottom = tab.fixedBottom }
+        if let tab = active {
+            if activeFixedTop != tab.fixedTop { activeFixedTop = tab.fixedTop }
+            if activeFixedBottom != tab.fixedBottom { activeFixedBottom = tab.fixedBottom }
+        }
         // A pinned tab set to start over when its workspace was left goes back to its pinned address now, before its page is brought back, so it loads once.
         if pendingPinnedResets.remove(id) != nil, let tab = active { resetPinnedTab(tab, becauseOfWorkspaceSwitch: true) }
         active?.ensureLoaded()
@@ -2762,7 +2773,7 @@ final class BrowserModel: ObservableObject {
             // A strip showing every group inline keeps showing them all: choosing a grouped tab there does not narrow it to that group.
             if tab.group != activeGroup, !(stripShowsGroupsInlineHere && activeGroup.isEmpty) { activeGroup = tab.group }
         }
-        if separatesPrivate, let tab = active { privateMode = tab.isPrivate }
+        if separatesPrivate, let tab = active, privateMode != tab.isPrivate { privateMode = tab.isPrivate }
         refreshBookmarkState()
         // A navigation/tab update must not replace the user's in-progress address edit.
         // Escape restores the newly selected tab's address; Return submits to that tab.
@@ -3621,10 +3632,11 @@ final class BrowserModel: ObservableObject {
     func refreshBookmarkState() {
         if spotlightBookmarks { scheduleSpotlightSync() }
         guard let url = active?.url?.absoluteString, active?.isBlank == false else {
-            activeBookmarked = false
+            if activeBookmarked { activeBookmarked = false }
             return
         }
-        activeBookmarked = (try? core.isBookmarked(url: url)) ?? false
+        let bookmarked = (try? core.isBookmarked(url: url)) ?? false
+        if activeBookmarked != bookmarked { activeBookmarked = bookmarked }
     }
 
     private func scheduleSpotlightSync() {
