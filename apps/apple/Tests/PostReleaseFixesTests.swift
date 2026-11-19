@@ -23,7 +23,7 @@ final class PostReleaseFixesTests: XCTestCase {
     }
 
     func testRemovingAnOlderHistoryRowIsRememberedAndNeverTouchesTheFile() async throws {
-        let suite = UserDefaults(suiteName: "bs.postrelease.\(UUID().uuidString)")!
+        let suite = IsolatedTestDefaults(suiteName: "bs.postrelease.\(UUID().uuidString)")!
         let entries = [DownloadLegacyHistory.Entry(url: "https://youtu.be/zrnciBMFlzI", filename: "watch.html", created: Date(timeIntervalSince1970: 1_794_412_146)),
                        DownloadLegacyHistory.Entry(url: "https://www.youtube.com/watch?v=zrnciBMFlzI", filename: "watch (1).html", created: Date(timeIntervalSince1970: 1_794_412_181))]
         let coordinator = DownloadCoordinator()
@@ -89,7 +89,7 @@ final class PostReleaseFixesTests: XCTestCase {
 
     func testRemovingATaskDoesNotBringItsOlderHistoryLineBack() async throws {
         let when = Date(timeIntervalSince1970: 1_794_412_146)
-        let suite = UserDefaults(suiteName: "bs.postrelease.\(UUID().uuidString)")!
+        let suite = IsolatedTestDefaults(suiteName: "bs.postrelease.\(UUID().uuidString)")!
         let c = DownloadCoordinator()
         let mine = completedTask(c, name: "watch.html", url: "https://youtu.be/zrnciBMFlzI", finishedAt: when)
         let other = completedTask(c, name: "report.pdf", url: "https://example.org/report.pdf", finishedAt: when)
@@ -111,7 +111,7 @@ final class PostReleaseFixesTests: XCTestCase {
 
     func testRemovingOneOfTwoLinesForTheSameFileKeepsTheOtherAndNeverTouchesTheFiles() async throws {
         let when = Date(timeIntervalSince1970: 1_794_412_146)
-        let suite = UserDefaults(suiteName: "bs.postrelease.\(UUID().uuidString)")!
+        let suite = IsolatedTestDefaults(suiteName: "bs.postrelease.\(UUID().uuidString)")!
         // Two lines for one file name (the same page saved twice, minutes apart): distinct entries, removed one at a time.
         let entries = [(url: "https://example.org/a", filename: "watch.html", created: Int64(when.timeIntervalSince1970)),
                        (url: "https://example.org/a", filename: "watch.html", created: Int64(when.timeIntervalSince1970) + 300)]
@@ -133,7 +133,7 @@ final class PostReleaseFixesTests: XCTestCase {
 
     func testAHistoryLineWhoseFileIsMissingCanStillBeRemoved() async throws {
         let entry = (url: "https://example.org/gone.zip", filename: "definitely-not-on-disk-\(UUID().uuidString).zip", created: Int64(1_794_412_146))
-        let suite = UserDefaults(suiteName: "bs.postrelease.\(UUID().uuidString)")!
+        let suite = IsolatedTestDefaults(suiteName: "bs.postrelease.\(UUID().uuidString)")!
         let vm = DownloadsViewModel(coordinator: DownloadCoordinator(), legacy: { _ in [entry] }, defaults: suite)
         vm.loadLegacy(); try await Task.sleep(nanoseconds: 400_000_000); vm.refreshNow()
         let row = try XCTUnwrap(vm.rows.first { $0.isLegacy })
@@ -150,7 +150,7 @@ final class PostReleaseFixesTests: XCTestCase {
         defer { DownloadCoordinator.directoryOverride = saved; try? FileManager.default.removeItem(at: dir) }
         let name = "keep-me-\(UUID().uuidString).html"
         let file = dir.appendingPathComponent(name); try Data("<p>hi</p>".utf8).write(to: file)
-        let suite = UserDefaults(suiteName: "bs.postrelease.\(UUID().uuidString)")!
+        let suite = IsolatedTestDefaults(suiteName: "bs.postrelease.\(UUID().uuidString)")!
         let entry = (url: "https://youtu.be/zrnciBMFlzI", filename: name, created: Int64(1_794_412_146))
         let vm = DownloadsViewModel(coordinator: DownloadCoordinator(), legacy: { _ in [entry] }, defaults: suite)
         vm.loadLegacy(); try await Task.sleep(nanoseconds: 400_000_000); vm.refreshNow()
@@ -173,7 +173,7 @@ final class PostReleaseFixesTests: XCTestCase {
     }
 
     func testTwoDownloadsWindowsDoNotUndoEachOthersRemovals() async throws {
-        let suite = UserDefaults(suiteName: "bs.postrelease.\(UUID().uuidString)")!
+        let suite = IsolatedTestDefaults(suiteName: "bs.postrelease.\(UUID().uuidString)")!
         let when = Int64(1_794_412_146)
         let entries = [(url: "https://example.org/a", filename: "a.html", created: when), (url: "https://example.org/b", filename: "b.html", created: when + 5)]
         func make() -> DownloadsViewModel { DownloadsViewModel(coordinator: DownloadCoordinator(), legacy: { _ in entries }, defaults: suite) }

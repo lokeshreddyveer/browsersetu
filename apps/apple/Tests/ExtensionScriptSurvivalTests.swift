@@ -38,10 +38,10 @@ final class ExtensionScriptSurvivalTests: XCTestCase {
         let loaded = try await WKWebExtension(resourceBaseURL: folder)
         let context = WKWebExtensionContext(for: loaded)
         if let all = try? WKWebExtension.MatchPattern(string: "<all_urls>") { context.setPermissionStatus(.grantedExplicitly, for: all) }
-        let controller = WKWebExtensionController(configuration: .nonPersistent())
+        let controller = WKWebExtensionController(configuration: IsolatedWebKit.extensionControllerConfiguration(identifier: nil))
         try controller.load(context)
 
-        let configuration = WKWebViewConfiguration()
+        let configuration = IsolatedWebKit.persistentConfiguration()
         configuration.webExtensionController = controller
         let view = WKWebView(frame: CGRect(x: 0, y: 0, width: 400, height: 300), configuration: configuration)
         let loader = Loader()

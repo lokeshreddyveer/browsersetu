@@ -9,7 +9,7 @@ final class BlockedCounterTests: XCTestCase {
         let id = "bs-counter-" + UUID().uuidString
         let list = try await WKContentRuleListStore.default().compileContentRuleList(forIdentifier: id, encodedContentRuleList: rules)
         defer { Task { try? await WKContentRuleListStore.default().removeContentRuleList(forIdentifier: id) } }
-        let config = WKWebViewConfiguration()
+        let config = IsolatedWebKit.ephemeralConfiguration()
         config.userContentController.add(list!)
         config.userContentController.addUserScript(WKUserScript(source: BlockedCounter.script, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .defaultClient))
         let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 600, height: 400), configuration: config)

@@ -59,7 +59,7 @@ final class LocalTrackerPermissionTests: XCTestCase {
     typealias Answer = LocalTrackerPermission.Answer
 
     private func make(_ clock: Clock? = nil) -> (LocalTrackerPermission, UserDefaults) {
-        let d = UserDefaults(suiteName: "perm-\(UUID().uuidString)")!
+        let d = IsolatedTestDefaults(suiteName: "perm-\(UUID().uuidString)")!
         return (LocalTrackerPermission(defaults: d, now: { clock?.now ?? Date() }), d)
     }
     private final class Clock: @unchecked Sendable { var now = Date(timeIntervalSince1970: 1000) }

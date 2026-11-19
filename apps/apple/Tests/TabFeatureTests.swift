@@ -77,7 +77,7 @@ final class TabFeatureModelTests: XCTestCase {
 
     override func setUp() async throws {
         root = NSTemporaryDirectory() + "bs-tf-\(UUID().uuidString)"
-        model = BrowserModel(engine: WebKitEngine(), root: root, profile: "tf")
+        model = BrowserModel(engine: IsolatedWebKit.engine(), root: root, profile: "tf")
         Dialogs.testHandler = { _, _, buttons in 0 }
     }
 
@@ -282,7 +282,7 @@ final class GlanceAndGroupTests: XCTestCase {
 
     override func setUp() async throws {
         root = NSTemporaryDirectory() + "bs-gl-\(UUID().uuidString)"
-        model = BrowserModel(engine: WebKitEngine(), root: root, profile: "gl")
+        model = BrowserModel(engine: IsolatedWebKit.engine(), root: root, profile: "gl")
     }
 
     override func tearDown() async throws {
@@ -405,7 +405,7 @@ final class ClearUndoTests: XCTestCase {
     func testUndoOfALargeClearBringsMostTabsBackAsleep() {
         let root = NSTemporaryDirectory() + "bs-undo-\(UUID().uuidString)"
         defer { try? FileManager.default.removeItem(atPath: root) }
-        let model = BrowserModel(engine: WebKitEngine(), root: root, profile: "undo")
+        let model = BrowserModel(engine: IsolatedWebKit.engine(), root: root, profile: "undo")
         model.clearTabsAsks = false
         let count = ClearTabs.loadedOnUndo + 4
         for i in 0..<count { let t = model.openTab(url: nil, isPrivate: false); t.url = URL(string: "https://t\(i).example/") }

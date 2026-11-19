@@ -18,7 +18,7 @@ final class DX07LiveTests: XCTestCase {
         var observations: [MediaObservation] = []
         private var window: NSWindow?
         init(observe: Bool = true) {
-            let config = WKWebViewConfiguration()
+            let config = IsolatedWebKit.ephemeralConfiguration()
             config.mediaTypesRequiringUserActionForPlayback = []
             web = WKWebView(frame: CGRect(x: 0, y: 0, width: 800, height: 600), configuration: config)
             super.init()

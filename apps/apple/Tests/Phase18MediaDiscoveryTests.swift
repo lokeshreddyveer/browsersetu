@@ -370,7 +370,7 @@ final class MediaDiscoveryStoreTests: XCTestCase {
 @MainActor
 final class MediaPageExtractorTests: XCTestCase {
     private func load(_ html: String) async throws -> WKWebView {
-        let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 600, height: 400))
+        let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 600, height: 400), configuration: IsolatedWebKit.ephemeralConfiguration())
         let delegate = LoadWaiter()
         web.navigationDelegate = delegate
         objc_setAssociatedObject(web, "waiter", delegate, .OBJC_ASSOCIATION_RETAIN)

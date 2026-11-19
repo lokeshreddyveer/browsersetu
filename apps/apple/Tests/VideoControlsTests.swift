@@ -5,7 +5,7 @@ import WebKit
 @MainActor
 final class VideoControlsTests: XCTestCase {
     private func page(speeds: [String: Double], host: String = "127.0.0.1") async throws -> WKWebView {
-        let config = WKWebViewConfiguration()
+        let config = IsolatedWebKit.ephemeralConfiguration()
         config.userContentController.addUserScript(WKUserScript(source: VideoControls.rememberedSpeedScript(speeds), injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .defaultClient))
         let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 600, height: 400), configuration: config)
         web.loadHTMLString("<html><body><video id=a></video><video id=b></video></body></html>", baseURL: URL(string: "http://\(host):18765/"))

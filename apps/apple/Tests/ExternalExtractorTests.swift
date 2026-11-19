@@ -70,7 +70,7 @@ final class ExternalExtractorTests: XCTestCase {
 
     func testNeverRunsInAPrivateTabOrWithoutConsent() async throws {
         do { _ = try await ExternalExtractor.lookup(page: page("k", "muxed"), path: script, isPrivate: true); XCTFail() } catch { XCTAssertNotNil(error as? ExtractorFailure) }
-        let d = UserDefaults(suiteName: "bs.test.ext.\(UUID().uuidString)")!
+        let d = IsolatedTestDefaults(suiteName: "bs.test.ext.\(UUID().uuidString)")!
         let c = MediaConsentStore(defaults: d)
         XCTAssertFalse(c.isAllowed(.externalExtractor("/bin/x|aa"), host: "x.org", profile: "p", isPrivate: false), "nothing is allowed until the person says so")
         c.grant(.externalExtractor("/bin/x|aa"), scope: .site("x.org"), profile: "p", isPrivate: false)

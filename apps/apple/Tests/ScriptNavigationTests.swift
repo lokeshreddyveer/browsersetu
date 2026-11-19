@@ -8,7 +8,7 @@ final class ScriptNavigationTests: XCTestCase {
     private func run(rerun: Bool, steps: [String]) async throws -> (runs: Int, address: String) {
         var script = try XCTUnwrap(UserScriptFile.parse("// ==UserScript==\n// @name Counter\n// @match http://spa.test/pull/*\n// @noframes\n// ==/UserScript==\nwindow.__runs = (window.__runs || 0) + 1;\n(window.__paths = window.__paths || []).push(location.pathname);\ndocument.documentElement.setAttribute('data-runs', String(window.__runs));", fallbackName: "Counter"))
         script.enabled = true; script.inPageWorld = true; script.rerunOnNavigation = rerun
-        let config = WKWebViewConfiguration()
+        let config = IsolatedWebKit.ephemeralConfiguration()
         UserScriptInstaller.install([script], policy: WebPolicy(), storage: nil, filter: FilterScripts(), into: config.userContentController)
         let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 400, height: 300), configuration: config)
         web.loadHTMLString("<html><body>app</body></html>", baseURL: URL(string: "http://spa.test/repo"))

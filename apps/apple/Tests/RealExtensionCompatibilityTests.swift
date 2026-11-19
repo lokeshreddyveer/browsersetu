@@ -27,7 +27,7 @@ final class RealExtensionCompatibilityTests: XCTestCase {
 
     /// What a page looks like after loading, with or without the extension controller: the attributes on <html> and how many style sheets it holds.
     private func snapshot(controller: WKWebExtensionController?) async throws -> String {
-        let configuration = WKWebViewConfiguration()
+        let configuration = IsolatedWebKit.persistentConfiguration()
         if let controller { configuration.webExtensionController = controller }
         let view = WKWebView(frame: NSRect(x: 0, y: 0, width: 600, height: 400), configuration: configuration)
         let loader = Loader()
@@ -56,7 +56,9 @@ final class RealExtensionCompatibilityTests: XCTestCase {
             let storage = FileManager.default.temporaryDirectory.appendingPathComponent("compat-\(UUID().uuidString)")
             defer { try? FileManager.default.removeItem(at: storage) }
             let center = ExtensionCenter()
-            let manager = WebKitExtensionManager(profile: "compat-\(UUID().uuidString)", directory: storage, center: center, host: host)
+            let profile = "compat-\(UUID().uuidString)"
+            let manager = WebKitExtensionManager(profile: profile, directory: storage, center: center, host: host,
+                                                 controllerConfiguration: IsolatedWebKit.extensionControllerConfiguration(identifier: ProfileIdentity.storeID(for: profile)))
             center.attach(manager, supported: true)
             await manager.start()
             do {

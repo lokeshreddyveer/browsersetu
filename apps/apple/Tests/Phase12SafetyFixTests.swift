@@ -279,7 +279,7 @@ final class StoreOwnershipWebKitTests: XCTestCase {
     }
     override func tearDown() async throws { DownloadCoordinator.directoryOverride = nil; try? FileManager.default.removeItem(at: scratch) }
 
-    private func view(_ config: WKWebViewConfiguration = WKWebViewConfiguration()) -> WKWebView {
+    private func view(_ config: WKWebViewConfiguration) -> WKWebView {
         let v = WKWebView(frame: CGRect(x: 0, y: 0, width: 200, height: 200), configuration: config); v.navigationDelegate = handler; return v
     }
     private func privateConfig() -> WKWebViewConfiguration { let c = WKWebViewConfiguration(); c.websiteDataStore = .nonPersistent(); return c }

@@ -144,7 +144,7 @@ final class PasswordSafetyTests: XCTestCase {
     }
 
     func testTheFillScriptRefusesAFrameWhoseOriginIsNotTheOneTheLoginBelongsTo() async throws {
-        let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 400, height: 300))
+        let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 400, height: 300), configuration: IsolatedWebKit.ephemeralConfiguration())
         web.loadHTMLString("<html><body><form><input id='u' type='text'><input id='p' type='password'></form></body></html>", baseURL: URL(string: "https://attacker.example/"))
         try await Task.sleep(for: .seconds(1.0))
         let wrong = try await web.callAsyncJavaScript(LoginScripts.fill, arguments: ["origin": "https://bank.example", "user": "ada", "password": "secret-\(UUID().uuidString)"], contentWorld: .defaultClient) as? Bool

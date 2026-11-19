@@ -49,12 +49,14 @@ final class WebKitExtensionManager: NSObject, ExtensionBackend, WKWebExtensionCo
 
     private var recordsURL: URL { directory.appendingPathComponent("extensions.json") }
 
-    init(profile: String, directory: URL, center: ExtensionCenter, host: ExtensionHost?) {
+    /// `controllerConfiguration` is for tests only: a test gives the controller isolated stores of its own (`IsolatedWebKit.extensionControllerConfiguration`). The app never passes it,
+    /// so the app's controller is made exactly as before.
+    init(profile: String, directory: URL, center: ExtensionCenter, host: ExtensionHost?, controllerConfiguration: WKWebExtensionController.Configuration? = nil) {
         self.directory = directory
         self.center = center
         self.host = host
         // The controller keeps its state under the same identity rule as the website data (a test process never shares a person's own).
-        controller = WKWebExtensionController(configuration: ProfileIdentity.storeID(for: profile).map { WKWebExtensionController.Configuration(identifier: $0) } ?? .nonPersistent())
+        controller = WKWebExtensionController(configuration: controllerConfiguration ?? ProfileIdentity.storeID(for: profile).map { WKWebExtensionController.Configuration(identifier: $0) } ?? .nonPersistent())
         super.init()
         controller.delegate = self
     }

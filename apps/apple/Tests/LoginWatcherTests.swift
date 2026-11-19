@@ -14,7 +14,7 @@ final class LoginWatcherTests: XCTestCase {
 
     private func makePage(_ html: String) async throws -> (WKWebView, Catcher) {
         let catcher = Catcher()
-        let config = WKWebViewConfiguration()
+        let config = IsolatedWebKit.ephemeralConfiguration()
         config.userContentController.add(catcher, contentWorld: .defaultClient, name: "bsLogin")
         config.userContentController.addUserScript(WKUserScript(source: LoginScripts.watcher, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .defaultClient))
         let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 800, height: 600), configuration: config)
@@ -133,7 +133,7 @@ final class LoginPromptFlowTests: XCTestCase {
 @MainActor
 final class YouTubeStripTests: XCTestCase {
     func testTheAdScheduleIsRemovedFromTheDataThePageReads() async throws {
-        let config = WKWebViewConfiguration()
+        let config = IsolatedWebKit.ephemeralConfiguration()
         config.userContentController.addUserScript(WKUserScript(source: YouTubeAdRules.builtIn.script, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page))
         let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 800, height: 600), configuration: config)
         web.loadHTMLString("<html><head><script>var ytInitialPlayerResponse = {adPlacements:[1], playerAds:[2], videoDetails:{title:'t'}};</script></head><body></body></html>", baseURL: URL(string: "https://www.youtube.com/"))

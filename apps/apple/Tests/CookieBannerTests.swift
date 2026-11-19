@@ -6,7 +6,7 @@ import WebKit
 @MainActor
 final class CookieBannerTests: XCTestCase {
     private func run(_ html: String, check: String) async throws -> Any? {
-        let config = WKWebViewConfiguration()
+        let config = IsolatedWebKit.ephemeralConfiguration()
         config.userContentController.addUserScript(WKUserScript(source: CookieBanners.script, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .defaultClient))
         let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 800, height: 600), configuration: config)
         web.loadHTMLString(html, baseURL: URL(string: "http://127.0.0.1:18765/"))
@@ -51,7 +51,7 @@ final class CookieBannerTests: XCTestCase {
     // MARK: Refusal is only claimed when it happened
 
     private func load(_ html: String, script: String = CookieBanners.script, wait: Double = 2.2) async throws -> WKWebView {
-        let config = WKWebViewConfiguration()
+        let config = IsolatedWebKit.ephemeralConfiguration()
         config.userContentController.addUserScript(WKUserScript(source: script, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .defaultClient))
         let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 800, height: 600), configuration: config)
         web.loadHTMLString(html, baseURL: URL(string: "http://127.0.0.1:18765/"))

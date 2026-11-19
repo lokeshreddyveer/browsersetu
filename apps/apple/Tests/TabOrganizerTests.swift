@@ -38,7 +38,7 @@ final class TabOrganizingRulesTests: XCTestCase {
 @MainActor
 final class TabOrganizerModelTests: XCTestCase {
     private func makeModel(root: String? = nil) -> BrowserModel {
-        BrowserModel(engine: WebKitEngine(), root: root ?? NSTemporaryDirectory() + "bs-org-\(UUID().uuidString)", profile: "default")
+        BrowserModel(engine: IsolatedWebKit.engine(), root: root ?? NSTemporaryDirectory() + "bs-org-\(UUID().uuidString)", profile: "default")
     }
 
     func testNamesColoursStatusesAndNotesPersist() async throws {

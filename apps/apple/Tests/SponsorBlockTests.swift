@@ -153,7 +153,7 @@ final class SponsorBlockTests: XCTestCase {
     // The video is steered by seeking, which is what a person scrubbing does: it needs the picture to have loaded, not to be playing (a web view that is not on screen may not play).
 
     private func player(_ actions: [String: String], offSites: Set<String> = [], host: String = "www.youtube.com", markup: String = "") async throws -> WKWebView {
-        let config = WKWebViewConfiguration()
+        let config = IsolatedWebKit.ephemeralConfiguration()
         config.mediaTypesRequiringUserActionForPlayback = []
         config.userContentController.addUserScript(WKUserScript(source: SponsorBlockScript.source(SponsorPolicy(actions: actions, offSites: offSites)), injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .defaultClient))
         let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 640, height: 400), configuration: config)

@@ -540,7 +540,7 @@ final class LinkNavigationTests: XCTestCase {
 @MainActor
 final class PageExtractionTests: XCTestCase {
     private func page(_ body: String) async throws -> WKWebView {
-        let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 400, height: 300))
+        let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 400, height: 300), configuration: IsolatedWebKit.ephemeralConfiguration())
         web.loadHTMLString("<html><body>\(body)</body></html>", baseURL: URL(string: "https://example.org/dir/"))
         for _ in 0..<100 where web.isLoading || web.url == nil { try await Task.sleep(for: .milliseconds(50)) }
         return web
@@ -723,7 +723,7 @@ final class Phase16ReviewFixTests: XCTestCase {
     }
 
     func testAnSVGAnchorDoesNotBreakCollection() async throws {
-        let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 300, height: 200))
+        let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 300, height: 200), configuration: IsolatedWebKit.ephemeralConfiguration())
         web.loadHTMLString("<html><body><svg width='10' height='10'><a href='https://example.org/svg-link'><rect width='5' height='5'/></a></svg><a href='https://example.org/real.zip'>zip</a></body></html>", baseURL: URL(string: "https://example.org/"))
         for _ in 0..<100 where web.isLoading || web.url == nil { try await Task.sleep(for: .milliseconds(50)) }
         let r = await LinkPageExtractor.collect(from: web)

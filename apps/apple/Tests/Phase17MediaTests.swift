@@ -942,7 +942,7 @@ final class MediaIntegrationTests: MediaCase {
 
     func testTheInspectorHasWhatItNeedsAndNothingForOtherDownloads() async throws {
         let master = try await publishHLS("insp")
-        let vm = DownloadsViewModel(coordinator: c, defaults: UserDefaults(suiteName: "p17-\(UUID().uuidString)")!, changeDelay: 0, progressDelay: 5)
+        let vm = DownloadsViewModel(coordinator: c, defaults: IsolatedTestDefaults(suiteName: "p17-\(UUID().uuidString)")!, changeDelay: 0, progressDelay: 5)
         let id = try await start(master)
         let info = try XCTUnwrap(vm.mediaInfo(for: id))
         XCTAssertEqual(info.format, "HLS"); XCTAssertEqual(info.tracks, "160×120, 800 kbit/s + Audio (en)")

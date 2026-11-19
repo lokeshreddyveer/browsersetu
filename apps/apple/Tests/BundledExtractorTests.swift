@@ -127,7 +127,7 @@ final class BundledExtractorTests: XCTestCase {
 
     func testBundledConsentIsBoundToThisToolAndNeverGrantedInAPrivateTab() async throws {
         let v = try need()
-        let d = UserDefaults(suiteName: "bs.test.bundled.\(UUID().uuidString)")!
+        let d = IsolatedTestDefaults(suiteName: "bs.test.bundled.\(UUID().uuidString)")!
         let c = MediaConsentStore(defaults: d)
         c.grant(.externalExtractor(v.identity), scope: .profile, profile: "p", isPrivate: false)
         XCTAssertTrue(c.isAllowed(.externalExtractor(v.identity), host: "x.org", profile: "p", isPrivate: false))

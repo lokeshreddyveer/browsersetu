@@ -476,7 +476,7 @@ final class DHTNodeTests: XCTestCase {
         _ = await until { store.saved != nil }
         XCTAssertNotNil(store.saved); XCTAssertTrue(store.saved!.allSatisfy { $0.endpoint.isRoutable })
 
-        let defaults = UserDefaults(suiteName: "dht-\(UUID().uuidString)")!
+        let defaults = IsolatedTestDefaults(suiteName: "dht-\(UUID().uuidString)")!
         let real = DefaultsDHTNodeStore(defaults: defaults)
         let good = DHTNodeInfo(id: NodeID.random(), endpoint: ep("198.51.100.5"))
         real.save([good, DHTNodeInfo(id: NodeID.random(), endpoint: ep("10.0.0.1")), DHTNodeInfo(id: NodeID.random(), endpoint: ep("127.0.0.1"))])

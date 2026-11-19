@@ -92,7 +92,7 @@ final class WebAppTests: XCTestCase {
         tab.engineLinkAction(URL(string: "https://work.example.com/own")!, .newTab)
         tab.engineOpenInNewTab(url: URL(string: "https://work.example.com/popup")!, userInitiated: true)
         XCTAssertEqual(m.tabs.count, before, "its own links and allowed pop-ups load in place, never as new tabs")
-        XCTAssertNil(tab.engineOpenPopup(configuration: WKWebViewConfiguration()), "no second web view is made for it")
+        XCTAssertNil(tab.engineOpenPopup(configuration: IsolatedWebKit.ephemeralConfiguration()), "no second web view is made for it")
         let denied = await tab.engineRequestPermission(origin: "https://work.example.com", kinds: [.notifications])
         XCTAssertFalse(denied, "notifications are off for this app")
     }

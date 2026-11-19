@@ -5,7 +5,7 @@ import XCTest
 @MainActor
 final class TabPrivacyTests: XCTestCase {
     private func model(guest: Bool = false) async -> BrowserModel {
-        let m = BrowserModel(engine: WebKitEngine(), root: NSTemporaryDirectory() + "bs-ctx-\(UUID().uuidString)", profile: "default")
+        let m = BrowserModel(engine: IsolatedWebKit.engine(), root: NSTemporaryDirectory() + "bs-ctx-\(UUID().uuidString)", profile: "default")
         m.wifiKeys = MemoryWiFiKeys()
         await m.start()
         m.isGuest = guest

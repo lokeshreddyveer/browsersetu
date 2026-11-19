@@ -10,7 +10,7 @@ final class DownloadsScrollCostTests: XCTestCase {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let saved = DownloadCoordinator.directoryOverride
         DownloadCoordinator.directoryOverride = folder
-        let suite = "scrollcost-\(UUID().uuidString)"; let defaults = UserDefaults(suiteName: suite)!
+        let suite = "scrollcost-\(UUID().uuidString)"; let defaults = IsolatedTestDefaults(suiteName: suite)!
         defer { DownloadCoordinator.directoryOverride = saved; defaults.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: folder) }
         let coordinator = DownloadCoordinator()
         for i in 0..<1000 {

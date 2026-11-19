@@ -6,7 +6,7 @@ import XCTest
 @MainActor
 final class DownloadHistoryRaceTests: XCTestCase {
     private let when = Int64(1_794_412_146)
-    private func suite() -> UserDefaults { UserDefaults(suiteName: "bs.hardening.\(UUID().uuidString)")! }
+    private func suite() -> UserDefaults { IsolatedTestDefaults(suiteName: "bs.hardening.\(UUID().uuidString)")! }
 
     private func completedTask(_ c: DownloadCoordinator, name: String, url: String, finishedAt: Int64) -> UUID {
         let r = c.ledger.create(protocolID: .http, source: URL(string: url), filename: name, isPrivate: false)
@@ -108,7 +108,7 @@ final class DownloadHistoryRaceTests: XCTestCase {
     }
 
     /// Counts how often the hidden-line lists are written to the settings store.
-    private final class CountingDefaults: UserDefaults {
+    private final class CountingDefaults: IsolatedTestDefaults {
         var writes: [String: Int] = [:]
         override func set(_ value: Any?, forKey defaultName: String) { writes[defaultName, default: 0] += 1; super.set(value, forKey: defaultName) }
     }

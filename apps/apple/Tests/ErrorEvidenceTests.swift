@@ -35,7 +35,7 @@ final class ErrorEvidenceTests: XCTestCase {
     private var lastRefusedSchemes: [String] = []
 
     private func fail(_ configure: (WKWebViewConfiguration) -> Void = { _ in }, seconds: Double = 8, load: (WKWebView) -> Void) async -> NSError? {
-        let config = WKWebViewConfiguration()
+        let config = IsolatedWebKit.ephemeralConfiguration()
         configure(config)
         let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 400, height: 300), configuration: config)
         let probe = Probe()
@@ -90,7 +90,7 @@ final class ErrorEvidenceTests: XCTestCase {
 
     func testANavigationTheCodeCancelsIsNotAFailureToShow() async throws {
         // A page the browser itself stops (a new load replaces the old one) reports "cancelled" and must show nothing.
-        let config = WKWebViewConfiguration()
+        let config = IsolatedWebKit.ephemeralConfiguration()
         let web = WKWebView(frame: .zero, configuration: config)
         let probe = Probe()
         web.navigationDelegate = probe

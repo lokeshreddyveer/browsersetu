@@ -9,7 +9,8 @@ After it ends (or on SIGINT, SIGTERM or SIGHUP, which are forwarded to the comma
 "before" is already on disk, so `--compare` finishes the proof afterwards. It reads the person's files; it never writes, moves or deletes any of them. Run it with Browser Setu CLOSED.
 
 What is recorded, for the app's bundle id and its test, runner and helper ids (com.browsersetu.mac, .tests, .uitests, .uitests.xctrunner, .jsc, .share):
-  ~/Library/Preferences (the plist files, the ByHost ones, and any bs.* / bs-ui* file) and `defaults read` of each id
+  ~/Library/Preferences: the plist files and ByHost ones of those ids, and every file named with a preference-suite prefix this repository uses (scanned from its Swift sources, plus
+  KNOWN_SUITE_PREFIXES); `defaults read` of each id. Any other new non-Apple preference file is listed in the verdict but not counted, because nothing ties it to this repository
   ~/Library/WebKit, Caches, HTTPStorages, Saved Application State, Containers and Logs/DiagnosticReports entries of those ids
   ~/Library/Application Support/BrowserSetu* and "Browser Setu*"
   the per-user cache and temporary folders the system keeps outside the home (getconf DARWIN_USER_CACHE_DIR and DARWIN_USER_TEMP_DIR), entries of those ids
@@ -17,13 +18,37 @@ Each file is recorded with its size, modification time, inode and, up to 64 MB, 
 NOT covered: the Keychain (it is audited in the source, not read here), files outside the places above, and anything a process holds only in memory.
 Exit status: 70 when the run changed the person's state (the launcher stops there), otherwise the command's own status.
 """
-import hashlib, json, os, signal, subprocess, sys, time, difflib
+import hashlib, json, os, re, signal, subprocess, sys, time, difflib
 
 HOME = os.path.expanduser("~")
 BUNDLE = "com.browsersetu.mac"
 IDS = [BUNDLE, BUNDLE + ".tests", BUNDLE + ".uitests", BUNDLE + ".uitests.xctrunner", BUNDLE + ".jsc", BUNDLE + ".share"]
 EVIDENCE_ROOT = os.environ.get("BS_ISOLATION_EVIDENCE", "/private/tmp/bs-isolation-evidence")
 HASH_LIMIT = 64 * 1024 * 1024
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Preference-suite name prefixes that this repository's tests and debug fixtures have used. `cfprefsd` keeps every suite in the person's real ~/Library/Preferences, whatever
+# home the test process has, so a file with one of these names that a run adds or changes is the run's doing. Kept even after the tests stop using them, so a regression is still seen.
+KNOWN_SUITE_PREFIXES = ["bs.", "bs-", "dash6-", "clear-", "scrollcost-", "dht-", "p17-", "perm-"]
+
+def suite_prefixes():
+    """Every literal suite-name prefix in the repository's Swift sources (the text before the first interpolation), plus the known ones."""
+    found = set(KNOWN_SUITE_PREFIXES)
+    pattern = re.compile(r'(?:suiteName:\s*|suite\s*=\s*)"([^"\\]{3,})')
+    for base, dirs, files in os.walk(os.path.join(REPO, "apps")):
+        dirs[:] = [d for d in dirs if not d.endswith((".xcodeproj", ".xcassets")) and d not in ("build", "DerivedData")]
+        for name in files:
+            if not name.endswith(".swift"): continue
+            try:
+                with open(os.path.join(base, name), encoding="utf-8", errors="ignore") as f: text = f.read()
+            except OSError:
+                continue
+            for m in pattern.finditer(text): found.add(m.group(1))
+    return sorted(found)
+
+PREFIXES = suite_prefixes()
+
+def attributed(name):
+    return any(name.startswith(i) for i in IDS) or any(name.startswith(p) for p in PREFIXES)
 
 def record(path):
     try:
@@ -63,7 +88,7 @@ def snapshot():
     for base in (prefs, os.path.join(prefs, "ByHost")):
         if not os.path.isdir(base): continue
         for name in sorted(os.listdir(base)):
-            if any(name.startswith(i) for i in IDS) or name.startswith("bs.") or name.startswith("bs-ui"):
+            if attributed(name):
                 tree(os.path.join(base, name), snap)
     for sub in ("WebKit", "Caches", "HTTPStorages", "Containers"):
         for i in IDS: tree(os.path.join(lib, sub, i), snap)
@@ -83,7 +108,9 @@ def snapshot():
     for i in IDS:
         r = subprocess.run(["defaults", "read", i], capture_output=True, text=True)
         defaults[i] = r.stdout if r.returncode == 0 else ""
-    return {"files": snap, "defaults": defaults}
+    # Names only, of every other preference file: a new one is listed (not counted) so a leak under a name no source here uses is still visible to a reader.
+    others = sorted(n for n in (os.listdir(prefs) if os.path.isdir(prefs) else []) if not attributed(n) and not n.startswith("com.apple.") and not n.startswith("."))
+    return {"files": snap, "defaults": defaults, "other_preferences": others}
 
 RUNNER = os.path.join(HOME, "Library", "Containers", BUNDLE + ".uitests.xctrunner", "Data")
 
@@ -134,6 +161,10 @@ def save(path, obj):
 def verdict(before, after, evidence, status, note=""):
     changed, pref_lines, allowed = diff(before, after)
     tolerated_note = "" if not allowed else " Tolerated (test-owned or OS-owned): " + "; ".join(f"{n} in {w}" for w, n in sorted(allowed.items())) + "."
+    # Not attributed to this repository by name, so not counted; listed so a leak under an unexpected name is not silent.
+    new_others = sorted(set(after.get("other_preferences", [])) - set(before.get("other_preferences", [])))
+    if new_others:
+        tolerated_note += " Not counted (new preference files whose names no source here uses; attribute by hand): " + ", ".join(new_others[:20]) + "."
     report = []
     if changed or pref_lines:
         report.append("ISOLATION CHECK FAILED: the run changed the person's own Browser Setu state:")

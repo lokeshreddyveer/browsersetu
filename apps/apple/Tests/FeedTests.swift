@@ -550,7 +550,7 @@ final class GalleryExtractorTests: XCTestCase {
         <div aria-hidden="true"><img src="/hidden.jpg"></div>
         </body></html>
         """
-        let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 600, height: 400))
+        let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 600, height: 400), configuration: IsolatedWebKit.ephemeralConfiguration())
         web.loadHTMLString(html, baseURL: URL(string: "https://gallery.example/album/"))
         let end = Date().addingTimeInterval(10)
         while (web.isLoading || web.url == nil) && Date() < end { try await Task.sleep(nanoseconds: 50_000_000) }

@@ -304,8 +304,7 @@ final class BrowserWebKitDownloadTests: XCTestCase {
     private func log() async throws -> [[String: Any]] { (try JSONSerialization.jsonObject(with: try await fixture("/_log")) as? [[String: Any]]) ?? [] }
 
     private func makeView(persistent: Bool = true) -> WKWebView {
-        let config = WKWebViewConfiguration()
-        if !persistent { config.websiteDataStore = .nonPersistent() }
+        let config = persistent ? IsolatedWebKit.persistentConfiguration() : IsolatedWebKit.ephemeralConfiguration()
         let view = WKWebView(frame: CGRect(x: 0, y: 0, width: 300, height: 200), configuration: config)
         view.navigationDelegate = handler
         views.append(view)

@@ -165,7 +165,7 @@ final class MediaToolsInstallerTests: XCTestCase {
         XCTAssertTrue((MediaToolsError.blockedByMacOS.errorDescription ?? "").contains("Gatekeeper"), "a meaningful message")
         // The same through the screen model: failed with that message, never Ready; then a program that does start becomes Ready.
         try pin(m, root: r); defer { unpin() }
-        let store = MediaToolsStore(root: r, transport: LocalTransport(source: zip), defaults: UserDefaults(suiteName: "bs-gate-\(UUID().uuidString)")!, policy: adhoc)
+        let store = MediaToolsStore(root: r, transport: LocalTransport(source: zip), defaults: IsolatedTestDefaults(suiteName: "bs-gate-\(UUID().uuidString)")!, policy: adhoc)
         store.launchCheck = { _, _ in throw MediaToolsError.blockedByMacOS }
         store.install()
         for _ in 0..<100 { if !store.isBusy { break }; try await Task.sleep(nanoseconds: 100_000_000) }
@@ -270,7 +270,7 @@ final class MediaToolsInstallerTests: XCTestCase {
 
     func testStoreInstallRemoveAndTheRecordedChoice() async throws {
         let (zip, m) = try makePackage()
-        let defaults = UserDefaults(suiteName: "bs-mt-\(UUID().uuidString)")!
+        let defaults = IsolatedTestDefaults(suiteName: "bs-mt-\(UUID().uuidString)")!
         let store = MediaToolsStore(root: root("store"), transport: LocalTransport(source: zip), defaults: defaults, policy: adhoc)
         XCTAssertEqual(store.choice, .undecided)
         store.decline(); XCTAssertEqual(store.choice, .declined)

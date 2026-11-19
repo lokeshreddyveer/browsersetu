@@ -97,7 +97,7 @@ final class ExtractorAdversarialTests: XCTestCase {
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: exe.path)
         let before = try XCTUnwrap(ExternalExtractor.identity(of: exe))
         XCTAssertEqual(before.split(separator: "|").last?.count, 64, "the full SHA-256, not a prefix")
-        let d = UserDefaults(suiteName: "bs.test.ext.\(UUID().uuidString)")!
+        let d = IsolatedTestDefaults(suiteName: "bs.test.ext.\(UUID().uuidString)")!
         let c = MediaConsentStore(defaults: d)
         c.grant(.externalExtractor(before), scope: .profile, profile: "p", isPrivate: false)
         XCTAssertTrue(c.isAllowed(.externalExtractor(before), host: "x.org", profile: "p", isPrivate: false))

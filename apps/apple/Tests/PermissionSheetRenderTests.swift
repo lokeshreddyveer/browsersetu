@@ -10,6 +10,12 @@ final class PermissionSheetRenderTests: XCTestCase {
         let root = NSTemporaryDirectory() + "bs-perm-\(UUID().uuidString)"
         let model = BrowserModel(engine: WebKitEngine(), root: root, profile: "default")
         await model.start()
+        // The engine's own extension manager leaves its controller's extension store at WebKit's default store, whose temporary files live in the folder the person's
+        // Browser Setu uses. This test only renders the sheet, so before anything is installed it attaches a manager whose stores are all named (`IsolatedWebKit`).
+        let isolated = WebKitExtensionManager(profile: "default", directory: URL(fileURLWithPath: root).appendingPathComponent("extensions", isDirectory: true), center: model.extensionCenter,
+                                              host: model, controllerConfiguration: IsolatedWebKit.extensionControllerConfiguration(identifier: ProfileIdentity.storeID(for: "default")))
+        model.extensionCenter.attach(isolated, supported: true)
+        await isolated.start()
         let folder = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("bs-permfix-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let manifest = """

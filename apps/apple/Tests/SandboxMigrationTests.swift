@@ -31,7 +31,7 @@ final class SandboxMigrationTests: XCTestCase {
         (prefs as NSDictionary).write(to: c.appendingPathComponent("Library/Preferences/com.test.app.plist"), atomically: true)
         return c
     }
-    func defaults() -> UserDefaults { UserDefaults(suiteName: "bs.mig.\(UUID().uuidString)")! }
+    func defaults() -> UserDefaults { IsolatedTestDefaults(suiteName: "bs.mig.\(UUID().uuidString)")! }
     var home: URL { root.appendingPathComponent("home", isDirectory: true) }
     func run(_ c: URL, _ d: UserDefaults) -> SandboxMigration.Outcome { SandboxMigration.runIfNeeded(bundleID: "com.test.app", sourceContainer: c, destinationHome: home, defaults: d) }
 

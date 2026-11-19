@@ -9,7 +9,7 @@ final class RealVideoPlayerTests: XCTestCase {
     private var folder: URL { URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/video", isDirectory: true) }
 
     private func openClip() async throws -> (WKWebView, Int) {
-        let config = WKWebViewConfiguration()
+        let config = IsolatedWebKit.ephemeralConfiguration()
         config.mediaTypesRequiringUserActionForPlayback = []
         let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 640, height: 480), configuration: config)
         web.loadFileURL(folder.appendingPathComponent("index.html"), allowingReadAccessTo: folder)

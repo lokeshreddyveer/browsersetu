@@ -16,7 +16,7 @@ final class FilterExceptionTests: XCTestCase {
         var classified = FilterClassifier.parse(Data(list.utf8), name: "T")
         classified.scripts.exceptions = exceptions
         let scripts = FilterScripts.make(from: classified.scripts)
-        let config = WKWebViewConfiguration()
+        let config = IsolatedWebKit.ephemeralConfiguration()
         UserScriptInstaller.addFilterScripts(scripts, to: config.userContentController)
         let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 400, height: 600), configuration: config)
         web.loadHTMLString(html, baseURL: URL(string: "http://\(host)/"))

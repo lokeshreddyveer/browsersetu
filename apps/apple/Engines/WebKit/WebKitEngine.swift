@@ -28,6 +28,9 @@ final class WebKitEngine: BrowserEngine {
     #endif
     /// A `WebKitExtensionManager` on systems that have WebKit extension support; type-erased because it is availability-gated.
     private var extensionManager: AnyObject?
+    /// Tests only: the extension controller's configuration for a profile (`IsolatedWebKit.engine()` sets it, so that a controller attached to a non-persistent tab never falls
+    /// back to WebKit's default store). The app never sets it; with it unset the controller is made exactly as before. Type-erased because the configuration is availability-gated.
+    var extensionControllerConfiguration: (@MainActor (String) -> AnyObject?)?
     private var userScripts: [UserScript] = []
     private var userScriptStorage: UserScriptStorage?
     /// The scriptlets and procedural cosmetic rules from the filter lists, for every page.
@@ -278,7 +281,8 @@ final class WebKitEngine: BrowserEngine {
 
     func attachExtensions(center: ExtensionCenter, profile: String, directory: URL, host: ExtensionHost) {
         if #available(macOS 15.4, iOS 18.4, *) {
-            let manager = WebKitExtensionManager(profile: profile, directory: directory, center: center, host: host)
+            let manager = WebKitExtensionManager(profile: profile, directory: directory, center: center, host: host,
+                                                 controllerConfiguration: extensionControllerConfiguration?(profile) as? WKWebExtensionController.Configuration)
             extensionManager = manager
             center.attach(manager, supported: true)
             Task { await manager.start() }

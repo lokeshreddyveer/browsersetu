@@ -47,7 +47,9 @@ final class ExtensionTests: XCTestCase {
 
     private func manager(directory: URL, profile: String = "ext-\(UUID().uuidString)") -> (WebKitExtensionManager, ExtensionCenter) {
         let center = ExtensionCenter()
-        let manager = WebKitExtensionManager(profile: profile, directory: directory, center: center, host: host)
+        // The profile's own test identity (as the app would use), with every store of the controller named, so a restart on the same profile finds its state.
+        let manager = WebKitExtensionManager(profile: profile, directory: directory, center: center, host: host,
+                                             controllerConfiguration: IsolatedWebKit.extensionControllerConfiguration(identifier: ProfileIdentity.storeID(for: profile)))
         center.attach(manager, supported: true)
         return (manager, center)
     }
@@ -59,7 +61,7 @@ final class ExtensionTests: XCTestCase {
 
     /// Loads a page into a web view that uses the extension controller and reports whether the marker appeared.
     private func marked(by manager: WebKitExtensionManager, page baseURL: String, wait: Double = 3) async throws -> Bool {
-        let configuration = WKWebViewConfiguration()
+        let configuration = IsolatedWebKit.persistentConfiguration()
         configuration.webExtensionController = manager.controller
         let view = WKWebView(frame: NSRect(x: 0, y: 0, width: 600, height: 400), configuration: configuration)
         let loader = Loader()

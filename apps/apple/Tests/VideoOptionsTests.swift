@@ -37,7 +37,7 @@ final class VideoOptionsTests: XCTestCase {
     }
 
     func testConsentScopesAndPrivateRule() {
-        let d = UserDefaults(suiteName: "bs.test.consent.\(UUID().uuidString)")!
+        let d = IsolatedTestDefaults(suiteName: "bs.test.consent.\(UUID().uuidString)")!
         let s = MediaConsentStore(defaults: d)
         let svc = MediaConsentPurpose.externalService("Example")
         XCTAssertFalse(s.isAllowed(svc, host: "a.org", profile: "p", isPrivate: false))
@@ -55,7 +55,7 @@ final class VideoOptionsTests: XCTestCase {
     }
 
     func testPrivateTabsStoreNothingAndOnceGrantsAreClearable() {
-        let d = UserDefaults(suiteName: "bs.test.consent.\(UUID().uuidString)")!
+        let d = IsolatedTestDefaults(suiteName: "bs.test.consent.\(UUID().uuidString)")!
         let s = MediaConsentStore(defaults: d)
         s.grant(.localConversion, scope: .profile, profile: "p", isPrivate: true)
         s.grant(.localConversion, scope: .site("a.org"), profile: "p", isPrivate: true)

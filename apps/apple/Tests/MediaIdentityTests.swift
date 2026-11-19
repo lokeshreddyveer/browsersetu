@@ -6,7 +6,7 @@ import XCTest
 @MainActor
 final class MediaIdentityTests: XCTestCase {
     fileprivate func page(_ body: String) async throws -> WKWebView {
-        let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 600, height: 400))
+        let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 600, height: 400), configuration: IsolatedWebKit.ephemeralConfiguration())
         web.loadHTMLString("<html><body>\(body)</body></html>", baseURL: URL(string: "http://127.0.0.1:18766/"))
         try await Task.sleep(for: .seconds(1.5))
         return web
@@ -185,7 +185,7 @@ extension MediaIdentityTests {
 extension MediaIdentityTests {
     /// The guard against videos starting by themselves still refuses a page, and lets a deliberate command from the browser's own controls through, only after the secret event.
     func testTheAutoplayGuardRefusesAPageButHonoursAGrantFromTheBrowser() async throws {
-        let config = WKWebViewConfiguration()
+        let config = IsolatedWebKit.ephemeralConfiguration()
         config.userContentController.addUserScript(WKUserScript(source: PageScripts.noAutoplay(exceptions: [], grant: "bs-test-grant"), injectionTime: .atDocumentStart, forMainFrameOnly: false))
         let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 400, height: 300), configuration: config)
         web.loadHTMLString("<html><body><video id=a></video></body></html>", baseURL: URL(string: "http://127.0.0.1:18767/"))

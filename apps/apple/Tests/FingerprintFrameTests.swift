@@ -15,7 +15,7 @@ final class FingerprintFrameTests: XCTestCase {
     """
 
     private func hashes(topSite: String, exceptions: Set<String> = []) async throws -> (top: String, frame: String, frameCouldReadTop: Bool) {
-        let config = WKWebViewConfiguration()
+        let config = IsolatedWebKit.ephemeralConfiguration()
         config.userContentController.addUserScript(WKUserScript(source: PageScripts.fingerprint(seed: 424242, exceptions: exceptions), injectionTime: .atDocumentStart, forMainFrameOnly: false))
         let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 500, height: 400), configuration: config)
         let frameCode = "<script>\(draw) var readable = true; try { void window.top.location.href; } catch (e) { readable = false; } parent.postMessage({ h: fp(), readable: readable }, '*');</script>"

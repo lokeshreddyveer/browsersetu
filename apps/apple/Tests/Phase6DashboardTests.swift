@@ -321,7 +321,7 @@ final class DownloadsViewModelTests: XCTestCase {
         DownloadCoordinator.directoryOverride = folder
         coordinator = DownloadCoordinator()
         suite = "dash6-\(UUID().uuidString)"
-        defaults = UserDefaults(suiteName: suite)
+        defaults = IsolatedTestDefaults(suiteName: suite)
     }
     override func tearDown() async throws {
         DownloadCoordinator.directoryOverride = savedOverride

@@ -18,7 +18,7 @@ final class DownloadsClearingTests: XCTestCase {
         DownloadCoordinator.directoryOverride = folder
         coordinator = DownloadCoordinator()
         suite = "clear-\(UUID().uuidString)"
-        defaults = UserDefaults(suiteName: suite)
+        defaults = IsolatedTestDefaults(suiteName: suite)
     }
 
     override func tearDown() async throws {

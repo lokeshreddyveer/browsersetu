@@ -326,7 +326,7 @@ final class AgentReviewRegressionTests: XCTestCase {
         <p>Visible text</p>
         </body></html>
         """
-        let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 800, height: 900))
+        let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 800, height: 900), configuration: IsolatedWebKit.ephemeralConfiguration())
         let loader = PageLoader()
         web.navigationDelegate = loader
         try await loader.load(html, in: web)

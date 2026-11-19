@@ -9,7 +9,7 @@ final class FilterScriptsTests: XCTestCase {
     private func page(_ list: String, html: String, host: String, wait: Double = 1.2) async throws -> WKWebView {
         let classified = FilterClassifier.parse(Data(list.utf8), name: "T")
         let scripts = FilterScripts.make(from: classified.scripts)
-        let config = WKWebViewConfiguration()
+        let config = IsolatedWebKit.ephemeralConfiguration()
         UserScriptInstaller.addFilterScripts(scripts, to: config.userContentController)
         let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 400, height: 600), configuration: config)
         web.loadHTMLString(html, baseURL: URL(string: "http://\(host)/"))
