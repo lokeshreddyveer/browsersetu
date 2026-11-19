@@ -13,16 +13,16 @@ Everything here was run or read during this work. Where something was not run, o
 | **S0-3** 15 to 19 s tab-switch outliers | **Attributed to the test runner, not the app.** In the instrumented run the app handled every selection in at most 3 ms and its longest main-thread stall was 820 ms; the two outliers were seen 19.3 s and 18.6 s after the key press while the app had received the command 0.2 s after it. Production code was not changed for this. The benchmark was corrected. The exact cause inside the runner (accessibility query or its wait for idle) is **not** proven |
 | **S0-5/S0-6** stale callbacks from a replaced engine | **Latent, not changed.** The replaced engine is freed after a sleep (3 of 3 runs), so a late callback cannot arrive in the observed flow. If an old engine were kept alive, a late "process ended" notice does put an error page on the sleeping tab and counts a crash. Pinned by a strict expected failure. A one-line correction is proposed, not applied |
 | iPad | iPad simulator created and used. 22 tests, 0 failures. One finding (S05-A: page 340 pt wide in a 320 pt window). No split panes exist on iPad |
-| Isolation | One Mac unit run exited 70 because the isolation guard saw two cache files change (`Cache.db-shm`, `Cache.db-wal`). Not attributed. See sections 10 and 11 |
+| Isolation | One Mac unit run exited 70 because the isolation guard saw two cache files change (`Cache.db-shm`, `Cache.db-wal`). **Closed 2026-11-18** (section 14): reproduced on a clean Mac, attributed to `PrivacyIntegrationTests` loading its fixture server through the shared URL cache, fixed in the Debug-only test isolation, and the regression rerun passed isolation class by class (119 tests, 0 failures) |
 
-Stage 1 readiness: **conditionally ready** (section 12).
+Stage 1 readiness: **ready** (section 12, updated 2026-11-18).
 
 ## 2. Repository and working-tree provenance
 
 | Item | Value |
 |---|---|
 | Branch / HEAD | `main` / `87e86e40881e584c48666e325e27ba12fa98b4ed` |
-| Before Stage 0.5 | 16 modified tracked files and 10 untracked paths (the earlier Favorites, stress-test and Stage 0 files, plus `STAGE_0_BASELINE.md`); recorded in the session scratchpad. Nothing was reset, cleaned, stashed or overwritten |
+| Before Stage 0.5 | 16 modified tracked files and 10 untracked paths (the earlier Favorites, stress-test and Stage 0 files, plus `STAGE_0_BASELINE.md`), recorded before the work started. Nothing was reset, cleaned, stashed or overwritten |
 | Stage 0 files kept | `Tests/Stage0BaselineTests.swift`, `Tests/Stage0RecoveryTests.swift`, `iOSTests/Stage0ViewportTests.swift` (the last two changed, see section 9) |
 | Stage 0.5 production changes | `Shared/TabLifecycle.swift` (+9 −4, the fix); `Shared/ChromeTrace.swift` (+41, debug-only); `Shared/BrowserModel.swift` (+2 lines in `selectTab`, debug trace). Details in section 8 |
 | Environment | Apple M4, 10 cores, 16 GB, macOS 27.3 (26C5035r), Xcode 27.2 (27B52). iPhone 17 simulator and a new iPad Pro 11-inch (M5) simulator `02C512CA-D9B2-402D-9806-82BB6C59B50C`, both iOS 27.0. Only this OS generation is testable here (macOS 14 and iOS 17 targets are not) |
@@ -129,6 +129,13 @@ iPhone: the hosted viewport tests and `Stage0ViewportTests` ran on the iPhone 17
 
 No other production file, no project setting, no configuration, no WebKit API change. `BrowserModel.swift` also carries the earlier uncommitted Favorites work; only those two lines are Stage 0.5.
 
+Added at closure (2026-11-18, section 14), test infrastructure only:
+
+| File | Change | Why |
+|---|---|---|
+| `Shared/TestIsolation.swift` | `isolateSharedURLCache(home:)` (`:101-105`), called for a test process at `:81-82`. Inside `#if DEBUG && os(macOS)`, so release builds are unchanged | Isolation flag: test processes get their own URL cache inside the relocated home |
+| `scripts/check-uitest-isolation.py` | `tolerated()` also names the bundle's own folder in the system cache directory (`:103`); every file inside it is still checked | macOS creates that folder for the Metal shader cache, which was already tolerated |
+
 ## 9. New or modified tests
 
 | File | Tests | Status |
@@ -163,7 +170,7 @@ Skipped and expected-failure counts: skipped 8 (iPad tests on iPhone, by design)
 
 ## 11. Remaining defects and risks
 
-1. **Isolation flag** (section 10): unattributed; the "all regressions rerun in isolation" item is therefore only partly closed.
+1. ~~**Isolation flag** (section 10): unattributed; the "all regressions rerun in isolation" item is therefore only partly closed.~~ Closed 2026-11-18 (section 14). Nine other test files still load fixtures through the shared session (`URLSession.shared`, for example `Phase12BrowserIntegrationTests.swift:303`, `HardeningTests.swift:24`, `BrowserIntegrationTests.swift:24`); they are now covered by the same isolated cache, but they were not part of this rerun.
 2. **S0-5** latent; one-line correction proposed, awaiting your decision. **Siblings** `suspendAll` and `hibernate` share the S0-1 pattern.
 3. **S05-A**: 340 pt page in a 320 pt window on iPad, in a hosted test only.
 4. **S0-3**: the cause inside the runner is unproven. The app's own jank under many live pages (55 to 72 stalls of 0.25 to 0.8 s over 115 pages) is real and not addressed.
@@ -171,7 +178,7 @@ Skipped and expected-failure counts: skipped 8 (iPad tests on iPhone, by design)
 6. Coverage blocked: keyboard presentation, real rotation, Stage Manager, hardware shortcuts, iPad UI tests, macOS 14 and iOS 17.
 7. Instruments and `xctrace` were not run.
 8. The brand-new-tab interval before the phone layout reports its insets was not examined (section 4).
-9. 32 uncommitted paths in the working tree; none of this work is committed.
+9. ~~32 uncommitted paths in the working tree; none of this work is committed.~~ Committed on `main` (2026-11-18, `cc6ff3c`).
 10. The iPad simulator device created for this work still exists (`xcrun simctl delete 02C512CA-D9B2-402D-9806-82BB6C59B50C` removes it).
 
 ## 12. Stage 1 readiness
@@ -183,10 +190,10 @@ Skipped and expected-failure counts: skipped 8 (iPad tests on iPhone, by design)
 | S0-3 profiled with reproducible traces | **Met** for attribution (two consistent runs); cause inside the runner not proven |
 | Stale-callback risk tested or documented | **Met** (latent, tested) |
 | iPad and hosted iPhone tests executed, or blockers recorded | **Met**, with the blockers in section 7 |
-| Relevant regressions rerun in isolation | **Partly**: passed (246, 8, 195), but one run's isolation guard failed and is unattributed |
+| Relevant regressions rerun in isolation | **Met** (2026-11-18, section 14): 13 classes, 119 tests, 0 failures, isolation passed for every class. Earlier: 246, 8 and 195 tests passed |
 | Report with an explicit decision | **Met** (this section) |
 
-**Decision: conditionally ready for Stage 1.** Condition: close the isolation flag first by closing the installed Browser Setu and rerunning the unit regression through `scripts/test-isolated.sh`; if the flag repeats, bisect by class. Nothing else blocks a Stage 1 start; the open items above do not depend on it.
+**Decision (2026-11-18): ready for Stage 1.** The one condition, the isolation flag, is closed (section 14). The open items in section 11 do not block a Stage 1 start; they are carried into the scope below. Stage 1 is not started and needs the owner's approval of its plan first.
 
 ## 13. Updated recommended Stage 1 scope (not started)
 
@@ -196,3 +203,30 @@ Skipped and expected-failure counts: skipped 8 (iPad tests on iPhone, by design)
 4. **iPad layout:** schedule S05-A and the 50 pt sidebar observation as their own small items; iPad has no split panes, so Research Desk-style work stays macOS-only.
 5. **Session and resource identity (Stage 2) inputs:** the app's own main-thread stalls under many pages (section 5) and the latent stale-callback exposure are the two concrete measurements to carry forward; the tab-switch command itself is already cheap (≤ 3 ms).
 6. Keep the benchmark as corrected: it separates command handling from what the UI observes.
+
+## 14. Closure of the isolation flag (2026-11-18)
+
+**Environment.** Apple M6, 16 GB, macOS 27.2.1 (26B7131), Xcode 27.2 (27B52). A new Mac on which Browser Setu had never been installed, so every file the guard saw in the app's own places was made by the tests. Branch `main`, HEAD `cc6ff3c`, plus the two files in section 8 (uncommitted).
+
+**Reproduction.** `zsh scripts/test-isolated.sh --per-class -only-testing:BrowserSetuMacTests/<Class> …` with the 13 classes below, before any change:
+
+| Class | Guard result |
+|---|---|
+| `Stage0BaselineTests` (13 tests, 0 failures) | **failed**: `added: $DARWIN_USER_CACHE_DIR/com.browsersetu.mac` (its only content `com.apple.metalfe`, the tolerated Metal shader cache). Evidence `/private/tmp/bs-isolation-evidence/20261118-232006-BrowserSetuMacTests_Stage0BaselineTests` |
+| 11 classes, from `Stage0RecoveryTests` to `TabScalingTests` | passed |
+| `PrivacyIntegrationTests` (30 tests, 0 failures) | **failed**: `added: …/com.browsersetu.mac/Cache.db`, `Cache.db-shm`, `Cache.db-wal`, the same files as the original flag. Evidence `/private/tmp/bs-isolation-evidence/20261118-232311-BrowserSetuMacTests_PrivacyIntegrationTests` |
+
+**Attribution (proven).** `Cache.db` held exactly two responses, `http://127.0.0.1:18765/_reset` and `http://127.0.0.1:18765/_requests`: the fixture server calls in `Tests/PrivacyIntegrationTests.swift:32-33` (`String(contentsOf:)`). Those load through the shared URL loading system, whose disk cache macOS keeps in the per-user system cache folder named after the bundle id. That folder is outside the home the runner relocates, so it is shared with the person's own app. The app's own networking was not involved; `testNoTelemetryOrAnalyticsOrBackgroundNetworkingInSources` already restricts it. The earlier flag's timing (section 10) fits this class.
+
+**Correction** (section 8): a test process gets its own URL cache inside the relocated home (`TestIsolation.isolateSharedURLCache`, Debug only), and the guard tolerates the bundle's system cache folder itself, macOS-made for the Metal cache, while still checking every file inside it. No test was weakened and no assertion changed. The first version of the change failed `testNoTelemetryOrAnalyticsOrBackgroundNetworkingInSources` because its doc comment named the shared session; the comment was reworded and the test was left as it is.
+
+**Proof.** The test-made cache folder was moved aside, then:
+
+| Run | Result |
+|---|---|
+| `--per-class --build` `Stage0BaselineTests`, `PrivacyIntegrationTests` (`/private/tmp/bs-test-232541-…`, `bs-test-232711-…`) | 13 and 30 tests, 0 failures; isolation passed for both; the system folder afterwards holds only `com.apple.metalfe` (no `Cache.db`) |
+| Final gate, `--per-class`, 13 classes, 167 s (`/private/tmp/bs-test-2328*` to `bs-test-2330*`, evidence `/private/tmp/bs-isolation-evidence/20261118-232808-…` to `20261118-233004-…`) | **119 tests, 0 failures, 0 skipped, isolation passed for all 13 classes**: Stage0Baseline 13, Stage0Recovery 3, Stage05StaleCallback 2, ResourceGovernor 6, TabRecency 9, TabBehavior 10, TabFeaturePure 6, TabPrivacy 9, Favorites 22, PageDefense 4, PerformanceBaseline 2, TabScaling 3, PrivacyIntegration 30 |
+
+Expected failures in that gate: 1 test, `testALateProcessEndFromAnOldEngineDoesNotChangeTheSleepingTab`. XCTest reports it as passed because the strict wrapper accepted its two known assertion failures (`Stage05StaleCallbackTests.swift:48-49`). It still documents S0-5 as latent; it is not a passing guarantee.
+
+**Not rerun at closure:** the wider 27-class set of section 10 (its class list was in a log on the previous Mac), the Mac UI tests and the iOS and iPad tests. None of them is affected by the change, which applies only to Mac test processes.

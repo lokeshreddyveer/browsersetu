@@ -76,7 +76,10 @@ enum TestIsolation {
         let environment = ProcessInfo.processInfo.environment
         let target = (NSTemporaryDirectory() as NSString).appendingPathComponent("bs-test-home-\(getuid())")
         switch homeDecision(environment: environment, arguments: CommandLine.arguments, realHome: realHome, relocatedHome: target) {
-        case .notATestProcess, .alreadyRelocated:
+        case .notATestProcess:
+            return
+        case .alreadyRelocated:
+            isolateSharedURLCache(home: environment["CFFIXED_USER_HOME"] ?? target)
             return
         case .relocate(let home):
             for sub in ["Library/Preferences", "Library/Caches", "Library/WebKit", "Library/Application Support"] {
@@ -90,6 +93,15 @@ enum TestIsolation {
             execv(executable, arguments)
             fatalError("TestIsolation: could not restart with a relocated home (errno \(errno)); refusing to run a test against the person's own data")
         }
+    }
+
+    /// The shared URL cache does not follow the relocated home: macOS keeps it in the per-user system cache folder named after the bundle id (`DARWIN_USER_CACHE_DIR/com.browsersetu.mac/Cache.db`),
+    /// the same folder the person's own app uses. A test that loads a URL through the shared loading system (the shared session, `String(contentsOf:)`) would write there, so a test process gets
+    /// its own cache inside the relocated home before anything loads.
+    static func isolateSharedURLCache(home: String) {
+        let directory = URL(fileURLWithPath: home).appendingPathComponent("Library/Caches/bs-test-urlcache", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        URLCache.shared = URLCache(memoryCapacity: 4 << 20, diskCapacity: 32 << 20, directory: directory)
     }
     #endif
 }

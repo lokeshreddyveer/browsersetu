@@ -99,6 +99,8 @@ def tolerated(path):
     if path.startswith(os.path.join(HOME, "Library", "Logs", "DiagnosticReports") + os.sep) and os.path.basename(path).startswith("Browser Setu") and path.endswith(".ips"): return "CRASH REPORT written by macOS (the app under test crashed)"
     cache = getconf("DARWIN_USER_CACHE_DIR").rstrip("/")
     if cache:
+        # The bundle's folder itself: macOS creates it (or updates its timestamp) to hold the Metal cache below. Every file inside it is still checked one by one, so a Cache.db written there still counts.
+        if path == os.path.join(cache, BUNDLE): return "system cache folder (holds the Metal shader cache)"
         for sub in ("com.apple.metal", "com.apple.metalfe"):
             if path.startswith(os.path.join(cache, BUNDLE, sub)): return "system Metal shader cache"
     return None
