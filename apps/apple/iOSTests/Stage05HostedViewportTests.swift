@@ -35,6 +35,12 @@ final class Stage05HostedViewportTests: XCTestCase {
         let tab = model.openTab(url: URL(string: "about:blank#hosted")!, isPrivate: false)
         let web = (tab.engine as! WebKitTab).webView
         hosted?.attach(web)
+        // The tab's own first load re-applies the model's room (zero here) when it starts and finishes (TabController.engineLoadingChanged / engineDidFinishLoading).
+        // Requests written straight to the engine before that load is over have a second writer racing them (S0-2). Waiting for it keeps the test the only writer.
+        // (Stage 1: on a real iPhone the load finished after the requests, which the simulator had hidden.)
+        let end = CACurrentMediaTime() + 5
+        while (tab.isLoading || web.isLoading), CACurrentMediaTime() < end { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
         return (model, tab, web)
     }
 

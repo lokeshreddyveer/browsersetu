@@ -369,9 +369,13 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
         let reporting = ScrollReportingWebView(frame: .zero, configuration: configuration)
         webView = reporting
         #else
-        webView = WKWebView(frame: .zero, configuration: configuration)
+        let reporting = SafeAreaReportingWebView(frame: .zero, configuration: configuration)
+        webView = reporting
         #endif
         super.init()
+        #if os(iOS)
+        reporting.onSafeAreaChange = { [weak self] in self?.webViewSafeAreaChanged() }
+        #endif
         #if os(iOS)
         // On an iPhone Safari writes "… Version/26.0 Mobile/15E148 Safari/604.1". A web view appends the application name AFTER "Mobile/…", so it
         // could only say "Mobile/15E148 Version/26.0 Safari/605.1.15": the parts out of order and the wrong WebKit number. Sites that judge whether a
@@ -444,6 +448,25 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
     private var editableFocused = true
     #if os(iOS)
     private var lastViewportInsets = UIEdgeInsets.zero
+    /// The room last asked for, kept so it can be told again when the web view's own safe area changes.
+    private var requestedViewportInsets: (top: CGFloat, bottom: CGFloat)?
+    /// The pending re-tell after a safe-area change, replaced by every newer change.
+    private var safeAreaRetell: DispatchWorkItem?
+    /// The web view's safe area changed (its frame moved under or away from the status bar or home indicator, after a layout change, a fold or a turn). What WebKit
+    /// was told includes that safe area, and the room is asked for before layout moves the page, so the room is told again once layout has settled. During an
+    /// animated layout change the safe area changes on every frame, so the re-tell waits until it has stopped changing for a moment and then happens once, with the
+    /// latest room and the latest safe area. Unchanged values are dropped by `setViewportInsets`, so this costs nothing when nothing moved.
+    private func webViewSafeAreaChanged() {
+        guard requestedViewportInsets != nil else { return }
+        safeAreaRetell?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, let room = self.requestedViewportInsets else { return }
+            self.safeAreaRetell = nil
+            self.setViewportInsets(top: room.top, bottom: room.bottom)
+        }
+        safeAreaRetell = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: work)
+    }
     #endif
 
     private func refreshEditableFocus() {
@@ -507,6 +530,7 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
     /// Room at the foot of the page for a toolbar floating over it, so the last of the page can be scrolled clear of the bar.
     func setViewportInsets(top: CGFloat, bottom: CGFloat) {
         #if os(iOS)
+        requestedViewportInsets = (top, bottom)
         let insets = UIEdgeInsets(top: top, left: 0, bottom: bottom, right: 0)
         // Giving the page its own insets replaces the room WebKit keeps by itself for the status bar and the home indicator, so a site's sticky or fixed header would stick behind
         // the clock. When the page runs under those areas, they are added to what the page is told (not to the scrolling room, which the system already adds).
@@ -514,6 +538,11 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
         let told = UIEdgeInsets(top: top + safe.top, left: 0, bottom: bottom + safe.bottom, right: 0)
         #if DEBUG
         debugLog("VIEWPORT in top=\(top) bottom=\(bottom) safe=\(safe.top)/\(safe.bottom) told=\(told.top)/\(told.bottom) last=\(lastViewportInsets.top)/\(lastViewportInsets.bottom)")
+        #endif
+        #if DEBUG
+        // Stage 1 shadow mode: counts this call and checks the resolver's "told" formula against the line above; it applies nothing.
+        ViewportShadow.writer(overlayTop: top, overlayBottom: bottom, webViewSafeTop: safe.top, webViewSafeBottom: safe.bottom,
+                              told: (told.top, told.bottom), changed: told != lastViewportInsets)
         #endif
         guard told != lastViewportInsets else { return }
         lastViewportInsets = told
@@ -2010,6 +2039,18 @@ extension PageTint {
     }
     #endif
 }
+
+#if os(iOS)
+/// A web view that says when its own safe area changes (it moved under or away from the status bar or the home indicator). It only reads what UIKit already
+/// tells every view; nothing is injected into the page.
+final class SafeAreaReportingWebView: WKWebView {
+    var onSafeAreaChange: (() -> Void)?
+    override func safeAreaInsetsDidChange() {
+        super.safeAreaInsetsDidChange()
+        onSafeAreaChange?()
+    }
+}
+#endif
 
 #if os(macOS)
 /// A web view that tells the shell how far the user scrolled. It only reads the scroll event the view already

@@ -74,12 +74,30 @@ struct PhoneRootView: View {
         // With the keyboard up the bar sits on it, so no room is kept for the home indicator.
         let home = editing ? 0 : Self.bottomSafeInset
         switch sheetKind {
-        case .card: return (editing ? 72 : PhoneBarSheet.height(.card)) + home
+        case .card: return (editing ? Self.editingCardHeight : PhoneBarSheet.height(.card)) + home
         case .compact: return PhoneBarSheet.height(.compact) + 6 + home
         }
     }
 
+    /// The card's height while the address is edited: it shrinks to its field, which sits on the keyboard.
+    private static let editingCardHeight: CGFloat = 72
+
     private var sheetKind: PhoneBarSheet.Kind { model.phoneSpec.compactBar || landscape ? .compact : .card }
+
+    #if DEBUG
+    /// Stage 1 shadow mode: the resolver's input, built from the same state this screen uses, beside this screen's own answer. Read only by `ViewportShadow`.
+    private var viewportShadowSample: ViewportShadowSample {
+        let input = PhoneViewportInput(safeTop: Self.topSafeInset, safeBottom: Self.bottomSafeInset, hasActiveTab: model.active != nil, floatingBars: floatingBars,
+                                       sheetAtBottom: sheetAtBottom, barsHidden: barsHidden, sheet: sheetKind == .card ? .card : .compact,
+                                       editingAddress: model.addressBar.isEditing, showsDock: showsDock, pageHasFixedBottomBar: model.activeFixedBottom,
+                                       landscape: landscape, dockOnItsOwnStrip: dockOnItsOwnStrip, floatingAddressVisible: model.floatingAddressVisible,
+                                       metrics: .init(cardHeight: PhoneBarSheet.height(.card), compactHeight: PhoneBarSheet.height(.compact),
+                                                      cardEditingHeight: Self.editingCardHeight, dockHeight: PhoneChrome.height, dockLift: PhoneChrome.dockLift))
+        let legacy = PhoneViewportOutput(overlayTop: floatingInsets.top, overlayBottom: floatingInsets.bottom, reservedPageBottom: pageBottomRoom,
+                                         reservedAreaBottom: pageReservedBottom)
+        return ViewportShadowSample(input: input, legacy: legacy)
+    }
+    #endif
 
     /// How much room the sheet takes (its tallest), with its gap.
     private var floatingRoom: CGFloat { PhoneBarSheet.height(sheetKind) + (sheetKind == .card ? 4 : 14) }
@@ -197,6 +215,10 @@ struct PhoneRootView: View {
             #endif
             model.phoneBottomInset = bottom
         }
+        #if DEBUG
+        // Stage 1 shadow mode: compares only; the two lines above stay the authority.
+        .onChange(of: viewportShadowSample, initial: true) { _, sample in ViewportShadow.compare(sample.input, legacy: sample.legacy) }
+        #endif
         .motion(.spring(response: 0.4, dampingFraction: 0.88), value: showsSidebar)
         .motion(.spring(response: 0.4, dampingFraction: 0.88), value: showsTabRail)
         .sheet(item: $model.sheet) { SheetContainer(sheet: $0) }
