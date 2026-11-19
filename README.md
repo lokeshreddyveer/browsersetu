@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/brand/browser-setu-icon.svg" alt="Browser Setu" width="112" height="112">
+  <img src="docs/brand/browser-setu-icon.png" alt="Browser Setu" width="112" height="112">
 </p>
 
 <h1 align="center">Browser Setu</h1>

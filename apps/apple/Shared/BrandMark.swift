@@ -1,7 +1,6 @@
 import SwiftUI
 
-// The Browser Setu mark and name. "Setu" is Sanskrit and Hindi for bridge, so the mark is a shield holding a bridge: a deck, the arch that meets it at its middle, two piers.
-// Drawn from paths (the editable source is docs/brand/browser-setu-mark.svg, the same geometry), so it is sharp at any size, takes the accent colour, and needs no image file.
+// The Browser Setu mark and name. The mark is the app icon's artwork (`SetuIcon` in the asset catalogs, the same image as `AppIcon`); the name is set in type.
 
 // "Setu" is Sanskrit for bridge or causeway: Rama Setu is the causeway of stones laid across the sea. The mark is that causeway, a row of stones arching over deep-teal water, with a saffron sun rising behind it.
 // Saffron is the old colour of the sun, fire and purity; turmeric ("the golden one") the colour of blessing; the sea is deep teal.
@@ -14,48 +13,23 @@ enum SetuPalette {
     static let saffron = LinearGradient(colors: [saffronTop, saffronBottom], startPoint: .top, endPoint: .bottom)
 }
 
-/// The Browser Setu icon, for beside the name (24 to 48 pt). Three layers: a saffron protective ring, the world (deep-blue ocean, golden continents, India facing us), and a large shield with a lock.
-/// Land is Natural Earth (public domain). Source: docs/brand/browser-setu-icon-bubble.svg, same geometry. A vector: sharp on any display, in light and dark.
+/// The Browser Setu icon (the app icon's artwork: an ocean globe with an orbit and an arrow), for beside the name and in the intro film. It is the same image the app
+/// icon uses (`SetuIcon` in the asset catalog), clipped to the icon's rounded square so the artwork's pale margin never shows on a dark background.
 struct SetuMark: View {
     var size: CGFloat = 28
-    /// The film's own colours (ice teal, deep teal, highlight) in place of the app icon's gold and blue.
+    /// Kept for the film's call site; the icon artwork has one colour scheme, so it no longer changes anything.
     var teal = false
-    private static let tealMap: [UInt32: UInt32] = [0xFFE08C: 0xDFF3F8, 0xF6A73A: 0x8FD0E3, 0xE8782A: 0x397E96, 0x2F86D8: 0x397E96, 0x125AA8: 0x1F5870, 0x0A2C66: 0x10303F, 0xFFE3A0: 0xDFF3F8, 0xF4B94D: 0x8FD0E3, 0xE48F2C: 0x397E96, 0x143E90: 0x1F5870, 0x081F58: 0x0E2A38]
-
-    private static func hex(_ v: UInt32, _ a: Double = 1) -> Color { Color(red: Double((v >> 16) & 255) / 255, green: Double((v >> 8) & 255) / 255, blue: Double(v & 255) / 255, opacity: a) }
-    private func shape(_ d: String, _ t: CGAffineTransform = .identity) -> SVGShape { SVGShape(d: d, unit: 128, transform: t) }
-    private let shieldPath = "M64 29C76 34.5 87 34.5 94 40C94 68 82 90 64 103C46 90 34 68 34 40C41 34.5 52 34.5 64 29Z"
-    private let landTransform = CGAffineTransform(translationX: -128, y: -94).concatenating(CGAffineTransform(scaleX: 0.703, y: 0.703)).concatenating(CGAffineTransform(translationX: 64, y: 64))
 
     var body: some View {
-        let u = size / 128
-        func hex(_ v: UInt32, _ a: Double = 1) -> Color { Self.hex(teal ? (Self.tealMap[v] ?? v) : v, a) }
-        let cream = hex(0xFFF4DC)
-        return ZStack {
-            // 1. the protective ring
-            Circle().strokeBorder(LinearGradient(colors: [hex(0xFFE08C), hex(0xF6A73A), hex(0xE8782A)], startPoint: .top, endPoint: .bottom), lineWidth: 5 * u).frame(width: 124 * u, height: 124 * u).position(x: 64 * u, y: 64 * u)
-            Circle().fill(Color.white.opacity(0.07)).frame(width: 113 * u, height: 113 * u).position(x: 64 * u, y: 64 * u)
-            // 2. the world
-            Circle().fill(RadialGradient(colors: [hex(0x2F86D8), hex(0x125AA8), hex(0x0A2C66)], center: .init(x: 0.35, y: 0.28), startRadius: 0, endRadius: 85 * u)).frame(width: 90 * u, height: 90 * u).position(x: 64 * u, y: 64 * u)
-            ZStack {
-                shape(SetuLandData.path, landTransform).fill(LinearGradient(colors: [hex(0xFFE3A0), hex(0xF4B94D), hex(0xE48F2C)], startPoint: UnitPoint(x: 0.2, y: 0.17), endPoint: UnitPoint(x: 0.8, y: 0.83)))
-                Circle().fill(RadialGradient(colors: [.white.opacity(0.45), .white.opacity(0)], center: .init(x: 0.3, y: 0.2), startRadius: 0, endRadius: 50 * u)).frame(width: 90 * u, height: 90 * u).position(x: 64 * u, y: 64 * u)
-            }
-            .frame(width: size, height: size).mask(Circle().frame(width: 90 * u, height: 90 * u).position(x: 64 * u, y: 64 * u))
-            Circle().strokeBorder(Color.white.opacity(0.35), lineWidth: 1.2 * u).frame(width: 90 * u, height: 90 * u).position(x: 64 * u, y: 64 * u)
-            // 3. protection, large, over the world (smaller below 44 pt, so the continents still show)
-            Group {
-            shape(shieldPath).fill(LinearGradient(colors: [hex(0x143E90), hex(0x081F58)], startPoint: .top, endPoint: .bottom)).opacity(0.78)
-            shape(shieldPath).stroke(cream, style: StrokeStyle(lineWidth: 3 * u, lineJoin: .round))
-            shape("M55.5 70V63.8C55.5 59.1 59.3 55.3 64 55.3C68.7 55.3 72.5 59.1 72.5 63.8V70").stroke(cream, style: StrokeStyle(lineWidth: 4.2 * u, lineCap: .round))
-            RoundedRectangle(cornerRadius: 4.6 * u, style: .continuous).fill(cream).frame(width: 28 * u, height: 22 * u).position(x: 64 * u, y: 79.5 * u)
-            Circle().fill(hex(0x0A2C66)).frame(width: 6.6 * u, height: 6.6 * u).position(x: 64 * u, y: 77.6 * u)
-            shape("M62.5 79H65.5L66.4 85H61.6Z").fill(hex(0x0A2C66))
-            }
-            .frame(width: size, height: size).scaleEffect(size < 44 ? 0.74 : 1, anchor: UnitPoint(x: 0.5, y: 0.5))
-        }
-        .frame(width: size, height: size)
-        .accessibilityHidden(true)
+        Image("SetuIcon")
+            .resizable()
+            .interpolation(.high)
+            .antialiased(true)
+            .scaledToFit()
+            // The artwork's own rounded square sits about 1.5 % inside its edges; this clips just inside it.
+            .clipShape(RoundedRectangle(cornerRadius: size * 0.2, style: .continuous).inset(by: size * 0.02))
+            .frame(width: size, height: size)
+            .accessibilityHidden(true)
     }
 }
 
