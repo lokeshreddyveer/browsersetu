@@ -8,10 +8,11 @@ final class PhoneViewportGeometryTests: XCTestCase {
     private let metrics = PhoneViewportInput.Metrics(cardHeight: 134, compactHeight: 48, cardEditingHeight: 72, dockHeight: 40, dockLift: -8)
 
     private func input(safeTop: CGFloat = 59, safeBottom: CGFloat = 34, active: Bool = true, floatingBars: Bool = true, atBottom: Bool = false, hidden: Bool = false,
-                       sheet: PhoneViewportInput.Sheet = .card, editing: Bool = false, dock: Bool = false, fixedBottom: Bool = false, landscape: Bool = false,
-                       dockStrip: Bool = false, floatingAddress: Bool = false) -> PhoneViewportInput {
+                       sheet: PhoneViewportInput.Sheet = .card, editing: Bool = false, keyboard: Bool? = nil, dock: Bool = false, fixedBottom: Bool = false,
+                       landscape: Bool = false, dockStrip: Bool = false, floatingAddress: Bool = false) -> PhoneViewportInput {
+        // Editing the address normally raises the keyboard; `keyboard` says otherwise (a hardware keyboard) or raises it for a field in the page.
         PhoneViewportInput(safeTop: safeTop, safeBottom: safeBottom, hasActiveTab: active, floatingBars: floatingBars, sheetAtBottom: atBottom, barsHidden: hidden,
-                           sheet: sheet, editingAddress: editing, showsDock: dock, pageHasFixedBottomBar: fixedBottom, landscape: landscape,
+                           sheet: sheet, editingAddress: editing, keyboardUp: keyboard ?? editing, showsDock: dock, pageHasFixedBottomBar: fixedBottom, landscape: landscape,
                            dockOnItsOwnStrip: dockStrip, floatingAddressVisible: floatingAddress, metrics: metrics)
     }
 
@@ -36,6 +37,15 @@ final class PhoneViewportGeometryTests: XCTestCase {
         XCTAssertEqual(PhoneViewportGeometry.resolve(input(atBottom: true, sheet: .compact, editing: true)), out(page: 54))
         // Editing does not change a sheet at the top.
         XCTAssertEqual(PhoneViewportGeometry.resolve(input(sheet: .card, editing: true)), out(138))
+    }
+
+    /// The home strip goes with the keyboard, not with editing: the keyboard hides the home indicator whichever field has it.
+    func testTheHomeStripFollowsTheKeyboardNotTheAddressBar() {
+        // A field in the page has the keyboard: full card or compact bar, no home strip.
+        XCTAssertEqual(PhoneViewportGeometry.resolve(input(atBottom: true, sheet: .card, keyboard: true)), out(page: 134))
+        XCTAssertEqual(PhoneViewportGeometry.resolve(input(atBottom: true, sheet: .compact, keyboard: true)), out(page: 54))
+        // Editing with no on-screen keyboard (a hardware keyboard): the short card, and the home indicator still shows.
+        XCTAssertEqual(PhoneViewportGeometry.resolve(input(atBottom: true, sheet: .card, editing: true, keyboard: false)), out(page: 106))
     }
 
     func testNoVisibleChromeMeansNoRoom() {
@@ -96,6 +106,42 @@ final class PhoneViewportGeometryTests: XCTestCase {
             }
         }
         XCTAssertEqual(count, 2048 * 2 * 3)
+    }
+
+    // MARK: iOS 26 and later: a bottom sheet overlays the page instead of shortening it
+
+    func testOverlayModeMovesTheBottomSheetsRoomFromReservedToOverlay() {
+        var card = input(atBottom: true, sheet: .card); card.bottomChromeOverlays = true
+        XCTAssertEqual(PhoneViewportGeometry.resolve(card), out(0, 168))
+        var compact = input(atBottom: true, sheet: .compact); compact.bottomChromeOverlays = true
+        XCTAssertEqual(PhoneViewportGeometry.resolve(compact), out(0, 88))
+        var editing = input(atBottom: true, sheet: .card, editing: true); editing.bottomChromeOverlays = true
+        XCTAssertEqual(PhoneViewportGeometry.resolve(editing), out(0, 72))
+        // A top sheet and the dock are not affected.
+        var top = input(sheet: .card); top.bottomChromeOverlays = true
+        XCTAssertEqual(PhoneViewportGeometry.resolve(top), out(138))
+        var dock = input(floatingBars: false, dock: true, fixedBottom: true); dock.bottomChromeOverlays = true
+        XCTAssertEqual(PhoneViewportGeometry.resolve(dock), out(area: 40))
+    }
+
+    func testOverlayModeKeepsEveryAmountAndNeverCompensatesTwice() {
+        for mask in 0..<(1 << 10) {
+            func bit(_ n: Int) -> Bool { mask & (1 << n) != 0 }
+            // The bar sheet (Attached style) and the dock (Floating / Pills styles) are different layout styles, never on together.
+            if bit(1) && bit(5) { continue }
+            for sheet in [PhoneViewportInput.Sheet.card, .compact] {
+                var i = input(active: bit(0), floatingBars: bit(1), atBottom: bit(2), hidden: bit(3), sheet: sheet, editing: bit(4), dock: bit(5),
+                              fixedBottom: bit(6), landscape: bit(7), dockStrip: bit(8), floatingAddress: bit(9))
+                let reserved = PhoneViewportGeometry.resolve(i)
+                i.bottomChromeOverlays = true
+                let overlay = PhoneViewportGeometry.resolve(i)
+                XCTAssertEqual(overlay.overlayBottom, reserved.reservedPageBottom, "same room, other kind: \(i)")
+                XCTAssertEqual(overlay.reservedPageBottom, 0)
+                XCTAssertEqual(overlay.reservedAreaBottom, reserved.reservedAreaBottom)
+                XCTAssertEqual(overlay.overlayTop, reserved.overlayTop)
+                XCTAssertFalse(overlay.compensatesBottomTwice, "\(i)")
+            }
+        }
     }
 
     func testRepeatedInputGivesTheSameOutput() {

@@ -15,10 +15,11 @@ struct PhoneBarSheet: View {
     let kind: Kind
     let folded: Bool
     let atBottom: Bool
+    /// A keyboard is up (for the address or for a field in the page). Given by the screen, which tracks the keyboard once (`KeyboardLift`) for this sheet and for the
+    /// page's room alike, so the two can never disagree.
+    let keyboardUp: Bool
     @ObservedObject private var icons = FaviconStore.shared
     @ObservedObject private var look = LookState.shared
-    /// With the keyboard up the sheet sits on top of it, so the room kept for the home indicator or the status bar is gone.
-    @State private var keyboardUp = false
     /// The room for the status bar and the home indicator. Read again after the window exists (at the first draw it can still be zero) and when the phone is turned.
     @ObservedObject private var insets = WindowInsets.shared
 
@@ -49,8 +50,9 @@ struct PhoneBarSheet: View {
             } else {
             // The dock: attached to the screen's edge (not hovering), its outer corners rounded and its other edge running under the home indicator or the status bar. Open it is
             // as tall as its content plus that safe area; folded it gathers into the small capsule and lifts clear of the edge. One shape whose corners change, so it moves smoothly.
-            // Only while the address is being typed AND the keyboard is really up does the sheet sit on the keyboard with no room kept for the home indicator.
-            let safe = keyboardUp && address.isEditing && atBottom ? 0 : (atBottom ? insets.bottom : insets.top)
+            // While a keyboard is really up (for the address or for a field in the page) the sheet sits on it with no room kept for the home indicator, which the
+            // keyboard hides; the page keeps the same rule (`PhoneRootView.bottomSheetRoom`).
+            let safe = keyboardUp && atBottom ? 0 : (atBottom ? insets.bottom : insets.top)
             let outer: CGFloat = folded ? Self.foldedHeight / 2 : 30, inner: CGFloat = folded ? Self.foldedHeight / 2 : 0
             let shape = UnevenRoundedRectangle(topLeadingRadius: atBottom ? outer : inner, bottomLeadingRadius: atBottom ? inner : outer,
                                                bottomTrailingRadius: atBottom ? inner : outer, topTrailingRadius: atBottom ? outer : inner, style: .continuous)
@@ -67,20 +69,23 @@ struct PhoneBarSheet: View {
             }
             .frame(width: folded ? min(Self.foldedWidth, geo.size.width) : geo.size.width, height: folded ? Self.foldedHeight : open + safe)
             .floatingGlass(shape, solidity: folded ? 0.55 : 0.3)
-            .offset(y: folded ? (atBottom ? -6 : 6) : (atBottom ? safe : -safe))
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: atBottom ? .bottom : .top)
+            #if DEBUG
+            .viewportProbe("sheet.glass")
+            #endif
+            .offset(y: folded ? (atBottom ? -6 : 6) : 0)
+            // Open, the glass is taller than this reader (its content plus the safe strip it runs under). A reader places a child larger than itself at its top-leading
+            // corner, which put the bottom glass one safe strip too low (a dark band above it, its buttons in the home area) while the top glass happened to land right.
+            // The glass now sits in a frame of exactly the reader's height plus that strip, aligned to the edge it belongs to, and the frame reaches over the edge:
+            // at the bottom it starts at the reader's top and runs down under the home indicator; at the top it is lifted by the strip so it runs up under the clock.
+            .frame(width: geo.size.width, height: geo.size.height + (folded ? 0 : safe), alignment: atBottom ? .bottom : .top)
+            .offset(y: atBottom || folded ? 0 : -safe)
             }
         }
+        #if DEBUG
+        .viewportProbe("sheet.container")
+        #endif
         // Room for the tallest it gets, so the sheet changing size never moves anything else.
         .frame(height: Self.height(kind))
-        // The keyboard's real frame decides, not a show / hide pair that can be missed (leaving the app with the keyboard up, for one): it is up only while it covers the screen's foot.
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
-            let frame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect) ?? .zero
-            keyboardUp = frame.minY < UIScreen.main.bounds.height - 1
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardUp = false }
-        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in if !address.isEditing { keyboardUp = false } }
-        .onChange(of: address.isEditing) { _, editing in if !editing { keyboardUp = false } }
         .animation(.spring(response: 0.42, dampingFraction: 0.86), value: folded)
         .animation(.spring(response: 0.34, dampingFraction: 0.88), value: address.isEditing)
     }

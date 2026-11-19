@@ -555,6 +555,9 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
             scroll.contentInset.top = top
             scroll.contentInset.bottom = bottom
             scroll.verticalScrollIndicatorInsets = insets
+            // From iOS 26 a bar at the bottom floats over the page (`PhoneRootView.bottomChromeOverlays`): WebKit is told the strip it covers, which keeps the page's fixed
+            // footers above it, while the scrolling room above lets the last of the page be scrolled clear of it. The top keeps the path above, which already works.
+            if #available(iOS 26, *) { self.webView.obscuredContentInsets = UIEdgeInsets(top: 0, left: 0, bottom: bottom, right: 0) }
             if wasAtTop, top > 0 { scroll.contentOffset.y = -scroll.adjustedContentInset.top }
         }
         // From iOS 26 the edge under a floating bar is softened, as it is in Safari, so the bar's own controls stay legible over the page.

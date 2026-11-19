@@ -34,13 +34,8 @@ struct PhoneRootView: View {
 
     private static var bottomSafeInset: CGFloat { WindowInsets.shared.bottom }
 
-    /// Room kept clear of the page for the whole dock, measured from the home-indicator edge (the page already stops there): the dock's height and a small gap.
-    /// It must not read the window's own safe area while laying out: that made the whole screen come up blank.
-    private var pageReservedBottom: CGFloat {
-        // Only for a page with its own bar along the bottom, and kept the same when the dock folds into its pill: the page changing size while you scroll made its content jump.
-        guard showsDock, model.activeFixedBottom, !landscape, !dockOnItsOwnStrip, !model.floatingAddressVisible else { return 0 }
-        return PhoneChrome.height + PhoneChrome.dockLift + 8
-    }
+    /// Room kept clear of the page for the whole dock (a page with its own bottom bar under the Floating or Immersive dock), from `viewportGeometry`.
+    private var pageReservedBottom: CGFloat { viewportGeometry.reservedAreaBottom }
 
     private var landscape: Bool { isPhone && verticalSizeClass == .compact }
     /// The iPhone's bar layouts: no bar fixed to an edge. ONE sheet of glass floats over the page, which runs to the screen's edge behind it (see `PhoneBarSheet`), and the same
@@ -67,16 +62,11 @@ struct PhoneRootView: View {
         return PhoneBarSheet.height(sheetKind) + (sheetKind == .card ? 0 : 6) + 10
     }
 
-    /// How much of the page's foot a bar at the bottom takes: the page view ends above it, so the footers and bottom tab bars of a site sit clear of it and are never hidden behind it.
-    private var pageBottomRoom: CGFloat {
-        guard floatingBars, sheetAtBottom, !barsHidden, model.active != nil else { return 0 }
-        let editing = model.addressBar.isEditing
-        // With the keyboard up the bar sits on it, so no room is kept for the home indicator.
-        let home = editing ? 0 : Self.bottomSafeInset
-        switch sheetKind {
-        case .card: return (editing ? Self.editingCardHeight : PhoneBarSheet.height(.card)) + home
-        case .compact: return PhoneBarSheet.height(.compact) + 6 + home
-        }
+    /// iOS 26 and later: the page runs under a bar sheet at the bottom and WebKit is told the covered strip (`obscuredContentInsets`), which keeps a site's fixed footers
+    /// and bottom tab bars above the bar; no dark strip is left behind the bar. Before iOS 26 WebKit cannot do that, so the page view is shortened instead.
+    private static var bottomChromeOverlays: Bool {
+        if #available(iOS 26, *) { return true }
+        return false
     }
 
     /// The card's height while the address is edited: it shrinks to its field, which sits on the keyboard.
@@ -84,31 +74,37 @@ struct PhoneRootView: View {
 
     private var sheetKind: PhoneBarSheet.Kind { model.phoneSpec.compactBar || landscape ? .compact : .card }
 
-    #if DEBUG
-    /// Stage 1 shadow mode: the resolver's input, built from the same state this screen uses, beside this screen's own answer. Read only by `ViewportShadow`.
-    private var viewportShadowSample: ViewportShadowSample {
-        let input = PhoneViewportInput(safeTop: Self.topSafeInset, safeBottom: Self.bottomSafeInset, hasActiveTab: model.active != nil, floatingBars: floatingBars,
-                                       sheetAtBottom: sheetAtBottom, barsHidden: barsHidden, sheet: sheetKind == .card ? .card : .compact,
-                                       editingAddress: model.addressBar.isEditing, showsDock: showsDock, pageHasFixedBottomBar: model.activeFixedBottom,
-                                       landscape: landscape, dockOnItsOwnStrip: dockOnItsOwnStrip, floatingAddressVisible: model.floatingAddressVisible,
-                                       metrics: .init(cardHeight: PhoneBarSheet.height(.card), compactHeight: PhoneBarSheet.height(.compact),
-                                                      cardEditingHeight: Self.editingCardHeight, dockHeight: PhoneChrome.height, dockLift: PhoneChrome.dockLift))
-        let legacy = PhoneViewportOutput(overlayTop: floatingInsets.top, overlayBottom: floatingInsets.bottom, reservedPageBottom: pageBottomRoom,
-                                         reservedAreaBottom: pageReservedBottom)
-        return ViewportShadowSample(input: input, legacy: legacy)
+    /// Everything the page's geometry depends on, read once from this screen's state.
+    private var viewportInput: PhoneViewportInput {
+        PhoneViewportInput(safeTop: Self.topSafeInset, safeBottom: Self.bottomSafeInset, hasActiveTab: model.active != nil, floatingBars: floatingBars,
+                           sheetAtBottom: sheetAtBottom, barsHidden: barsHidden, sheet: sheetKind == .card ? .card : .compact,
+                           editingAddress: model.addressBar.isEditing, keyboardUp: keyboard.height > 0, showsDock: showsDock, pageHasFixedBottomBar: model.activeFixedBottom,
+                           landscape: landscape, dockOnItsOwnStrip: dockOnItsOwnStrip, floatingAddressVisible: model.floatingAddressVisible,
+                           metrics: .init(cardHeight: PhoneBarSheet.height(.card), compactHeight: PhoneBarSheet.height(.compact),
+                                          cardEditingHeight: Self.editingCardHeight, dockHeight: PhoneChrome.height, dockLift: PhoneChrome.dockLift),
+                           bottomChromeOverlays: Self.bottomChromeOverlays)
     }
+
+    /// The page's geometry: room told to WebKit (overlay) and room taken from the page view (reserved), worked out in one place (`PhoneViewportGeometry`). Every value
+    /// below comes from here; the formulas are not repeated in this view (Stage 2: two rules kept in two places had drifted apart).
+    private var viewportGeometry: PhoneViewportOutput { PhoneViewportGeometry.resolve(viewportInput) }
+
+    /// How much of the page's foot a bar at the bottom covers, whichever way it is kept clear (reserved before iOS 26, told to WebKit from iOS 26).
+    private var bottomSheetRoom: CGFloat { viewportGeometry.reservedPageBottom + viewportGeometry.overlayBottom }
+
+    /// How much the page view is shortened for a bar at the bottom, so a site's footers and bottom tab bars sit clear of it: the bar's room before iOS 26, nothing from iOS 26.
+    private var pageBottomRoom: CGFloat { viewportGeometry.reservedPageBottom }
+
+    #if DEBUG
+    /// The resolver's input and the answer this screen applies, for `ViewportShadow` (frame probes, write counts, the latest sample for hosted tests).
+    private var viewportShadowSample: ViewportShadowSample { ViewportShadowSample(input: viewportInput, legacy: viewportGeometry) }
     #endif
 
-    /// How much room the sheet takes (its tallest), with its gap.
+    /// How much room the sheet takes (its tallest), with its gap (for the tab rail, the pills and toasts placed around it).
     private var floatingRoom: CGFloat { PhoneBarSheet.height(sheetKind) + (sheetKind == .card ? 4 : 14) }
 
-    /// Room the page keeps clear for the sheet while it is open, so the last of a page can be scrolled above it and a site's own fixed bars sit clear of it.
-    private var floatingInsets: (top: CGFloat, bottom: CGFloat) {
-        guard floatingBars, !barsHidden, model.active != nil else { return (0, 0) }
-        let room = floatingRoom
-        // A bar at the bottom shrinks the page view instead (see `pageBottomRoom`): WebKit does not move a site's fixed footers clear of room given only as an inset.
-        return sheetAtBottom ? (0, 0) : (room, 0)
-    }
+    /// Room told to WebKit for chrome floating over the page: a sheet at the top always; a sheet at the bottom from iOS 26.
+    private var floatingInsets: (top: CGFloat, bottom: CGFloat) { (viewportGeometry.overlayTop, viewportGeometry.overlayBottom) }
 
     /// The page takes over the edge the sheet floats at.
     private var floatEdges: Edge.Set {
@@ -156,11 +152,14 @@ struct PhoneRootView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             // The bar layouts: one sheet of glass over the page, open or (scrolling) shrunk into a small capsule.
             if floatingBars, let tab = model.active, !model.floatingAddressVisible {
-                PhoneBarSheet(tab: tab, address: model.addressBar, kind: sheetKind, folded: barsHidden, atBottom: sheetAtBottom)
+                PhoneBarSheet(tab: tab, address: model.addressBar, kind: sheetKind, folded: barsHidden, atBottom: sheetAtBottom, keyboardUp: keyboard.height > 0)
                     // The dock runs edge to edge; the Compact bar hovers, with a margin all round.
                     .padding(.horizontal, sheetKind == .card ? 0 : 12)
                     .padding(sheetAtBottom ? .bottom : .top, sheetKind == .card ? 0 : 6)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: sheetAtBottom ? .bottom : .top)
+                    #if DEBUG
+                    .viewportProbe("sheet.slot")
+                    #endif
                     .zIndex(4)
             }
             // Where the page runs under the status bar, the clock stays readable: a soft veil that fades out over the page, as in Safari.
@@ -215,8 +214,11 @@ struct PhoneRootView: View {
             #endif
             model.phoneBottomInset = bottom
         }
+        // The keyboard tracker's two other rules (they were the bar sheet's own): editing the address ended, or the app came back with nothing being edited.
+        .onReceive(model.addressBar.$isEditing.removeDuplicates()) { editing in if !editing { keyboard.reset() } }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in if !model.addressBar.isEditing { keyboard.reset() } }
         #if DEBUG
-        // Stage 1 shadow mode: compares only; the two lines above stay the authority.
+        // DEBUG only: records the latest input and answer for `ViewportShadow` (the answer is the one applied above).
         .onChange(of: viewportShadowSample, initial: true) { _, sample in ViewportShadow.compare(sample.input, legacy: sample.legacy) }
         #endif
         .motion(.spring(response: 0.4, dampingFraction: 0.88), value: showsSidebar)
@@ -288,12 +290,14 @@ struct PhoneRootView: View {
                                 .padding(.top, floatingBars && !sheetAtBottom ? floatingRoom + Self.topSafeInset - 2 : 0)
                         }
                     }
-                    .padding(.bottom, pageBottomRoom)
+                    // The start page is not a web page, so WebKit's covered strip does not reach it: it keeps the bar's room on every iOS version.
+                    .padding(.bottom, tab.isBlank ? bottomSheetRoom : pageBottomRoom)
                     .animation(.easeInOut(duration: 0.25), value: pageBottomRoom)
                     .clipped()
                     .overlay(alignment: .bottom) {
                         WebStoreBanner()
-                            .padding(.bottom, showsDock && !landscape && pageReservedBottom == 0 ? PhoneChrome.height + PhoneChrome.dockLift + Self.bottomSafeInset + 12 : 12)
+                            .padding(.bottom, showsDock && !landscape && pageReservedBottom == 0 ? PhoneChrome.height + PhoneChrome.dockLift + Self.bottomSafeInset + 12
+                                     : 12 + (tab.isBlank ? 0 : bottomSheetRoom - pageBottomRoom))
                     }
                     // In landscape the page runs under the sides of the screen (the notch side and the home-indicator side), so there are
                     // no black strips; WebKit keeps the text itself clear of them. The foot of the page runs under the home indicator too, so no dark band is left under it.
@@ -1363,11 +1367,17 @@ struct PhoneDockField: View {
 }
 
 
-/// How far the keyboard rises above the bottom safe area, so the dock can sit right on top of it while the page stays where it is.
+/// How far the keyboard rises above the bottom safe area, so the dock can sit right on top of it while the page stays where it is. The screen's one keyboard tracker:
+/// the bar sheet and the page's room both read it (`height > 0` means a keyboard is up), so they cannot disagree about the home strip. The keyboard's real frame
+/// decides; a hide also counts, so a frame change missed around a turn or a trip to the background cannot leave it up.
 @MainActor
 final class KeyboardLift: ObservableObject {
     @Published var height: CGFloat = 0
     private var observer: NSObjectProtocol?
+    private var hideObserver: NSObjectProtocol?
+
+    /// The keyboard is known to be down (it was hidden, or the address bar stopped editing, or the app came back with nothing being edited).
+    func reset() { if height != 0 { height = 0 } }
 
     init() {
         observer = NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillChangeFrameNotification, object: nil, queue: .main) { [weak self] note in
@@ -1380,9 +1390,18 @@ final class KeyboardLift: ObservableObject {
                 animated(.easeOut(duration: duration)) { self.height = lift }
             }
         }
+        hideObserver = NotificationCenter.default.addObserver(forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main) { [weak self] note in
+            MainActor.assumeIsolated {
+                let duration = (note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0.25
+                animated(.easeOut(duration: duration)) { self?.reset() }
+            }
+        }
     }
 
-    deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
+    deinit {
+        if let observer { NotificationCenter.default.removeObserver(observer) }
+        if let hideObserver { NotificationCenter.default.removeObserver(hideObserver) }
+    }
 }
 
 /// The strip behind the clock, in the page's own colour, as long as the clock stays readable on it. The clock is white on a dark phone and black on a light one, so a page colour

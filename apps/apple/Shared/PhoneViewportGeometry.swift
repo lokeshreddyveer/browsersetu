@@ -1,7 +1,8 @@
-import Foundation
+import SwiftUI
 
-/// The iPhone page's geometry, worked out in one place from plain values. Pure: no views, no web view, no model, no observers. In Stage 1 it runs beside the
-/// screen's own calculation (`PhoneRootView`) and the writer (`WebKitTab.setViewportInsets`), which stay in charge; DEBUG builds compare the two (`ViewportShadow`).
+/// The iPhone page's geometry, worked out in one place from plain values. Pure: no views, no web view, no model, no observers. `PhoneRootView` takes the page's
+/// geometry from it (Stage 2; Stage 1 had run it in shadow beside the screen's own formulas, with no difference in any state) and the writer
+/// (`WebKitTab.setViewportInsets`) applies what the screen passes on. DEBUG builds record frames, writes and the latest sample (`ViewportShadow`).
 ///
 /// Coordinate spaces: every length is in points. Safe-area values are the window's (screen edges). The outputs are lengths along the page area's top and bottom
 /// edges. Two kinds of room, never both on one edge:
@@ -30,6 +31,8 @@ struct PhoneViewportInput: Equatable {
     var barsHidden: Bool
     var sheet: Sheet
     var editingAddress: Bool
+    /// A keyboard is up (for the address bar or for a field in the page): it hides the home indicator, so no room is kept for it.
+    var keyboardUp = false
     /// The Floating layout: a dock instead of bars.
     var showsDock: Bool
     var pageHasFixedBottomBar: Bool
@@ -37,6 +40,9 @@ struct PhoneViewportInput: Equatable {
     var dockOnItsOwnStrip: Bool
     var floatingAddressVisible: Bool
     var metrics: Metrics
+    /// iOS 26 and later: a bar sheet along the bottom is told to WebKit as covered (`obscuredContentInsets`) instead of shortening the page, so the page runs under
+    /// it and its fixed footers sit above it. The amount is the same either way; only its kind changes. The dock's room is not affected.
+    var bottomChromeOverlays = false
 }
 
 struct PhoneViewportOutput: Equatable {
@@ -72,13 +78,13 @@ enum PhoneViewportGeometry {
 
     static func resolve(_ input: PhoneViewportInput) -> PhoneViewportOutput {
         let sheetOpen = input.floatingBars && !input.barsHidden && input.hasActiveTab
-        // A sheet at the top floats over the page: overlay. A sheet at the bottom shortens the page instead, because WebKit does not move a site's fixed footers
-        // clear of room given only as an inset.
+        // A sheet at the top floats over the page: overlay. A sheet at the bottom shortens the page instead, because before iOS 26 WebKit does not move a site's fixed
+        // footers clear of room given only as an inset (from iOS 26 `obscuredContentInsets` does, see `bottomChromeOverlays`).
         let overlayTop = sheetOpen && !input.sheetAtBottom ? sheetRoom(input) : 0
         var reservedPageBottom: CGFloat = 0
         if sheetOpen, input.sheetAtBottom {
-            // With the keyboard up the sheet sits on it, so no room is kept for the home indicator.
-            let home = input.editingAddress ? 0 : clean(input.safeBottom)
+            // With a keyboard up the sheet sits on it, so no room is kept for the home indicator (whichever field has the keyboard).
+            let home = input.keyboardUp ? 0 : clean(input.safeBottom)
             switch input.sheet {
             case .card: reservedPageBottom = (input.editingAddress ? clean(input.metrics.cardEditingHeight) : clean(input.metrics.cardHeight)) + home
             case .compact: reservedPageBottom = clean(input.metrics.compactHeight) + 6 + home
@@ -87,6 +93,10 @@ enum PhoneViewportGeometry {
         var reservedAreaBottom: CGFloat = 0
         if input.showsDock, input.pageHasFixedBottomBar, !input.landscape, !input.dockOnItsOwnStrip, !input.floatingAddressVisible {
             reservedAreaBottom = max(0, input.metrics.dockHeight + input.metrics.dockLift + 8)
+        }
+        if input.bottomChromeOverlays {
+            // The bar sheet's room becomes overlay room. The dock's room (a page with its own bottom bar under the Floating or Immersive dock) stays reserved.
+            return PhoneViewportOutput(overlayTop: overlayTop, overlayBottom: reservedPageBottom, reservedPageBottom: 0, reservedAreaBottom: reservedAreaBottom)
         }
         return PhoneViewportOutput(overlayTop: overlayTop, overlayBottom: 0, reservedPageBottom: reservedPageBottom, reservedAreaBottom: reservedAreaBottom)
     }
@@ -125,10 +135,16 @@ enum ViewportShadow {
     private(set) static var toldMismatches = 0
     /// Time spent in the resolver (nanoseconds, total), for the Stage 1 budget.
     private(set) static var resolveNanos: UInt64 = 0
+    /// Stage 2: where named views really are (window coordinates) and the safe area each one sees, recorded by `viewportProbe`. Numbers only.
+    private(set) static var probes: [String: (frame: CGRect, safe: EdgeInsets)] = [:]
+    static func probe(_ name: String, _ geometry: GeometryProxy) {
+        guard enabled else { return }
+        probes[name] = (geometry.frame(in: .global), geometry.safeAreaInsets)
+    }
 
     static func reset() {
         samples = 0; mismatches = 0; lastMismatch = nil; lastSample = nil; doubleCompensations = 0
-        writerCalls = 0; applied = 0; unchanged = 0; toldMismatches = 0; resolveNanos = 0
+        writerCalls = 0; applied = 0; unchanged = 0; toldMismatches = 0; resolveNanos = 0; probes = [:]
     }
 
     /// One screen layout pass: the screen's own values against the resolver's for the same input.
@@ -156,6 +172,18 @@ enum ViewportShadow {
             toldMismatches += 1
             debugLog("VIEWPORT-SHADOW told mismatch: legacy \(told) proposed \(proposed)")
         }
+    }
+}
+
+extension View {
+    /// DEBUG only: records this view's frame in the window and the safe area it sees, under `name`, whenever it moves. Changes nothing on screen.
+    func viewportProbe(_ name: String) -> some View {
+        background(GeometryReader { geometry in
+            Color.clear
+                .onAppear { ViewportShadow.probe(name, geometry) }
+                .onChange(of: geometry.frame(in: .global)) { _, _ in ViewportShadow.probe(name, geometry) }
+                .onChange(of: geometry.safeAreaInsets) { _, _ in ViewportShadow.probe(name, geometry) }
+        })
     }
 }
 #endif

@@ -219,7 +219,15 @@ final class Stage1PhoneViewportTests: XCTestCase {
         model.addressBar.isEditing = true; keyboard(up: true); settle()
         assertConsistent("bottomBar editing")
         picture("bottomBar-editing")
-        XCTAssertEqual(ViewportShadow.lastSample?.legacy.reservedPageBottom ?? 0, 72, accuracy: 0.5, "editing card, no home strip")
+        // Reserved (before iOS 26) or told to WebKit as covered (iOS 26 and later). With a keyboard up there is no home strip; the card is short only while the
+        // address is still being edited. This test raises the keyboard with a notification and sets `isEditing` by hand, with no real field focused, so the
+        // address bar may drop out of editing when the screen redraws; the room must then be the full card's. The real case (the address field and a real
+        // keyboard) is measured in `Stage2PhoneChromeTests.testAddressEditingAndKeyboardKeepTheBottomGeometryTrue`.
+        let sample = ViewportShadow.lastSample
+        let editingRoom = (sample?.legacy.reservedPageBottom ?? 0) + (sample?.legacy.overlayBottom ?? 0)
+        print("STAGE1 editing state: editing \(sample?.input.editingAddress ?? false) keyboard \(sample?.input.keyboardUp ?? false) room \(editingRoom)")
+        XCTAssertEqual(sample?.input.keyboardUp, true, "the screen saw the keyboard")
+        XCTAssertEqual(editingRoom, sample?.input.editingAddress == true ? 72 : 134, accuracy: 0.5, "keyboard up: no home strip, short card only while editing")
         model.addressBar.isEditing = false; keyboard(up: false); settle()
         assertConsistent("bottomBar not editing")
         XCTAssertEqual(loads(tab), 1)
