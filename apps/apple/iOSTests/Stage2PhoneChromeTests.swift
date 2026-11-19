@@ -82,9 +82,15 @@ final class Stage2PhoneChromeTests: XCTestCase {
     <div id="f"></div><div id="env"></div><script>sessionStorage.n=(+sessionStorage.n||0)+1</script></body></html>
     """
 
-    private func pageTab() -> TabController {
+    /// An ordinary page: long content and a green end marker, no fixed elements.
+    static let ordinary = """
+    <html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;font:16px -apple-system;background:#fff}</style></head>
+    <body><div style="height:3000px">content</div><div id="end" style="height:20px;background:#0f0"></div><script>sessionStorage.n=(+sessionStorage.n||0)+1</script></body></html>
+    """
+
+    private func pageTab(_ html: String = Stage2PhoneChromeTests.fixture) -> TabController {
         let tab = model.openTab(url: nil, isPrivate: false)
-        tab.engine.showHTML(Self.fixture, baseURL: URL(string: "https://stage2.example.test/"))
+        tab.engine.showHTML(html, baseURL: URL(string: "https://stage2.example.test/"))
         waitUntil(8) { !tab.isBlank && !tab.isLoading }
         return tab
     }
@@ -425,5 +431,90 @@ final class Stage2PhoneChromeTests: XCTestCase {
         XCTAssertEqual(ViewportShadow.mismatches, 0)
         XCTAssertEqual(ObjectIdentifier(web(tab)), identity)
         XCTAssertEqual(js(web(tab), "+sessionStorage.n") as? Int, 1)
+    }
+
+    // MARK: Follow-up: the dock layouts (Floating, Immersive)
+
+    private func useDockLayout(_ name: String) {
+        if name == "floating" {
+            model.phoneCustomSpec = PhoneLayoutSpec(style: .floating, address: .bottom, reading: .foldsAndReturns, tabsPill: true, newTabPill: true)
+            model.phonePreset = .custom
+        } else {
+            model.phonePreset = .immersive
+        }
+    }
+
+    /// Scrolls to the very end and returns where the green end marker is drawn (window points), or nil if it is not visible.
+    private func endMarkerAfterScrollingToEnd(_ tab: TabController) -> ClosedRange<CGFloat>? {
+        let w = web(tab)
+        w.scrollView.setContentOffset(CGPoint(x: 0, y: w.scrollView.contentSize.height - w.scrollView.bounds.height + w.scrollView.adjustedContentInset.bottom), animated: false)
+        settle()
+        let top = w.convert(w.bounds, to: w.window).minY
+        return drawnRows(w, (0, 255, 0)).map { ($0.lowerBound + top)...($0.upperBound + top) }
+    }
+
+    func testMeasureDockLayouts() throws {
+        for layout in ["floating", "immersive"] {
+            for (page, html) in [("fixed-nav", Self.fixture), ("ordinary", Self.ordinary)] {
+                model = BrowserModel(engine: WebKitEngine(), root: NSTemporaryDirectory() + "bs-stage2-dock-\(UUID().uuidString)", profile: "default")
+                ViewportShadow.reset()
+                useDockLayout(layout)
+                let tab = pageTab(html)
+                host?.tearDown(); host = Host(model: model)
+                waitUntil(5) { web(tab).window != nil }
+                settle()
+                for state in ["open", "folded"] {
+                    if state == "folded" { model.foldChrome() } else { model.expandChrome(userRequested: true) }
+                    settle()
+                    let m = measure("DOCK \(layout) \(page) \(state)", tab)
+                    let dock = ViewportShadow.probes[state == "open" ? "dock" : "dock.pill"]?.frame
+                    let end = endMarkerAfterScrollingToEnd(tab)
+                    var obscured: CGFloat = -1
+                    if #available(iOS 26, *) { obscured = web(tab).obscuredContentInsets.bottom }
+                    print("STAGE2DOCK \(layout) \(page) \(state): fixedBottom \(model.activeFixedBottom) web \(Int(m.webFrame.minY))…\(Int(m.webFrame.maxY)) dock \(dock.map { "\(Int($0.minY))…\(Int($0.maxY))" } ?? "-") strip below page \(Int(m.window.height - m.webFrame.maxY)) obscured \(Int(obscured)) scroll room \(Int(web(tab).scrollView.adjustedContentInset.bottom)) innerH \(Int(m.innerHeight)) domFooter \(Int(m.footerRect.minY))…\(Int(m.footerRect.maxY)) end marker at end \(end.map { "\(Int($0.lowerBound))…\(Int($0.upperBound))" } ?? "-")")
+                }
+            }
+        }
+    }
+
+    func testDockLayoutsLeaveNoStripAndScrollTheEndClear() throws {
+        for layout in ["floating", "immersive"] {
+            for (page, html) in [("fixed-nav", Self.fixture), ("ordinary", Self.ordinary)] {
+                model = BrowserModel(engine: WebKitEngine(), root: NSTemporaryDirectory() + "bs-stage2-dock-\(UUID().uuidString)", profile: "default")
+                ViewportShadow.reset()
+                useDockLayout(layout)
+                let tab = pageTab(html)
+                host?.tearDown(); host = Host(model: model)
+                waitUntil(5) { web(tab).window != nil }
+                settle()
+                let identity = ObjectIdentifier(web(tab))
+                for state in ["open", "folded"] {
+                    if state == "folded" { model.foldChrome() } else { model.expandChrome(userRequested: true) }
+                    settle()
+                    let label = "\(layout) \(page) \(state)"
+                    let m = measure("DOCK \(label)", tab)
+                    let dockTop = try XCTUnwrap(ViewportShadow.probes["dock"]?.frame.minY, "\(label): no dock probe")
+                    if page == "fixed-nav" {
+                        XCTAssertTrue(model.activeFixedBottom, "\(label): the page's bottom bar was not seen")
+                        if #available(iOS 26, *) {
+                            XCTAssertEqual(m.webFrame.maxY, m.window.height, accuracy: 1, "\(label): a strip is left below the page")
+                            XCTAssertEqual(web(tab).obscuredContentInsets.bottom, 74, accuracy: 1, "\(label): covered strip")
+                            XCTAssertEqual(m.webFrame.minY + m.footerRect.maxY, m.window.height - 74, accuracy: 1.5, "\(label): the page's bar ends where the covered strip starts")
+                            XCTAssertLessThanOrEqual(m.webFrame.minY + m.footerRect.maxY, dockTop + 0.5, "\(label): the page's bar is under the dock")
+                        } else {
+                            XCTAssertLessThanOrEqual(m.webFrame.maxY, dockTop + 0.5, "\(label): before iOS 26 the page ends above the dock")
+                        }
+                    } else {
+                        if #available(iOS 26, *) { XCTAssertEqual(web(tab).obscuredContentInsets.bottom, 0, "\(label): an ordinary page is not covered") }
+                        XCTAssertEqual(m.webFrame.maxY, m.window.height, accuracy: 1, "\(label): the page runs under the floating dock")
+                        let end = try XCTUnwrap(endMarkerAfterScrollingToEnd(tab), "\(label): the end of the page is not visible after scrolling to it")
+                        XCTAssertLessThanOrEqual(end.upperBound, dockTop + 0.5, "\(label): the end of the page stays under the dock")
+                        print("STAGE2DOCK fixed \(label): end marker \(Int(end.lowerBound))…\(Int(end.upperBound)) dock top \(Int(dockTop)) scroll room \(Int(web(tab).scrollView.adjustedContentInset.bottom))")
+                    }
+                }
+                XCTAssertEqual(ObjectIdentifier(web(tab)), identity)
+                XCTAssertEqual(js(web(tab), "+sessionStorage.n") as? Int, 1, "\(layout) \(page): reloaded")
+            }
+        }
     }
 }

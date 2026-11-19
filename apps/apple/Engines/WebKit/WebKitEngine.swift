@@ -449,7 +449,8 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
     #if os(iOS)
     private var lastViewportInsets = UIEdgeInsets.zero
     /// The room last asked for, kept so it can be told again when the web view's own safe area changes.
-    private var requestedViewportInsets: (top: CGFloat, bottom: CGFloat)?
+    private var requestedViewportInsets: (top: CGFloat, bottom: CGFloat, coversBottom: Bool)?
+    private var lastCoversBottom = true
     /// The pending re-tell after a safe-area change, replaced by every newer change.
     private var safeAreaRetell: DispatchWorkItem?
     /// The web view's safe area changed (its frame moved under or away from the status bar or home indicator, after a layout change, a fold or a turn). What WebKit
@@ -462,7 +463,7 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
         let work = DispatchWorkItem { [weak self] in
             guard let self, let room = self.requestedViewportInsets else { return }
             self.safeAreaRetell = nil
-            self.setViewportInsets(top: room.top, bottom: room.bottom)
+            self.setViewportInsets(top: room.top, bottom: room.bottom, coversBottom: room.coversBottom)
         }
         safeAreaRetell = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: work)
@@ -528,9 +529,9 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
 
     /// Which look the websites are asked for, apart from the browser's own: nil follows the system.
     /// Room at the foot of the page for a toolbar floating over it, so the last of the page can be scrolled clear of the bar.
-    func setViewportInsets(top: CGFloat, bottom: CGFloat) {
+    func setViewportInsets(top: CGFloat, bottom: CGFloat, coversBottom: Bool) {
         #if os(iOS)
-        requestedViewportInsets = (top, bottom)
+        requestedViewportInsets = (top, bottom, coversBottom)
         let insets = UIEdgeInsets(top: top, left: 0, bottom: bottom, right: 0)
         // Giving the page its own insets replaces the room WebKit keeps by itself for the status bar and the home indicator, so a site's sticky or fixed header would stick behind
         // the clock. When the page runs under those areas, they are added to what the page is told (not to the scrolling room, which the system already adds).
@@ -542,10 +543,11 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
         #if DEBUG
         // Stage 1 shadow mode: counts this call and checks the resolver's "told" formula against the line above; it applies nothing.
         ViewportShadow.writer(overlayTop: top, overlayBottom: bottom, webViewSafeTop: safe.top, webViewSafeBottom: safe.bottom,
-                              told: (told.top, told.bottom), changed: told != lastViewportInsets)
+                              told: (told.top, told.bottom), changed: told != lastViewportInsets || coversBottom != lastCoversBottom)
         #endif
-        guard told != lastViewportInsets else { return }
+        guard told != lastViewportInsets || coversBottom != lastCoversBottom else { return }
         lastViewportInsets = told
+        lastCoversBottom = coversBottom
         let scroll = webView.scrollView
         let wasAtTop = scroll.contentOffset.y <= -scroll.adjustedContentInset.top + 1
         // The page lays itself out inside these insets (public API, iOS 15 and later), so its fixed headers and bottom tab bars sit clear of a bar floating over it, and the
@@ -557,7 +559,7 @@ final class WebKitTab: NSObject, TabEngine, WKNavigationDelegate, WKUIDelegate {
             scroll.verticalScrollIndicatorInsets = insets
             // From iOS 26 a bar at the bottom floats over the page (`PhoneRootView.bottomChromeOverlays`): WebKit is told the strip it covers, which keeps the page's fixed
             // footers above it, while the scrolling room above lets the last of the page be scrolled clear of it. The top keeps the path above, which already works.
-            if #available(iOS 26, *) { self.webView.obscuredContentInsets = UIEdgeInsets(top: 0, left: 0, bottom: bottom, right: 0) }
+            if #available(iOS 26, *) { self.webView.obscuredContentInsets = UIEdgeInsets(top: 0, left: 0, bottom: coversBottom ? bottom : 0, right: 0) }
             if wasAtTop, top > 0 { scroll.contentOffset.y = -scroll.adjustedContentInset.top }
         }
         // From iOS 26 the edge under a floating bar is softened, as it is in Safari, so the bar's own controls stay legible over the page.

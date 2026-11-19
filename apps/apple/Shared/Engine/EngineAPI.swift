@@ -182,7 +182,7 @@ extension TabEngine {
     func setJavaScriptEnabled(_ on: Bool) {}
     func setPageDarkening(_ on: Bool) {}
     func setWebsiteAppearance(_ mode: String) {}
-    func setViewportInsets(top: CGFloat, bottom: CGFloat) {}
+    func setViewportInsets(top: CGFloat, bottom: CGFloat, coversBottom: Bool) {}
     func setSiteStyle(_ css: String?) {}
     /// Runs one of the browser's own short scripts in the page, with its values passed as data.
     func runPageScript(_ script: String, arguments: [String: Any]) {}
@@ -308,7 +308,9 @@ protocol TabEngine: AnyObject {
     func setWebsiteAppearance(_ mode: String)
     /// iPhone: points at the foot of the page that a floating toolbar covers.
     /// Keeps the page's own layout (its fixed headers and bottom bars, not only its scrolling) clear of the status bar and of a toolbar floating over it.
-    func setViewportInsets(top: CGFloat, bottom: CGFloat)
+    /// `coversBottom`: the bottom room is chrome that covers the page's foot (a bar sheet, or a dock over a page with its own bottom bar), so from iOS 26 WebKit is told
+    /// the strip is covered and keeps the page's fixed footers above it. False: scrolling room only, for a small dock floating over an ordinary page.
+    func setViewportInsets(top: CGFloat, bottom: CGFloat, coversBottom: Bool)
     /// Adds (or with nil, removes) a small style sheet of the user's own on the page: CSS only, never script.
     func setSiteStyle(_ css: String?)
     /// Runs one of the browser's own short scripts in the page, with its values passed as data.
@@ -487,4 +489,9 @@ struct PageLinkScan: Equatable, Sendable {
 struct LinkPageSnapshot: Equatable, Sendable {
     var candidates: [String]
     var truncated: Bool
+}
+
+extension TabEngine {
+    /// The bottom room covers the page's foot (the usual case: a bar sheet).
+    func setViewportInsets(top: CGFloat, bottom: CGFloat) { setViewportInsets(top: top, bottom: bottom, coversBottom: true) }
 }

@@ -51,8 +51,11 @@ struct PhoneViewportOutput: Equatable {
     var overlayBottom: CGFloat
     /// Reserved room: the page view is shortened by this at its foot, inside the page area (a bar sheet at the bottom).
     var reservedPageBottom: CGFloat
-    /// Reserved room around the whole page area (the dock over a page that has its own fixed bottom bar).
+    /// Reserved room around the whole page area (the dock over a page that has its own fixed bottom bar, before iOS 26).
     var reservedAreaBottom: CGFloat
+    /// Scrolling room only, from the safe-area line (the system adds the home strip): the dock floating over an ordinary page, so the end of the page can be scrolled
+    /// clear of it. Nothing is told to WebKit as covered, so the page still shows around the floating dock.
+    var scrollRoomBottom: CGFloat = 0
 
     /// True when an edge is both reserved and told to WebKit, which would push the page's content away twice.
     var compensatesBottomTwice: Bool { overlayBottom > 0 && (reservedPageBottom > 0 || reservedAreaBottom > 0) }
@@ -61,6 +64,7 @@ struct PhoneViewportOutput: Equatable {
     func matches(_ other: PhoneViewportOutput, tolerance: CGFloat = 0.5) -> Bool {
         abs(overlayTop - other.overlayTop) <= tolerance && abs(overlayBottom - other.overlayBottom) <= tolerance
             && abs(reservedPageBottom - other.reservedPageBottom) <= tolerance && abs(reservedAreaBottom - other.reservedAreaBottom) <= tolerance
+            && abs(scrollRoomBottom - other.scrollRoomBottom) <= tolerance
     }
 }
 
@@ -90,15 +94,31 @@ enum PhoneViewportGeometry {
             case .compact: reservedPageBottom = clean(input.metrics.compactHeight) + 6 + home
             }
         }
-        var reservedAreaBottom: CGFloat = 0
-        if input.showsDock, input.pageHasFixedBottomBar, !input.landscape, !input.dockOnItsOwnStrip, !input.floatingAddressVisible {
-            reservedAreaBottom = max(0, input.metrics.dockHeight + input.metrics.dockLift + 8)
+        // The dock (Floating and Immersive layouts) at the bottom: its height and a small gap, from the safe-area line. Kept the same when the dock folds into its pill,
+        // so the page does not change size while it is scrolled.
+        let dockShown = input.showsDock && !input.landscape && !input.dockOnItsOwnStrip && !input.floatingAddressVisible
+        let dockRoom = dockShown ? max(0, input.metrics.dockHeight + input.metrics.dockLift + 8) : 0
+        var reservedAreaBottom: CGFloat = 0, scrollRoomBottom: CGFloat = 0, overlayBottom: CGFloat = 0
+        if dockRoom > 0 {
+            if !input.pageHasFixedBottomBar {
+                // An ordinary page runs under the floating dock and shows around it; it only needs the room to scroll its end clear of the dock.
+                scrollRoomBottom = dockRoom
+            } else if input.bottomChromeOverlays {
+                // A page with its own bottom bar: from iOS 26 the page runs to the screen's edge under the dock and WebKit is told the covered strip (the dock's room
+                // and the home strip below it), which keeps the page's bar above the dock with no dark strip behind it.
+                overlayBottom = dockRoom + clean(input.safeBottom)
+            } else {
+                // Before iOS 26: the page area ends above the dock instead.
+                reservedAreaBottom = dockRoom
+            }
         }
         if input.bottomChromeOverlays {
-            // The bar sheet's room becomes overlay room. The dock's room (a page with its own bottom bar under the Floating or Immersive dock) stays reserved.
-            return PhoneViewportOutput(overlayTop: overlayTop, overlayBottom: reservedPageBottom, reservedPageBottom: 0, reservedAreaBottom: reservedAreaBottom)
+            // The bar sheet's room becomes overlay room (the sheet and the dock are never both shown).
+            overlayBottom += reservedPageBottom
+            reservedPageBottom = 0
         }
-        return PhoneViewportOutput(overlayTop: overlayTop, overlayBottom: 0, reservedPageBottom: reservedPageBottom, reservedAreaBottom: reservedAreaBottom)
+        return PhoneViewportOutput(overlayTop: overlayTop, overlayBottom: overlayBottom, reservedPageBottom: reservedPageBottom, reservedAreaBottom: reservedAreaBottom,
+                                   scrollRoomBottom: scrollRoomBottom)
     }
 
     /// What WebKit is told as the page's minimum and maximum viewport inset: the overlay room plus the web view's own safe area (the status bar or home strip the page

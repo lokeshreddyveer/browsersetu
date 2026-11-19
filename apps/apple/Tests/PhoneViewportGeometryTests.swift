@@ -16,8 +16,8 @@ final class PhoneViewportGeometryTests: XCTestCase {
                            dockOnItsOwnStrip: dockStrip, floatingAddressVisible: floatingAddress, metrics: metrics)
     }
 
-    private func out(_ top: CGFloat = 0, _ bottom: CGFloat = 0, page: CGFloat = 0, area: CGFloat = 0) -> PhoneViewportOutput {
-        PhoneViewportOutput(overlayTop: top, overlayBottom: bottom, reservedPageBottom: page, reservedAreaBottom: area)
+    private func out(_ top: CGFloat = 0, _ bottom: CGFloat = 0, page: CGFloat = 0, area: CGFloat = 0, scroll: CGFloat = 0) -> PhoneViewportOutput {
+        PhoneViewportOutput(overlayTop: top, overlayBottom: bottom, reservedPageBottom: page, reservedAreaBottom: area, scrollRoomBottom: scroll)
     }
 
     // MARK: overlay versus reserved chrome
@@ -57,7 +57,8 @@ final class PhoneViewportGeometryTests: XCTestCase {
 
     func testDockReservesRoomOnlyOverAPageWithItsOwnBottomBar() {
         XCTAssertEqual(PhoneViewportGeometry.resolve(input(floatingBars: false, dock: true, fixedBottom: true)), out(area: 40))   // 40 − 8 + 8
-        XCTAssertEqual(PhoneViewportGeometry.resolve(input(floatingBars: false, dock: true, fixedBottom: false)), out())
+        // An ordinary page runs under the floating dock and gets only the room to scroll its end clear of it.
+        XCTAssertEqual(PhoneViewportGeometry.resolve(input(floatingBars: false, dock: true, fixedBottom: false)), out(scroll: 40))
         XCTAssertEqual(PhoneViewportGeometry.resolve(input(floatingBars: false, dock: true, fixedBottom: true, landscape: true)), out())
         XCTAssertEqual(PhoneViewportGeometry.resolve(input(floatingBars: false, dock: true, fixedBottom: true, dockStrip: true)), out())
         XCTAssertEqual(PhoneViewportGeometry.resolve(input(floatingBars: false, dock: true, fixedBottom: true, floatingAddress: true)), out())
@@ -120,8 +121,11 @@ final class PhoneViewportGeometryTests: XCTestCase {
         // A top sheet and the dock are not affected.
         var top = input(sheet: .card); top.bottomChromeOverlays = true
         XCTAssertEqual(PhoneViewportGeometry.resolve(top), out(138))
+        // The dock over a page with its own bottom bar: covered strip from the screen's edge (dock room 40 + home strip 34); an ordinary page keeps scroll room only.
         var dock = input(floatingBars: false, dock: true, fixedBottom: true); dock.bottomChromeOverlays = true
-        XCTAssertEqual(PhoneViewportGeometry.resolve(dock), out(area: 40))
+        XCTAssertEqual(PhoneViewportGeometry.resolve(dock), out(0, 74))
+        var ordinary = input(floatingBars: false, dock: true, fixedBottom: false); ordinary.bottomChromeOverlays = true
+        XCTAssertEqual(PhoneViewportGeometry.resolve(ordinary), out(scroll: 40))
     }
 
     func testOverlayModeKeepsEveryAmountAndNeverCompensatesTwice() {
@@ -135,9 +139,11 @@ final class PhoneViewportGeometryTests: XCTestCase {
                 let reserved = PhoneViewportGeometry.resolve(i)
                 i.bottomChromeOverlays = true
                 let overlay = PhoneViewportGeometry.resolve(i)
-                XCTAssertEqual(overlay.overlayBottom, reserved.reservedPageBottom, "same room, other kind: \(i)")
+                // Same room, other kind: the sheet's room as it was; the dock's room plus the home strip (the page now reaches the screen's edge).
+                XCTAssertEqual(overlay.overlayBottom, reserved.reservedPageBottom + (reserved.reservedAreaBottom > 0 ? reserved.reservedAreaBottom + i.safeBottom : 0), "\(i)")
                 XCTAssertEqual(overlay.reservedPageBottom, 0)
-                XCTAssertEqual(overlay.reservedAreaBottom, reserved.reservedAreaBottom)
+                XCTAssertEqual(overlay.reservedAreaBottom, 0)
+                XCTAssertEqual(overlay.scrollRoomBottom, reserved.scrollRoomBottom)
                 XCTAssertEqual(overlay.overlayTop, reserved.overlayTop)
                 XCTAssertFalse(overlay.compensatesBottomTwice, "\(i)")
             }

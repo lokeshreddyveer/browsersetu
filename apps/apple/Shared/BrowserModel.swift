@@ -1243,6 +1243,9 @@ final class BrowserModel: ObservableObject {
         activeFixedTop = tab.fixedTop; activeFixedBottom = tab.fixedBottom
     }
     var phoneTopInset: CGFloat = 0 { didSet { if oldValue != phoneTopInset { for tab in tabs { tab.applyBottomInset() } } } }
+    /// iPhone: whether the bottom room is chrome covering the page's foot (a bar sheet, or the dock over a page with its own bottom bar) or only scrolling room (the dock
+    /// floating over an ordinary page). Set by the screen with `phoneBottomInset`.
+    var phoneBottomCovers = true { didSet { if oldValue != phoneBottomCovers { for tab in tabs { tab.applyBottomInset() } } } }
     /// iPhone: the island opens by itself when the network speed changes a lot. Off until switched on.
     @Published var speedPopups = false { didSet { saveSetting("speed_popups", speedPopups ? "1" : "0") } }
     var showSpeedHandler: (() -> Void)?

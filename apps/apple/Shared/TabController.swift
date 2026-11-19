@@ -281,7 +281,9 @@ final class TabController: ObservableObject, Identifiable, TabEngineEvents {
     func toggleJavaScript() { javaScriptOn.toggle(); engine.setJavaScriptEnabled(javaScriptOn) }
 
     /// Applies the dark-pages choice to the page that has just loaded.
-    func applyBottomInset() { engine.setViewportInsets(top: owner?.phoneTopInset ?? 0, bottom: owner?.phoneBottomInset ?? 0) }
+    func applyBottomInset() {
+        engine.setViewportInsets(top: owner?.phoneTopInset ?? 0, bottom: owner?.phoneBottomInset ?? 0, coversBottom: owner?.phoneBottomCovers ?? true)
+    }
 
     func applyWebsiteAppearance() { engine.setWebsiteAppearance(owner?.effectiveWebsiteAppearance(host: url?.host).rawValue ?? "system") }
 

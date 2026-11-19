@@ -103,8 +103,11 @@ struct PhoneRootView: View {
     /// How much room the sheet takes (its tallest), with its gap (for the tab rail, the pills and toasts placed around it).
     private var floatingRoom: CGFloat { PhoneBarSheet.height(sheetKind) + (sheetKind == .card ? 4 : 14) }
 
-    /// Room told to WebKit for chrome floating over the page: a sheet at the top always; a sheet at the bottom from iOS 26.
-    private var floatingInsets: (top: CGFloat, bottom: CGFloat) { (viewportGeometry.overlayTop, viewportGeometry.overlayBottom) }
+    /// Room told to WebKit for chrome floating over the page: a sheet at the top always; a sheet at the bottom, or the dock over a page with its own bottom bar, from
+    /// iOS 26; and the dock over an ordinary page as scrolling room only (see `bottomRoomCovers`).
+    private var floatingInsets: (top: CGFloat, bottom: CGFloat) { (viewportGeometry.overlayTop, viewportGeometry.overlayBottom + viewportGeometry.scrollRoomBottom) }
+    /// Whether the bottom room is chrome covering the page's foot (told to WebKit as covered from iOS 26) or scrolling room only (the dock over an ordinary page).
+    private var bottomRoomCovers: Bool { viewportGeometry.scrollRoomBottom == 0 }
 
     /// The page takes over the edge the sheet floats at.
     private var floatEdges: Edge.Set {
@@ -214,6 +217,7 @@ struct PhoneRootView: View {
             #endif
             model.phoneBottomInset = bottom
         }
+        .onChange(of: bottomRoomCovers, initial: true) { _, covers in model.phoneBottomCovers = covers }
         // The keyboard tracker's two other rules (they were the bar sheet's own): editing the address ended, or the app came back with nothing being edited.
         .onReceive(model.addressBar.$isEditing.removeDuplicates()) { editing in if !editing { keyboard.reset() } }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in if !model.addressBar.isEditing { keyboard.reset() } }
@@ -342,6 +346,9 @@ struct PhoneRootView: View {
                     PhoneDock(tab: tab)
                         .frame(maxWidth: 560)
                         .padding(.horizontal, PhoneChrome.margin)
+                        #if DEBUG
+                        .viewportProbe("dock")
+                        #endif
                         .opacity(dockCompact ? 0 : 1)
                         .motion(.easeInOut(duration: dockCompact ? 0.16 : 0.26).delay(dockCompact ? 0 : 0.06), value: dockCompact)
                         .scaleEffect(dockCompact ? 0.3 : 1, anchor: .trailing)
@@ -349,6 +356,9 @@ struct PhoneRootView: View {
                         .allowsHitTesting(!dockCompact)
                         .accessibilityHidden(dockCompact)
                     PhoneCompactPill(tab: tab, tabsOpen: $verticalTabsOpen)
+                        #if DEBUG
+                        .viewportProbe("dock.pill")
+                        #endif
                         .frame(maxWidth: .infinity, alignment: .trailing)
                         .padding(.trailing, PhoneChrome.margin)
                         .opacity(dockCompact ? 1 : 0)
